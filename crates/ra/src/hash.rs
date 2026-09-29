@@ -266,7 +266,9 @@ unsafe extern "C" fn read_sector(
                 .get()
                 .and_then(|d| d.read_sector)
                 .expect("default cdreader captured");
-            unsafe { f(*inner, sector, buffer, requested_bytes) }
+            let n = unsafe { f(*inner, sector, buffer, requested_bytes) };
+            eprintln!("DEBUG-CI: read_sector({sector}, want={requested_bytes}) = {n}"); // DEBUG-CI
+            n
         }
     }
 }
@@ -297,7 +299,9 @@ unsafe extern "C" fn first_track_sector(handle: *mut c_void) -> c_uint {
                 .get()
                 .and_then(|d| d.first_track_sector)
                 .expect("default cdreader captured");
-            unsafe { f(*inner) }
+            let v = unsafe { f(*inner) };
+            eprintln!("DEBUG-CI: first_track_sector = {v}"); // DEBUG-CI
+            v
         }
     }
 }
