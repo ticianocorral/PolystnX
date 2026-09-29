@@ -14,7 +14,7 @@
 //! `docs/fase-0.md`.
 
 use crate::sys;
-use std::ffi::{c_char, c_uint, c_void, CStr, CString};
+use std::ffi::{c_char, c_int, c_uint, c_void, CStr, CString};
 use std::fs::File;
 use std::path::Path;
 use std::sync::OnceLock;
@@ -33,6 +33,7 @@ pub fn psx_disc_hash(path: impl AsRef<Path>) -> Result<String, String> {
     MESSAGES.get_or_init(|| unsafe {
         sys::rc_hash_init_error_message_callback(Some(rhash_log_error));
         sys::rc_hash_init_verbose_message_callback(Some(rhash_log_verbose));
+        sys::rc_hash_init_custom_filereader(&FILEREADER);
     });
     let ok = unsafe {
         sys::rc_hash_generate_from_file(
@@ -154,6 +155,67 @@ fn find_dir_entry(dir: &[u8], name: &[u8]) -> Option<DirEntry> {
 
 // --- the custom cdreader ----------------------------------------------------
 
+// --- the custom filereader --------------------------------------------------
+//
+// O filereader default do rhash é o único pedaço do pipeline com ramos por
+// OS/compilador que não controlamos (wchar no Windows, _LARGEFILE64 no
+// Linux...) — e o CI provou que ele devolve 0 bytes em Win/Linux onde o
+// macOS lê normal. O nosso usa std::fs (portátil por construção) e é a API
+// que o próprio RetroArch pluga.
+
+unsafe extern "C" fn filereader_open(path: *const c_char) -> *mut c_void {
+    let Some(path) = (unsafe { path.as_ref() }) else {
+        return std::ptr::null_mut();
+    };
+    let path = unsafe { CStr::from_ptr(path) }
+        .to_string_lossy()
+        .into_owned();
+    match File::open(&path) {
+        Ok(f) => Box::into_raw(Box::new(f)) as *mut c_void,
+        Err(_) => std::ptr::null_mut(),
+    }
+}
+
+unsafe extern "C" fn filereader_seek(handle: *mut c_void, offset: i64, origin: c_int) {
+    let Some(f) = (unsafe { (handle as *mut File).as_mut() }) else {
+        return;
+    };
+    use std::io::Seek;
+    let pos = match origin {
+        0 => std::io::SeekFrom::Start(offset as u64),
+        1 => std::io::SeekFrom::Current(offset),
+        _ => std::io::SeekFrom::End(offset),
+    };
+    let _ = f.seek(pos);
+}
+
+unsafe extern "C" fn filereader_tell(handle: *mut c_void) -> i64 {
+    let Some(f) = (unsafe { (handle as *mut File).as_mut() }) else {
+        return 0;
+    };
+    use std::io::Seek;
+    f.stream_position().map(|p| p as i64).unwrap_or(0)
+}
+
+unsafe extern "C" fn filereader_read(
+    handle: *mut c_void,
+    buffer: *mut c_void,
+    requested_bytes: usize,
+) -> usize {
+    let Some(f) = (unsafe { (handle as *mut File).as_mut() }) else {
+        return 0;
+    };
+    use std::io::Read;
+    let out = unsafe { std::slice::from_raw_parts_mut(buffer as *mut u8, requested_bytes) };
+    f.read(out).unwrap_or(0)
+}
+
+unsafe extern "C" fn filereader_close(handle: *mut c_void) {
+    if !handle.is_null() {
+        unsafe { drop(Box::from_raw(handle as *mut File)) };
+    }
+}
+
 unsafe extern "C" fn rhash_log_error(msg: *const c_char) {
     if !msg.is_null() {
         let m = unsafe { CStr::from_ptr(msg) }.to_string_lossy();
@@ -163,7 +225,7 @@ unsafe extern "C" fn rhash_log_error(msg: *const c_char) {
 unsafe extern "C" fn rhash_log_verbose(msg: *const c_char) {
     if !msg.is_null() {
         let m = unsafe { CStr::from_ptr(msg) }.to_string_lossy();
-        eprintln!("ra: rhash: {m}"); // DEBUG-CI
+        log::debug!("ra: rhash: {m}");
     }
 }
 
@@ -187,6 +249,14 @@ fn ensure_cdreader() {
         sys::rc_hash_init_custom_cdreader(&CDREADER);
     });
 }
+
+static FILEREADER: sys::rc_hash_filereader_t = sys::rc_hash_filereader_t {
+    open: Some(filereader_open),
+    seek: Some(filereader_seek),
+    tell: Some(filereader_tell),
+    read: Some(filereader_read),
+    close: Some(filereader_close),
+};
 
 static CDREADER: sys::rc_hash_cdreader_t = sys::rc_hash_cdreader_t {
     open_track: Some(open_track),
@@ -266,9 +336,7 @@ unsafe extern "C" fn read_sector(
                 .get()
                 .and_then(|d| d.read_sector)
                 .expect("default cdreader captured");
-            let n = unsafe { f(*inner, sector, buffer, requested_bytes) };
-            eprintln!("DEBUG-CI: read_sector({sector}, want={requested_bytes}) = {n}"); // DEBUG-CI
-            n
+            unsafe { f(*inner, sector, buffer, requested_bytes) }
         }
     }
 }
@@ -299,9 +367,7 @@ unsafe extern "C" fn first_track_sector(handle: *mut c_void) -> c_uint {
                 .get()
                 .and_then(|d| d.first_track_sector)
                 .expect("default cdreader captured");
-            let v = unsafe { f(*inner) };
-            eprintln!("DEBUG-CI: first_track_sector = {v}"); // DEBUG-CI
-            v
+            unsafe { f(*inner) }
         }
     }
 }

@@ -139,7 +139,30 @@ pub struct rc_hash_cdreader_t {
 
 pub type rc_hash_message_callback_t = unsafe extern "C" fn(msg: *const c_char);
 
+pub type rc_hash_open_file_fn = unsafe extern "C" fn(path: *const c_char) -> *mut c_void;
+pub type rc_hash_seek_fn =
+    unsafe extern "C" fn(file_handle: *mut c_void, offset: i64, origin: c_int);
+pub type rc_hash_tell_fn = unsafe extern "C" fn(file_handle: *mut c_void) -> i64;
+pub type rc_hash_read_fn = unsafe extern "C" fn(
+    file_handle: *mut c_void,
+    buffer: *mut c_void,
+    requested_bytes: usize,
+) -> usize;
+pub type rc_hash_close_file_fn = unsafe extern "C" fn(file_handle: *mut c_void);
+
+/// `struct rc_hash_filereader` — field order is the ABI.
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct rc_hash_filereader_t {
+    pub open: Option<rc_hash_open_file_fn>,
+    pub seek: Option<rc_hash_seek_fn>,
+    pub tell: Option<rc_hash_tell_fn>,
+    pub read: Option<rc_hash_read_fn>,
+    pub close: Option<rc_hash_close_file_fn>,
+}
+
 extern "C" {
+    pub fn rc_hash_init_custom_filereader(reader: *const rc_hash_filereader_t);
     pub fn rc_hash_generate_from_file(
         hash: *mut c_char,
         console_id: c_uint,
