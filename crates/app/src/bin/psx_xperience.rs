@@ -48,6 +48,7 @@ struct Args {
     system_dir: PathBuf,
     notes_dir: PathBuf,
     order: Order,
+    #[allow(dead_code)] // o run-ahead do jogo é do processo filho (--runahead)
     runahead: Option<u32>,
     /// Headless: render one settings screen ("main"|"controls") to `--shot`
     /// and exit, instead of starting the shelf (dev/testing).
@@ -159,6 +160,43 @@ it into core/ by hand (not included — non-commercial license, see\n\
 THIRD-PARTY-NOTICES.md). An optional nointro.dat at the root gives games\n\
 their canonical No-Intro name.";
 
+/// O nome do arquivo do core nesta plataforma (igual ao core_update).
+fn core_file_name() -> &'static str {
+    if cfg!(target_os = "macos") {
+        "swanstation_libretro.dylib"
+    } else if cfg!(target_os = "windows") {
+        "swanstation_libretro.dll"
+    } else {
+        "swanstation_libretro.so"
+    }
+}
+
+/// Spawna este mesmo binário em modo autoplay (processo novo = Metal limpa)
+/// com o disco e a arte passados por linha de comando. O filho herda o
+/// stdio; o pai espera pelo handle devolvido.
+fn spawn_game_child(
+    exe: std::path::PathBuf,
+    core: std::path::PathBuf,
+    rom: std::path::PathBuf,
+    args: &Args,
+    cartridge: Option<std::path::PathBuf>,
+) -> Result<std::process::Child> {
+    let mut cmd = std::process::Command::new(exe);
+    cmd.arg("--core").arg(core);
+    cmd.arg("--rom").arg(&rom);
+    cmd.arg("--system-dir").arg(&args.system_dir);
+    cmd.arg("--save-dir").arg(&args.save_dir);
+    cmd.arg("--notes-dir").arg(&args.notes_dir);
+    if let Some(cart) = cartridge {
+        cmd.arg("--cartridge").arg(cart);
+    }
+    if let Some(cfg_path) = &args.config {
+        cmd.arg("--config").arg(cfg_path);
+    }
+    cmd.env("PSX_XPERIENCE_AUTOPLAY", &rom);
+    Ok(cmd.spawn()?)
+}
+
 fn main() -> Result<()> {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
     // O "será atualizado ao reiniciar" (plan revision): um update baixado
@@ -207,6 +245,36 @@ fn main() -> Result<()> {
     let mut cab = plat
         .create_cabinet("PSX Xperience", 1280, 800, cfg.fullscreen)
         .map_err(|e| anyhow!(e.to_string()))?;
+    // DEBUG: autoplay — pula idle e estante, vai reto ao jogo. É o mesmo
+    // mecanismo do lançamento por processo (abaixo) exposto para dev.
+    if let Ok(rom) = std::env::var("PSX_XPERIENCE_AUTOPLAY") {
+        let rom = std::path::PathBuf::from(rom);
+        let core = xperience_app::dirs::core_dir().join(core_file_name());
+        let spec = GameSpec {
+            core,
+            rom,
+            system_dir: xperience_app::dirs::roms_dir()
+                .parent()
+                .unwrap()
+                .join("bios"),
+            save_dir: xperience_app::dirs::saves_dir(),
+            notes_dir: xperience_app::dirs::notes_dir(),
+            runahead: None,
+            shot: None,
+            logo: None,
+            card1: None,
+            cartridge: None,
+            shot_off: false,
+            debug_note_capture: false,
+            debug_shot_pause: false,
+            debug_shot_modal: None,
+            debug_cart_anim: None,
+        };
+        match run_game(&mut plat, &mut cab, &spec, &cfg) {
+            Ok(GameExit::Ejected { .. }) | Ok(GameExit::Quit) | Err(_) => {}
+        }
+        return Ok(());
+    }
     // The ambient static hiss (opt-in, settings "vídeo") — gate applied once
     // here and live on every settings toggle after.
     cab.set_static_hiss(cfg.hiss_on_static);
@@ -320,7 +388,7 @@ fn main() -> Result<()> {
         }
 
         'shelf: loop {
-            let (rom, logo, cartridge) =
+            let (rom, _logo, cartridge) =
                 match shelf::run(&mut plat, &mut cab, &catalog, &shelf_opts)? {
                     Pick::Quit => break 'app,
                     Pick::Back => {
@@ -376,42 +444,49 @@ fn main() -> Result<()> {
                 };
             shelf_opts.fade_in = None; // consumed
 
+            // A Metal guarda estado do 2D da estante que corrompe a textura
+            // do jogo (o "quadrado colorido"): a troca recria o canvas —
+            // a TV trocando de entrada. O mesmo na volta, no Ejected.
+            drop(cab);
+            cab = plat
+                .create_cabinet("PSX Xperience", 1280, 800, cfg.fullscreen)
+                .map_err(|e| anyhow!(e.to_string()))?;
+
             let Some(core) = &core_path else {
                 if no_core_screen(&mut plat, &mut cab)? {
                     break 'app;
                 }
                 continue;
             };
-            let spec = GameSpec {
-                core: core.clone(),
+            // O jogo roda em PROCESSO PRÓPRIO (mesmo binário, modo autoplay):
+            // dispositivo Metal limpo — o jogo nunca herda o estado de render
+            // da estante (o "quadrado colorido"). A estante fica viva por
+            // trás, esperando; quando o jogo sai, volta pra tela inicial.
+            let mut child = spawn_game_child(
+                std::env::current_exe().map_err(|e| anyhow!(e.to_string()))?,
+                core.clone(),
                 rom,
-                system_dir: args.system_dir.clone(),
-                save_dir: args.save_dir.clone(),
-                notes_dir: args.notes_dir.clone(),
-                runahead: args.runahead,
-                shot: None,
-                logo,
-                // O slot 1 da cena (picker de cards da biblioteca) chega na
-                // Fase 3; até lá o app completo roda sem card encaixado.
-                card1: None,
+                &args,
                 cartridge,
-                shot_off: false,
-                debug_note_capture: false,
-                debug_shot_pause: false,
-                debug_shot_modal: None,
-                debug_cart_anim: None,
-            };
-            match run_game(&mut plat, &mut cab, &spec, &cfg)? {
-                // The power-off ritual (desligar, snow, wait for eject)
-                // already ran inside run_game — the idle screen just eases
-                // in over what it left (plan §3.3, "a estante entra por
-                // cima" now applies to the idle screen, not the shelf).
-                GameExit::Ejected { static_level } => {
-                    idle_static = static_level;
-                    break 'shelf;
+            )?;
+            // A janela da estante fecha: o jogo fullscreen É a janela do app
+            // agora. Sem janela, sem bomba de eventos — só esperar o filho.
+            drop(cab);
+            loop {
+                match child.try_wait() {
+                    Ok(Some(_)) => break,
+                    Ok(None) => {}
+                    Err(e) => log::warn!("aguardando o jogo: {e}"),
                 }
-                GameExit::Quit => break 'app,
+                std::thread::sleep(std::time::Duration::from_millis(120));
             }
+            // De volta da TV: canvas novinho para o idle/estante.
+            idle_static = idle::RESTING_STATIC;
+            cab = plat
+                .create_cabinet("PSX Xperience", 1280, 800, cfg.fullscreen)
+                .map_err(|e| anyhow!(e.to_string()))?;
+            cab.set_nameplate(&core_update::nameplate_text(core_path.as_deref()));
+            break 'shelf;
         }
     }
 

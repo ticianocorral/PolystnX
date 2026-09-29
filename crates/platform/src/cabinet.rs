@@ -212,6 +212,8 @@ pub struct Cabinet {
     /// When the static noise was last regenerated (and at what level) —
     /// `update_noise_tex` caps regeneration at ~30Hz.
     noise_stamp: Option<(std::time::Instant, f32)>,
+    // Era o gerador do ruído de RF; a tela azul de AV não sorteia.
+    #[allow(dead_code)]
     rng: u32,
     /// 128 glyphs laid out horizontally, white on transparent (2D path).
     font: Texture,
@@ -1709,6 +1711,15 @@ impl Cabinet {
         let src = self.src.take().unwrap();
         let mesh = self.mesh.take().unwrap();
         let bezel = self.bezel.take().unwrap();
+        // Metal + render_geometry: a passada anterior (static/estante) deixa
+        // a textura vinculada errada — flush e um warm-up do binding antes do
+        // draw do jogo.
+        unsafe {
+            self.canvas.flush_renderer();
+        }
+        let _ = self
+            .canvas
+            .render_geometry(&bezel.verts, None, &bezel.indices[..]);
         let _ = self
             .canvas
             .render_geometry(&mesh.verts, Some(&src.tex), &mesh.indices[..]);
@@ -1759,6 +1770,19 @@ impl Cabinet {
             self.core_status.as_deref(),
         );
         self.canvas.set_viewport(None);
+        // DEBUG-CI: dump do composto (o que a Metal desenhou de fato).
+        if let Ok(path) = std::env::var("PSX_XPERIENCE_DEBUG_COMPOSITE") {
+            static N: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+            let n = N.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            if n == 30 || n == 300 || n == 700 || n == 1500 {
+                let named = format!("{path}.{n}.bmp");
+                let _ = self
+                    .canvas
+                    .read_pixels(None::<Rect>)
+                    .and_then(|s| s.save_bmp(std::path::Path::new(&named)));
+                log::info!("debug composite: {} -> {named}", n);
+            }
+        }
         self.present_and_time();
     }
 
@@ -1856,9 +1880,24 @@ impl Cabinet {
         } else {
             frame.pitch
         };
-        src.tex
-            .update(None, frame.pixels, pitch)
-            .expect("upload frame");
+        let r = src.tex.update(None, frame.pixels, pitch);
+        // DEBUG: primeiras uploads
+        {
+            static N: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+            let n = N.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            if n < 3 {
+                log::info!(
+                    "DEBUG upload #{n}: {}x{} {:?} pixels={} pitch={} (esperado {expected_pitch}) ok={}",
+                    frame.width,
+                    frame.height,
+                    frame.format,
+                    frame.pixels.len(),
+                    pitch,
+                    r.is_ok()
+                );
+            }
+        }
+        r.expect("upload frame");
     }
 
     fn ensure_src(&mut self, w: u32, h: u32, format: PixelFormat) {
@@ -1867,6 +1906,13 @@ impl Cabinet {
             None => true,
         };
         if stale {
+            log::info!(
+                "DEBUG ensure_src: criando {}x{} {:?} (era {:?})",
+                w,
+                h,
+                format,
+                self.src.as_ref().map(|s| (s.w, s.h, s.format))
+            );
             let mut tex = self
                 .canvas
                 .create_texture_streaming(format.sdl(), w, h)
@@ -2196,6 +2242,18 @@ impl Cabinet {
         } else if let Some(h) = &self.hiss {
             h.clear();
         }
+        // DEBUG: dump do composto do static.
+        if let Ok(path) = std::env::var("PSX_XPERIENCE_DEBUG_STATIC") {
+            static N: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+            let n = N.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            if n == 60 {
+                let _ = self
+                    .canvas
+                    .read_pixels(None::<Rect>)
+                    .and_then(|s| s.save_bmp(std::path::Path::new(&path)));
+                log::info!("debug static composite -> {path}");
+            }
+        }
         self.panel_buttons = draw_panel(
             &mut self.canvas,
             &mut self.font,
@@ -2442,21 +2500,20 @@ impl Cabinet {
         }
         self.noise_stamp = Some((now, level));
         self.ensure_noise_tex(NW, NH);
-        let k = level.clamp(0.0, 1.0);
-        let hi = (26.0 + 150.0 * k) as u32; // cap well under white
-        let lo = (6.0 * k) as u32;
-        let span = hi - lo + 1;
+        // Sem sinal na entrada composta = a tela azul famosa da TV ("AV 1").
+        // O level ainda governa o brilho: os bursts de power piscam a tela
+        // mais clara antes de assentar no azul escuro de repouso.
         {
-            let Self { noise, rng, .. } = &mut *self;
+            let Self { noise, .. } = &mut *self;
             if noise.len() != (NW * NH * 4) as usize {
                 *noise = vec![0u8; (NW * NH * 4) as usize];
             }
-            for px in noise.as_chunks_mut::<4>().0 {
-                *rng ^= *rng << 13;
-                *rng ^= *rng >> 17;
-                *rng ^= *rng << 5;
-                let v = (lo + *rng % span) as u8;
-                *px = [v, v, v, 255];
+            let k = level.clamp(0.0, 1.0);
+            // Azul de AV: quase nada de vermelho, verde pela metade.
+            let (r, g, b) = (8u32, 32u32, (60.0 + 140.0 * k) as u32);
+            let px = [r as u8, g as u8, b.min(255) as u8, 255];
+            for p in noise.as_chunks_mut::<4>().0 {
+                *p = px;
             }
         }
         let nt = self.noise_tex.as_mut().unwrap();
@@ -3139,16 +3196,17 @@ fn draw_minimize_button(canvas: &mut WindowCanvas, font: &mut Texture) -> Rect {
 /// hold it. `label` is `Cabinet::nameplate` (plan revision — `BRAND` plus the
 /// app/core version once the app calls `set_nameplate`).
 /// The channel banner's green — vivid OSD green, like the phosphor filter a
-/// TV applies to its own on-screen display (plan revision, "CH 3").
+/// TV applies to its own on-screen display — no PSX é "AV 1": entrada
+/// composta (cabos RCA), não RF (plano §6, revisão do usuário).
 const OSD_GREEN: (u8, u8, u8) = (60, 230, 70);
 
-/// The "CH 3" channel banner (plan revision: "quando a tv tiver fora do ar
-/// ... mostrar CH 3 na tv como era na tv antiga quando nao tinha sinal") —
+/// The channel banner ("AV 1" no PSX: a TV fica na entrada composta; o
+/// selo aparece na troca de entrada e na ausência de sinal) —
 /// green, top-right of the tube. Drawn flat on the glass, deliberately NOT
 /// warped with the picture: an OSD is the TV's own overlay, not part of the
 /// signal (same reasoning as `draw_brand`'s chin text).
 fn draw_ch3_osd(canvas: &mut WindowCanvas, font: &mut Texture, screen: Rect) {
-    const LABEL: &str = "CH  3";
+    const LABEL: &str = "AV 1";
     const SCALE: u32 = 3;
     let w = GLYPH_W as i32 * SCALE as i32 * LABEL.chars().count() as i32;
     let margin = 24;

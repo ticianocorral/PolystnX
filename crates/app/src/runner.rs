@@ -9,7 +9,6 @@ use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, Context, Result};
 use xperience_emulation::{AnalogStick, Button, Core, Frame as EmuFrame, PixelFormat as EmuFormat};
-use xperience_ntsc::{NtscFilter, Preset};
 use xperience_platform::{
     Cabinet, FrameRef, PanelButton, PixelFormat as PlatFormat, Platform, UiEvent, MAX_PORTS,
 };
@@ -1179,6 +1178,10 @@ pub fn run_game(
     log::info!("core: {} {}", core.system_name(), core.system_version());
     core.set_directories(&spec.system_dir, &spec.save_dir);
     core.init();
+    // Renderer de software, SEMPRE: o pipeline do app é 2D (framebuffer →
+    // tubo), e sem esta opção o SwanStation pede contexto de GPU que o
+    // frontend não dá — e cospe frames de lixo (o "quadrado colorido").
+    core.set_variable("swanstation_Renderer", "Software");
 
     // Identidade do disco para o log — o serial lido de dentro do CHD
     // (a chave da estante; o core recebe o caminho, disco é need_fullpath).
@@ -1241,9 +1244,8 @@ pub fn run_game(
         }
     }
 
-    // We do our own NTSC (vendored blargg snes_ntsc, RF preset) on the raw
-    // frame.
-    let mut ntsc = NtscFilter::new(Preset::Rf);
+    // Sem filtro composto no PSX (plano §2): o frame do core vai direto
+    // para a tubo; o filtro do blargg é do irmão de SNES.
 
     let av = core.av_info();
     log::info!(
@@ -2486,19 +2488,32 @@ pub fn run_game(
                     );
                     last_dims = dims;
                 }
-                // RF NTSC on RGB565 frames; anything else passes straight through.
+                // O filtro composto do blargg (snes_ntsc) é do irmão de SNES
+                // e fica FORA do caminho do PSX (plano §2: "começa sem filtro
+                // composto" — e ele esticava o frame para 1498 de largura).
+                //
+                // RGB565 vira XRGB8888 no CPU antes de apresentar: 565 é
+                // segunda classe na Metal (não existe MTLPixelFormat 565 — a
+                // SDL emula, e o caminho emulado falha com render_geometry no
+                // app), e a conversão de ~1 MB por frame é trivial perto do
+                // budget do software renderer.
+                let mut rgba8888: Vec<u8> =
+                    Vec::with_capacity(frame.width as usize * frame.height as usize * 4);
                 let fref = if frame.format == EmuFormat::Rgb565 {
-                    let (out, ow, oh) =
-                        ntsc.process(&frame.pixels, frame.width, frame.height, frame.pitch);
-                    let bytes = unsafe {
-                        std::slice::from_raw_parts(out.as_ptr() as *const u8, out.len() * 2)
-                    };
+                    for chunk in frame.pixels.as_chunks::<2>().0 {
+                        let v = u16::from_le_bytes([chunk[0], chunk[1]]);
+                        let r = (((v >> 11) & 0x1f) * 255 / 31) as u8;
+                        let g = (((v >> 5) & 0x3f) * 255 / 63) as u8;
+                        let b = ((v & 0x1f) * 255 / 31) as u8;
+                        // XRGB8888 em memória little-endian = [B, G, R, X].
+                        rgba8888.extend_from_slice(&[b, g, r, 255]);
+                    }
                     FrameRef {
-                        width: ow,
-                        height: oh,
-                        pitch: ow as usize * 2,
-                        format: PlatFormat::Rgb565,
-                        pixels: bytes,
+                        width: frame.width,
+                        height: frame.height,
+                        pitch: frame.width as usize * 4,
+                        format: PlatFormat::Xrgb8888,
+                        pixels: &rgba8888,
                     }
                 } else {
                     FrameRef {

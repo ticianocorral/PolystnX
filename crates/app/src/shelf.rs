@@ -985,6 +985,19 @@ pub fn run(
 
     loop {
         frame_no += 1;
+        // DEBUG: auto-abre o primeiro jogo após N frames — bissecção do
+        // quadrado da Metal (a estante rodou de verdade antes do jogo).
+        if let Ok(n) = std::env::var("PSX_XPERIENCE_SHELF_FRAMES") {
+            if let Ok(n) = n.parse::<u64>() {
+                if frame_no == n {
+                    if let Some(e) = view.first() {
+                        let logo_dir = crate::dirs::assets_dir().join("logo");
+                        let cart_dir = crate::dirs::assets_dir().join("disc");
+                        return Ok(pick_play(catalog, &logo_dir, &cart_dir, e));
+                    }
+                }
+            }
+        }
         if opts.max_frames.is_some_and(|n| frame_no > n) {
             return Ok(Pick::Quit);
         }
