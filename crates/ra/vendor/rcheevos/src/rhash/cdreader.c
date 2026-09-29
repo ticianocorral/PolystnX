@@ -79,6 +79,10 @@ static void cdreader_determine_sector_size(rc_hash_cdrom_track_t* cdrom)
       }
     }
   }
+
+  fprintf(stderr, "DEBUG-CD: determine: sector_size=%d header=%d first=%d pregap=%d offset=%d raw=%d\n",
+      (int)cdrom->sector_size, (int)cdrom->sector_header_size, (int)cdrom->track_first_sector,
+      (int)cdrom->track_pregap_sectors, (int)cdrom->file_track_offset, (int)cdrom->raw_data_size);
 }
 
 static void* cdreader_open_bin_track(const char* path, uint32_t track, const rc_hash_iterator_t* iterator)
@@ -518,6 +522,9 @@ static void* cdreader_open_cue_track(const char* path, uint32_t track, const rc_
     bin_filename = cdreader_get_bin_path(path, current_track.filename, iterator);
     if (bin_filename)
     {
+      fprintf(stderr, "DEBUG-CD: cue track %d mode=%s file=%s first_sector=%d\n",
+          (int)current_track.id, current_track.mode, current_track.filename,
+          (int)current_track.first_sector);
       if (cdreader_open_bin(cdrom, bin_filename, current_track.mode))
       {
         if (cdrom->track_pregap_sectors)
@@ -798,6 +805,9 @@ static size_t cdreader_read_sector(void* track_handle, uint32_t sector, void* bu
   if (!cdrom)
     return 0;
 
+  fprintf(stderr, "DEBUG-CD: read(%u, want=%d) first=%d size=%d header=%d\n",
+      sector, (int)requested_bytes, (int)cdrom->track_first_sector,
+      (int)cdrom->sector_size, (int)cdrom->sector_header_size);
   if (sector < (uint32_t)cdrom->track_first_sector)
     return 0;
 
