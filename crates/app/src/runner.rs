@@ -487,12 +487,9 @@ fn power_off_burst(plat: &Platform, cab: &mut Cabinet) -> f32 {
 
     while start.elapsed() < SPAN {
         let t = (start.elapsed().as_secs_f32() / SPAN.as_secs_f32()).min(1.0);
-        // Strong for the first half, then settle toward the idle-off hiss.
-        let level = if t < 0.5 {
-            1.0 - 0.5 * t
-        } else {
-            (0.9 - t).max(OFF_STATIC_LEVEL)
-        };
+        // Entrada composta: a imagem colapsa para o preto e assenta no azul
+        // escuro de repouso — sem flash (o brilho era ficção de RF).
+        let level = OFF_STATIC_LEVEL * (1.0 - t);
         cab.present_static(level);
 
         if let Some(a) = &audio {
@@ -532,7 +529,9 @@ fn power_on_burst(plat: &Platform, cab: &mut Cabinet) {
 
     while start.elapsed() < SPAN {
         let t = (start.elapsed().as_secs_f32() / SPAN.as_secs_f32()).min(1.0);
-        let level = OFF_STATIC_LEVEL + (1.0 - OFF_STATIC_LEVEL) * t;
+        // Ligar na entrada composta: o brilho CAI para o preto e o quadro do
+        // jogo chega em seguida — a TV "trocando de entrada".
+        let level = OFF_STATIC_LEVEL * (1.0 - t);
         cab.present_static(level);
 
         if let Some(a) = &audio {
@@ -627,7 +626,9 @@ fn cartridge_insert_animation(plat: &Platform, cab: &mut Cabinet) {
     while start.elapsed() < SPAN {
         let t = (start.elapsed().as_secs_f32() / SPAN.as_secs_f32()).min(1.0);
         cab.set_cartridge_motion(Some((t, false)));
-        cab.present_static(OFF_STATIC_LEVEL);
+        // Entra pelo preto (a troca de entrada da TV), assenta no azul.
+        let rise = (t * 3.0).min(1.0);
+        cab.present_static(OFF_STATIC_LEVEL * rise * (1.0 - 0.5 * t));
 
         if let Some(a) = &audio {
             let n = (RATE / 60) as usize;
