@@ -5,6 +5,10 @@
 //! which rcheevos has no built-in reader for — see `docs/fase-0.md`.
 fn main() {
     let mut b = cc::Build::new();
+    if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("linux") {
+        // Declarações POSIX que o rhash usa (strcasecmp/strdup/strncasecmp).
+        b.define("_DEFAULT_SOURCE", None);
+    }
     b.include("vendor/rcheevos/include")
         .include("vendor/rcheevos/src")
         .include("vendor/rcheevos/src/rcheevos")
@@ -12,9 +16,11 @@ fn main() {
         .define("RC_DISABLE_LUA", None)
         .define("RC_HASH_NO_ZIP", None)
         .define("RC_HASH_NO_ENCRYPTED", None);
-    // Sem -std=c99: o std do gcc (gnu17) expõe strcasecmp/strdup em
-    // <string.h>; com c99 estrito elas caem em implicit declaration e o
-    // walk ISO9660 do rhash quebra em Linux/Windows (o CI provou).
+    // A glibc só declara strcasecmp/strdup em <string.h> sob _DEFAULT_SOURCE
+    // (ou _GNU_SOURCE); sem isso viram implicit declaration e o walk ISO9660
+    // do rhash compara nomes quebrado — o CI provou (Linux/Windows falhavam
+    // o teste sintético, o macOS passava porque a libc do Apple declara por
+    // padrão). Sem -std=c99 para o gnu17 não esconder nada também.
     let files = vec![
         "rcheevos/alloc.c",
         "rcheevos/condition.c",
