@@ -123,6 +123,27 @@ fn hashes_synthetic_cue_bin_like_the_ra_server() {
     fs::create_dir_all(&dir).unwrap();
     let (cue, expected) = build_synthetic_disc(&dir);
 
+    // DEBUG-CI: walk ISO9660 em Rust puro sobre o mesmo bin — se achar o exe
+    // e o rhash (C) não, o bug é do C por OS; se não achar, o disco é
+    // malformado e a libc do macOS estava mascarando.
+    let bin_bytes = fs::read(cue.with_file_name("game.bin")).unwrap();
+    let sector = |n: usize| -> &[u8] { &bin_bytes[n * 2048..(n + 1) * 2048] };
+    assert_eq!(&sector(16)[1..6], b"CD001", "PVD ausente no setor 16");
+    let le = |b: &[u8]| u32::from_le_bytes([b[0], b[1], b[2], b[3]]);
+    let root_extent = le(&sector(16)[158..162]) as usize;
+    eprintln!("DEBUG-CI: root_extent={root_extent}");
+    let dir_data = sector(root_extent);
+    let mut pos = 0;
+    while pos + 33 <= dir_data.len() && dir_data[pos] != 0 {
+        let len = dir_data[pos] as usize;
+        let name_len = dir_data[pos + 32] as usize;
+        eprintln!(
+            "DEBUG-CI: record len={len} name={:?}",
+            String::from_utf8_lossy(&dir_data[pos + 33..pos + 33 + name_len])
+        );
+        pos += len;
+    }
+
     let got = match psx_disc_hash(&cue) {
         Ok(h) => h,
         Err(e) => panic!("hash do cue sintético falhou: {e}"),
