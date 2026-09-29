@@ -14,5 +14,4 @@ log.workspace = true
 version = "0.3"
 
 [dev-dependencies]
-libchdman-rs = "0.289.0"
 md-5.workspace = true

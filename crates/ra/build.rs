@@ -11,8 +11,10 @@ fn main() {
         .include("vendor/rcheevos/src/rhash")
         .define("RC_DISABLE_LUA", None)
         .define("RC_HASH_NO_ZIP", None)
-        .define("RC_HASH_NO_ENCRYPTED", None)
-        .flag_if_supported("-std=c99");
+        .define("RC_HASH_NO_ENCRYPTED", None);
+    // Sem -std=c99: o std do gcc (gnu17) expõe strcasecmp/strdup em
+    // <string.h>; com c99 estrito elas caem em implicit declaration e o
+    // walk ISO9660 do rhash quebra em Linux/Windows (o CI provou).
     let files = vec![
         "rcheevos/alloc.c",
         "rcheevos/condition.c",
