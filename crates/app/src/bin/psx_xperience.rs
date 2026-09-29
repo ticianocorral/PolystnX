@@ -57,6 +57,10 @@ struct Args {
     /// shows the first-run setup screen when the core or the DAT is missing.
     debug_idle: bool,
     shot: Option<PathBuf>,
+    /// Modo autoplay (o pai é este mesmo binário spawmando a si mesmo):
+    /// o disco a abrir direto, sem idle/estante, e a arte do disco.
+    autoplay_rom: Option<PathBuf>,
+    autoplay_cartridge: Option<PathBuf>,
 }
 
 fn default_core_path() -> Option<PathBuf> {
@@ -73,6 +77,8 @@ fn parse_args() -> Result<Args> {
     let mut order = Order::Shelf;
     let mut runahead = None;
     let mut debug_settings = None;
+    let mut autoplay_rom = None;
+    let mut autoplay_cartridge = None;
     let mut debug_idle = false;
     let mut shot = None;
 
@@ -88,6 +94,20 @@ fn parse_args() -> Result<Args> {
             "--debug-settings" => debug_settings = Some(val()?),
             "--debug-idle-shot" => debug_idle = true,
             "--shot" => shot = Some(val()?.into()),
+            "--rom" => {
+                autoplay_rom = Some(
+                    it.next()
+                        .ok_or_else(|| anyhow!("--rom needs a path"))?
+                        .into(),
+                )
+            }
+            "--cartridge" => {
+                autoplay_cartridge = Some(
+                    it.next()
+                        .ok_or_else(|| anyhow!("--cartridge needs a path"))?
+                        .into(),
+                )
+            }
             "--order" => {
                 order = match val()?.as_str() {
                     "name" => Order::Name,
@@ -124,6 +144,8 @@ fn parse_args() -> Result<Args> {
         debug_settings,
         debug_idle,
         shot,
+        autoplay_rom,
+        autoplay_cartridge,
     })
 }
 
@@ -247,8 +269,12 @@ fn main() -> Result<()> {
         .map_err(|e| anyhow!(e.to_string()))?;
     // DEBUG: autoplay — pula idle e estante, vai reto ao jogo. É o mesmo
     // mecanismo do lançamento por processo (abaixo) exposto para dev.
-    if let Ok(rom) = std::env::var("PSX_XPERIENCE_AUTOPLAY") {
-        let rom = std::path::PathBuf::from(rom);
+    if let Some(rom) = args.autoplay_rom.clone().or_else(|| {
+        std::env::var("PSX_XPERIENCE_AUTOPLAY")
+            .ok()
+            .map(PathBuf::from)
+    }) {
+        let _cartridge = args.autoplay_cartridge.clone(); // a arte vai via --cartridge do pai
         let core = xperience_app::dirs::core_dir().join(core_file_name());
         let spec = GameSpec {
             core,
@@ -469,22 +495,21 @@ fn main() -> Result<()> {
                 &args,
                 cartridge,
             )?;
-            // A janela da estante fecha: o jogo fullscreen É a janela do app
-            // agora. Sem janela, sem bomba de eventos — só esperar o filho.
-            drop(cab);
+            // A estante fica viva ATRÁS do jogo (a janela do filho é quem
+            // cobre a tela): o shell só bombeia eventos para não tomar
+            // beachball — e sem piscada na volta, a janela nunca sai.
+            let mut input = xperience_platform::Input::new();
+            let keymap = xperience_platform::KeyMap::defaults();
             loop {
                 match child.try_wait() {
                     Ok(Some(_)) => break,
                     Ok(None) => {}
                     Err(e) => log::warn!("aguardando o jogo: {e}"),
                 }
+                let _ = plat.poll(&mut input, &keymap);
                 std::thread::sleep(std::time::Duration::from_millis(120));
             }
-            // De volta da TV: canvas novinho para o idle/estante.
             idle_static = idle::RESTING_STATIC;
-            cab = plat
-                .create_cabinet("PSX Xperience", 1280, 800, cfg.fullscreen)
-                .map_err(|e| anyhow!(e.to_string()))?;
             cab.set_nameplate(&core_update::nameplate_text(core_path.as_deref()));
             break 'shelf;
         }
