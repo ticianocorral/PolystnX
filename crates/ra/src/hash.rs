@@ -163,7 +163,7 @@ unsafe extern "C" fn rhash_log_error(msg: *const c_char) {
 unsafe extern "C" fn rhash_log_verbose(msg: *const c_char) {
     if !msg.is_null() {
         let m = unsafe { CStr::from_ptr(msg) }.to_string_lossy();
-        log::debug!("ra: rhash: {m}");
+        eprintln!("ra: rhash: {m}");  // DEBUG-CI
     }
 }
 
