@@ -1174,6 +1174,11 @@ pub fn run_game(
     let runahead_cfg = spec.runahead.unwrap_or(cfg.runahead);
 
     // --- load + identify -------------------------------------------------
+    // A TV troca para AV 1 NO ATO da escolha: o carregar do core/disco
+    // (1-2s) acontece na tela escura da entrada — não sobre a estante
+    // congelada (era o "como se abrisse outra tela").
+    cab.set_powered(false);
+    cab.present_static(OFF_STATIC_LEVEL);
     let mut core =
         Core::load(&spec.core).with_context(|| format!("loading core {}", spec.core.display()))?;
     log::info!("core: {} {}", core.system_name(), core.system_version());
