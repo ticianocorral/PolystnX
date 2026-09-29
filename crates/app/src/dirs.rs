@@ -83,6 +83,12 @@ pub fn core_dir() -> PathBuf {
     app_root().join("core")
 }
 
+/// A BIOS do console (SCPH*.BIN, fornecida por quem roda — nunca baixada).
+/// É o system directory que o core espera (plano §1.1).
+pub fn bios_dir() -> PathBuf {
+    app_root().join("bios")
+}
+
 pub fn assets_dir() -> PathBuf {
     app_root().join("assets")
 }

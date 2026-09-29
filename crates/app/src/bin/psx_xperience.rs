@@ -131,7 +131,8 @@ fn parse_args() -> Result<Args> {
     }
 
     let save_dir = save_dir.unwrap_or_else(xperience_app::dirs::saves_dir);
-    let system_dir = system_dir.unwrap_or_else(|| save_dir.clone());
+    // O system directory do core é a BIOS (plano §1.1) — bios/, nunca saves/.
+    let system_dir = system_dir.unwrap_or_else(xperience_app::dirs::bios_dir);
     let notes_dir = notes_dir.unwrap_or_else(xperience_app::dirs::notes_dir);
     Ok(Args {
         core,
@@ -181,43 +182,6 @@ the settings screen's \"Núcleo\" to download SwanStation automatically, or drop
 it into core/ by hand (not included — non-commercial license, see\n\
 THIRD-PARTY-NOTICES.md). An optional nointro.dat at the root gives games\n\
 their canonical No-Intro name.";
-
-/// O nome do arquivo do core nesta plataforma (igual ao core_update).
-fn core_file_name() -> &'static str {
-    if cfg!(target_os = "macos") {
-        "swanstation_libretro.dylib"
-    } else if cfg!(target_os = "windows") {
-        "swanstation_libretro.dll"
-    } else {
-        "swanstation_libretro.so"
-    }
-}
-
-/// Spawna este mesmo binário em modo autoplay (processo novo = Metal limpa)
-/// com o disco e a arte passados por linha de comando. O filho herda o
-/// stdio; o pai espera pelo handle devolvido.
-fn spawn_game_child(
-    exe: std::path::PathBuf,
-    core: std::path::PathBuf,
-    rom: std::path::PathBuf,
-    args: &Args,
-    cartridge: Option<std::path::PathBuf>,
-) -> Result<std::process::Child> {
-    let mut cmd = std::process::Command::new(exe);
-    cmd.arg("--core").arg(core);
-    cmd.arg("--rom").arg(&rom);
-    cmd.arg("--system-dir").arg(&args.system_dir);
-    cmd.arg("--save-dir").arg(&args.save_dir);
-    cmd.arg("--notes-dir").arg(&args.notes_dir);
-    if let Some(cart) = cartridge {
-        cmd.arg("--cartridge").arg(cart);
-    }
-    if let Some(cfg_path) = &args.config {
-        cmd.arg("--config").arg(cfg_path);
-    }
-    cmd.env("PSX_XPERIENCE_AUTOPLAY", &rom);
-    Ok(cmd.spawn()?)
-}
 
 fn main() -> Result<()> {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
@@ -275,7 +239,7 @@ fn main() -> Result<()> {
             .map(PathBuf::from)
     }) {
         let _cartridge = args.autoplay_cartridge.clone(); // a arte vai via --cartridge do pai
-        let core = xperience_app::dirs::core_dir().join(core_file_name());
+        let core = xperience_app::dirs::core_dir().join(core_update::core_file_name());
         let spec = GameSpec {
             core,
             rom,
@@ -414,7 +378,7 @@ fn main() -> Result<()> {
         }
 
         'shelf: loop {
-            let (rom, _logo, cartridge) =
+            let (rom, logo, cartridge) =
                 match shelf::run(&mut plat, &mut cab, &catalog, &shelf_opts)? {
                     Pick::Quit => break 'app,
                     Pick::Back => {
@@ -484,34 +448,34 @@ fn main() -> Result<()> {
                 }
                 continue;
             };
-            // O jogo roda em PROCESSO PRÓPRIO (mesmo binário, modo autoplay):
-            // dispositivo Metal limpo — o jogo nunca herda o estado de render
-            // da estante (o "quadrado colorido"). A estante fica viva por
-            // trás, esperando; quando o jogo sai, volta pra tela inicial.
-            let mut child = spawn_game_child(
-                std::env::current_exe().map_err(|e| anyhow!(e.to_string()))?,
-                core.clone(),
+            // O jogo roda NESTE processo e nesta janela — o mesmo caminho do
+            // SNES Xperience. (O bug do "quadrado colorido" nunca foi da
+            // Metal: o system_dir default apontava saves/, a BIOS nunca era
+            // encontrada e o boot não saía do lugar. Corrigido no parse_args.)
+            let spec = GameSpec {
+                core: core.clone(),
                 rom,
-                &args,
+                system_dir: args.system_dir.clone(),
+                save_dir: args.save_dir.clone(),
+                notes_dir: args.notes_dir.clone(),
+                runahead: args.runahead,
+                shot: None,
+                logo,
+                card1: None,
                 cartridge,
-            )?;
-            // A estante fica viva ATRÁS do jogo (a janela do filho é quem
-            // cobre a tela): o shell só bombeia eventos para não tomar
-            // beachball — e sem piscada na volta, a janela nunca sai.
-            let mut input = xperience_platform::Input::new();
-            let keymap = xperience_platform::KeyMap::defaults();
-            loop {
-                match child.try_wait() {
-                    Ok(Some(_)) => break,
-                    Ok(None) => {}
-                    Err(e) => log::warn!("aguardando o jogo: {e}"),
+                shot_off: false,
+                debug_note_capture: false,
+                debug_shot_pause: false,
+                debug_shot_modal: None,
+                debug_cart_anim: None,
+            };
+            match run_game(&mut plat, &mut cab, &spec, &cfg)? {
+                GameExit::Ejected { static_level } => {
+                    idle_static = static_level;
+                    break 'shelf;
                 }
-                let _ = plat.poll(&mut input, &keymap);
-                std::thread::sleep(std::time::Duration::from_millis(120));
+                GameExit::Quit => break 'app,
             }
-            idle_static = idle::RESTING_STATIC;
-            cab.set_nameplate(&core_update::nameplate_text(core_path.as_deref()));
-            break 'shelf;
         }
     }
 

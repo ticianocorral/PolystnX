@@ -1711,15 +1711,6 @@ impl Cabinet {
         let src = self.src.take().unwrap();
         let mesh = self.mesh.take().unwrap();
         let bezel = self.bezel.take().unwrap();
-        // Metal + render_geometry: a passada anterior (static/estante) deixa
-        // a textura vinculada errada — flush e um warm-up do binding antes do
-        // draw do jogo.
-        unsafe {
-            self.canvas.flush_renderer();
-        }
-        let _ = self
-            .canvas
-            .render_geometry(&bezel.verts, None, &bezel.indices[..]);
         let _ = self
             .canvas
             .render_geometry(&mesh.verts, Some(&src.tex), &mesh.indices[..]);
@@ -2241,18 +2232,6 @@ impl Cabinet {
             self.queue_static_hiss(level);
         } else if let Some(h) = &self.hiss {
             h.clear();
-        }
-        // DEBUG: dump do composto do static.
-        if let Ok(path) = std::env::var("PSX_XPERIENCE_DEBUG_STATIC") {
-            static N: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
-            let n = N.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-            if n == 60 {
-                let _ = self
-                    .canvas
-                    .read_pixels(None::<Rect>)
-                    .and_then(|s| s.save_bmp(std::path::Path::new(&path)));
-                log::info!("debug static composite -> {path}");
-            }
         }
         self.panel_buttons = draw_panel(
             &mut self.canvas,

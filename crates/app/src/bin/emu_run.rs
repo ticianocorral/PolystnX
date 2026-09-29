@@ -182,7 +182,8 @@ fn parse_args() -> Result<Args> {
     let core = core.ok_or_else(|| anyhow!("no core: pass --core or set $PSX_XPERIENCE_CORE"))?;
     let rom = rom.ok_or_else(|| anyhow!("no ROM: pass --rom <file>"))?;
     let save_dir = save_dir.unwrap_or_else(|| PathBuf::from("."));
-    let system_dir = system_dir.unwrap_or_else(|| save_dir.clone());
+    // system directory do core = a BIOS (plano §1.1) — igual ao app.
+    let system_dir = system_dir.unwrap_or_else(xperience_app::dirs::bios_dir);
     let notes_dir = notes_dir.unwrap_or_else(|| save_dir.join("notes"));
     Ok(Args {
         core,
