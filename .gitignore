@@ -1,0 +1,43 @@
+/target
+**/*.rs.bk
+*.pdb
+.DS_Store
+
+# Local runtime assets — never commit ROMs, BIOS, cores or player data
+/cores/
+/roms/
+/saves/
+/system/
+*.sfc
+*.smc
+*.fig
+*.swc
+*.dylib
+*.so
+*.dll
+*.srm
+*.state
+*.state[0-9]
+shot-*.bmp
+
+# Mocks regeneráveis (cargo run --example ra_osd_mock) — só os .png ficam
+docs/mocks/*.bmp
+
+# Config and secrets (the app's default config lives in ~/.config)
+config.toml
+.env
+screenscraper.toml
+
+# Pacote de exemplo do World Cup 2026 (ROM de hack — não commitar);
+# o pacote seguro (platformer-example, open source) É commitado de propósito.
+/exemplo-world-cup-2026.zip
+
+# workspace do ZCode
+.zcode/
+
+# artefatos de runtime dos testes headless
+/platformer-example/
+.zcodeignore
+
+# pacotes locais da Fase 5 (o CI regenera por tag)
+/dist/

@@ -1,0 +1,289 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Retro Xperience — um console inteiro na sua tela</title>
+  <meta name="description" content="Família de emuladores-portáteis onde o console inteiro vive na sua tela: gabinete, tubo CRT e cartucho de verdade. Hoje PSX Xperience; PS1 e N64 no caminho.">
+  <meta property="og:title" content="Retro Xperience">
+  <meta property="og:description" content="Um console inteiro desenhado na sua tela — gabinete, tubo CRT e painel de controle de verdade.">
+  <meta property="og:image" content="assets/screenshot.png">
+  <link rel="icon" type="image/svg+xml" href="favicon.svg">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=VT323&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <a class="pular" href="#conteudo">Pular para o conteúdo</a>
+
+  <header class="topo">
+    <nav class="container topo-nav" aria-label="principal">
+      <a class="marca" href="#topo">
+        <span class="marca-badge" aria-hidden="true">RX</span>
+        <span class="marca-nome">Retro&nbsp;Xperience</span>
+      </a>
+      <ul class="topo-links">
+        <li><a href="#conceito">Conceito</a></li>
+        <li><a href="#consoles">Consoles</a></li>
+        <li><a href="#interface">Interface</a></li>
+        <li><a href="#conquistas">Conquistas</a></li>
+        <li><a class="botao botao-mini" href="https://github.com/ticianocorral/psx-xperience">GitHub</a></li>
+      </ul>
+    </nav>
+  </header>
+
+  <main id="conteudo">
+
+    <!-- ===== Hero ===== -->
+    <section class="hero" id="topo">
+      <div class="container hero-grid">
+        <div class="hero-texto">
+          <p class="kicker">// projeto pessoal, sem fins comerciais</p>
+          <h1>Retro<br>Xperience</h1>
+          <p class="lema">
+            Um <strong>console inteiro</strong> desenhado na sua tela —
+            gabinete, tubo CRT e painel de controle de verdade — em vez de só
+            uma janela com o jogo.
+          </p>
+          <ul class="linhagem" aria-label="Linha de consoles">
+            <li class="chip chip-ok"><span class="led" aria-hidden="true"></span>SNES — 1.1.1</li>
+            <li class="chip chip-breve">PSX — em desenvolvimento</li>
+            <li class="chip chip-breve">N64 — em breve</li>
+          </ul>
+          <div class="hero-acoes">
+            <a class="botao botao-primario" href="https://github.com/ticianocorral/snes-xperience/releases">Baixar SNES&nbsp;Xperience</a>
+            <a class="botao" href="https://github.com/ticianocorral/psx-xperience">PSX Xperience no GitHub</a>
+          </div>
+        </div>
+        <figure class="crt hero-midia">
+          <img src="assets/screenshot.png" width="1280" height="800" loading="eager"
+               alt="O Platformer Example — homebrew open source — rodando no tubo CRT, com o painel lateral: logotipo do jogo, cartucho no slot e chaves Power e Reset roxas">
+          <figcaption>clique na tela para ligar e desligar o tubo</figcaption>
+        </figure>
+      </div>
+    </section>
+
+    <!-- ===== Conceito ===== -->
+    <section class="secao" id="conceito">
+      <div class="container">
+        <h2>O conceito</h2>
+        <p class="secao-lema">
+          A maioria dos emuladores te dá uma janela. O Xperience te dá o
+          aparelho: você escolhe o jogo, o cartucho desce e encaixa no slot
+          com um clique, e o console só liga quando você aperta o Power —
+          igual ao hardware.
+        </p>
+        <ul class="cartoes">
+          <li class="cartao reveal">
+            <span class="cartao-icone" aria-hidden="true">▯</span>
+            <h3>Cartucho de verdade</h3>
+            <p>Escolher um jogo insere o cartucho de verdade, com animação,
+            clique de encaixe e de destravamento. Ejetar só com o console
+            desligado, como no original.</p>
+          </li>
+          <li class="cartao reveal">
+            <span class="cartao-icone" aria-hidden="true">▣</span>
+            <h3>Tubo CRT de verdade</h3>
+            <p>Filtro NTSC RF, tela cheia por padrão na resolução nativa do
+            monitor (16:10/16:9 — Steam Deck, laptop, TV) e botão de fechar
+            no canto, sem barra de título.</p>
+          </li>
+          <li class="cartao reveal">
+            <span class="cartao-icone" aria-hidden="true">☰</span>
+            <h3>Estante viva</h3>
+            <p>Busca, “jogados recentemente” e histórico, com tempo de jogo
+            por jogo — contando só com o console ligado — e por sessão.</p>
+          </li>
+          <li class="cartao reveal">
+            <span class="cartao-icone" aria-hidden="true">✎</span>
+            <h3>Anotações num livro</h3>
+            <p>Pausou, abriu o livro: cheats curados em checklist, nota de
+            texto livre e 15 slots de captura de tela fixáveis e nomeáveis.</p>
+          </li>
+          <li class="cartao reveal">
+            <span class="cartao-icone" aria-hidden="true">⌖</span>
+            <h3>Só mouse e gamepad</h3>
+            <p>Tudo funciona sem teclado. A única exceção é escrever uma
+            anotação, que precisa de teclado por natureza.</p>
+          </li>
+          <li class="cartao reveal">
+            <span class="cartao-icone" aria-hidden="true">◱</span>
+            <h3>Portátil, zero nuvem</h3>
+            <p>Sem banco de dados e sem raspagem online: tudo em pastas ao
+            lado do executável. O core baixa sozinho pelo menu de
+            configurações.</p>
+          </li>
+        </ul>
+      </div>
+    </section>
+
+    <!-- ===== Linha de consoles ===== -->
+    <section class="secao secao-alt" id="consoles">
+      <div class="container">
+        <h2>A linha</h2>
+        <p class="secao-lema">
+          Retro Xperience é o guarda-chuva. Cada console ganha seu app, e
+          todos dividem a mesma ideia — quando PS1 e N64 existirem,
+          dividem também a mesma estante, o mesmo painel e o mesmo tubo.
+        </p>
+        <ul class="consoles">
+          <li class="console console-snes reveal">
+            <p class="console-status ok"><span class="led" aria-hidden="true"></span>1.1.1</p>
+            <h3>SNES&nbsp;Xperience</h3>
+            <p class="console-desc">
+              O primeiro da família. Core snes9x, filtro NTSC do blargg,
+              cartucho que desce no slot com clique, chaves Power/Reset
+              roxas e RetroAchievements de ponta a ponta.
+            </p>
+            <p class="console-links">
+              <a href="https://github.com/ticianocorral/snes-xperience/releases">Releases</a>
+              <a href="https://github.com/ticianocorral/snes-xperience">Código</a>
+            </p>
+          </li>
+          <li class="console console-ps1 reveal">
+            <p class="console-status breve">em desenvolvimento</p>
+            <h3>PSX&nbsp;Xperience</h3>
+            <p class="console-desc">
+              O segundo da família, em forja: disco na bandeja com etiqueta
+              impressa, memory cards compartilhados nos slots e o boot real
+              da BIOS no Power. A mesma interface do irmão — muda o console
+              dentro da cena.
+            </p>
+            <p class="console-links">
+              <a href="https://github.com/ticianocorral/psx-xperience">Código e plano</a>
+            </p>
+          </li>
+          <li class="console console-n64 reveal">
+            <p class="console-status breve">em breve</p>
+            <h3>N64&nbsp;Xperience</h3>
+            <p class="console-desc">
+              O cartucho volta — agora com encaixe firme e alavanca. Mesma
+              estante, mesmo tubo, outra geração. Ainda no papel.
+            </p>
+          </li>
+        </ul>
+      </div>
+    </section>
+
+    <!-- ===== A interface (compartilhada pela família) ===== -->
+    <section class="secao" id="interface">
+      <div class="container">
+        <h2>A interface, em imagens</h2>
+        <p class="secao-lema">
+          Os screens abaixo mostram o <strong>SNES Xperience</strong>, o
+          primeiro da família — porque a interface é a mesma para todos:
+          mesma TV, mesma estante, mesmo painel. No PSX Xperience muda o
+          console dentro da cena: a bandeja de CD entra no lugar do slot de
+          cartucho, e os memory cards ganham os slots da estação.
+        </p>
+        <div class="galeria">
+          <figure class="crt reveal">
+            <img src="assets/inicial.png" width="1280" height="800" loading="lazy"
+                 alt="Tela inicial: tubo em estática no Canal 3 e painel com o slot vazio, botão Estante de games e controles apagados">
+            <figcaption>O console acorda em Canal 3: o slot vazio espera o cartucho.</figcaption>
+          </figure>
+          <figure class="crt reveal">
+            <img src="assets/estante.png" width="1280" height="800" loading="lazy"
+                 alt="A estante de jogos: o tile do Platformer Example com a capa, e o painel do jogo com logo, abas de informações, capa traseira, manual e cartucho">
+            <figcaption>A estante: painel com logo, abas (informações, capa traseira, manual, cartucho) e o manual em PDF dentro da TV.</figcaption>
+          </figure>
+          <figure class="crt reveal">
+            <img src="assets/cartucho.gif" width="1280" height="800" loading="lazy"
+                 alt="Cartucho entrando e saindo do slot do console, com animação de encaixe">
+            <figcaption>O cartucho desce, assenta e destrava com clique de verdade.</figcaption>
+          </figure>
+        </div>
+        <p class="nota-fake">
+          ps: os screens de jogo mostram o
+          <strong>Platformer Example</strong>, homebrew open source de
+          <a href="https://github.com/NovaSquirrel/snes-platformer-example">NovaSquirrel</a>
+          (código MIT; arte de Kenney, surt e GrafxKid via OpenGameArt, CC0/CC-BY) —
+          ele também vem como <a
+          href="https://raw.githubusercontent.com/ticianocorral/snes-xperience/main/exemplo-platformer-example.zip">pacote
+          de exemplo</a> pronto para instalar pelo modo dev. Nenhum jogo
+          comercial aparece no site; só as fotos de conquistas mantêm o
+          homebrew fictício Mundo do Tomate, desenhado pixel a pixel para
+          estas fotos.
+        </p>
+        <ul class="lista-snes">
+          <li>Ano e editora de fábrica sem DAT nenhum — tabela embutida
+            derivada do <a href="https://www.tosecdev.org/">TOSEC</a>; um DAT
+            local do <a href="https://datomatic.no-intro.org/">No-Intro</a>
+            tem prioridade quando concorda, e um botão renomeia as ROMs para
+            o padrão canônico.</li>
+          <li>Manual em PDF dentro da TV: cada jogo pode ter o seu, com
+            páginas viradas no próprio painel da estante.</li>
+          <li>Pacotes prontos — DMG (macOS), zip (Windows) e AppImage
+            (Linux), todos com SDL3 embutido — saem automático a cada
+            release.</li>
+          <li>Escrito em Rust sobre SDL3, em quatro camadas de crates:
+            apresentação, domínio, emulação e plataforma.</li>
+        </ul>
+      </div>
+    </section>
+
+    <!-- ===== Conquistas ===== -->
+    <section class="secao secao-alt" id="conquistas">
+      <div class="container conquistas-grid">
+        <div class="conquistas-texto">
+          <h2>Conquistas na TV</h2>
+          <p>
+            Integração completa com o
+            <a href="https://retroachievements.org">RetroAchievements</a>
+            (desde a 1.0 beta): login nas configurações, identificação do
+            jogo pelo hash da ROM e avaliação das condições em tempo real
+            contra a RAM do core — o “CONQUISTA DESBLOQUEADA” aparece no
+            queixo da TV com badge e pontos.
+          </p>
+          <p>
+            Enquanto nada desbloqueia, um badge fixo <strong>RA ATIVADO</strong>
+            fica no queixo, indicando o modo hardcore ou softcore. No painel
+            da estante, cada jogo mostra “X de Y (Z%)” sincronizado com o
+            servidor, a lista marca as conquistas que você já tem (ganhou
+            onde for) e um botão abre tudo dentro da TV.
+          </p>
+          <p>
+            E quem zerou o jogo merece medalha: dourada para 100%, prateada
+            para quem chegou ao fim — cheias no hardcore, vazadas no
+            softcore — ao lado do número de conquistas.
+          </p>
+          <p>
+            <a href="https://github.com/ticianocorral/snes-xperience/blob/main/docs/plano-retroachievements.md">Ler o plano completo →</a>
+          </p>
+        </div>
+        <div class="conquistas-fotos">
+          <figure class="crt reveal">
+            <img src="assets/ra-notificacao.png" width="1280" height="800" loading="lazy"
+                 alt="Notificação de conquista desbloqueada com badge, nome e pontos no queixo da TV, com o Mundo do Tomate no tubo">
+            <figcaption>“CONQUISTA DESBLOQUEADA” no queixo da TV — badge e jogo sintéticos.</figcaption>
+          </figure>
+          <figure class="crt reveal">
+            <img src="assets/ra-badge.png" width="1280" height="800" loading="lazy"
+                 alt="Badge fixo RA ATIVADO no queixo da TV, indicando o modo hardcore, com o Mundo do Tomate no tubo">
+            <figcaption>Sem desbloqueio na fila, o badge RA ATIVADO fica no lugar.</figcaption>
+          </figure>
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+  <footer class="rodape">
+    <div class="container rodape-grid">
+      <p>
+        <strong>Retro Xperience</strong> — projeto pessoal, sem fins
+        comerciais. Nenhum core ou ROM é distribuído com os projetos.
+      </p>
+      <ul class="rodape-links">
+        <li><a href="https://github.com/ticianocorral/psx-xperience">GitHub</a></li>
+        <li><a href="https://github.com/ticianocorral/psx-xperience/releases">Releases</a></li>
+        <li><a href="https://github.com/ticianocorral/psx-xperience/blob/main/THIRD-PARTY-NOTICES.md">Licenças de terceiros</a></li>
+      </ul>
+      <p class="rodape-ano">© <span id="ano">2026</span> Ticiano Corral</p>
+    </div>
+  </footer>
+
+  <script src="js/main.js"></script>
+</body>
+</html>

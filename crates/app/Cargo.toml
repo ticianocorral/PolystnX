@@ -1,0 +1,41 @@
+[package]
+name = "xperience-app"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+publish = false
+
+[[bin]]
+name = "psx-xperience"
+path = "src/bin/psx_xperience.rs"
+
+[[bin]]
+name = "emu-run"
+path = "src/bin/emu_run.rs"
+
+[[bin]]
+name = "selector"
+path = "src/bin/selector.rs"
+
+[dependencies]
+xperience-emulation = { path = "../emulation" }
+xperience-platform = { path = "../platform" }
+xperience-domain = { path = "../domain" }
+xperience-ntsc = { path = "../ntsc" }
+anyhow.workspace = true
+log.workspace = true
+env_logger.workspace = true
+md-5.workspace = true
+xperience-ra.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+ureq.workspace = true
+toml = "0.8"
+image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
+zip = { version = "8", default-features = false, features = ["deflate"] }
+lopdf = "0.36"
+
+[target.'cfg(windows)'.build-dependencies]
+winres = "0.1"

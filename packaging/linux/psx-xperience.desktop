@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=PSX Xperience
+Comment=Personal, non-commercial PSX emulator with a CRT-TV frame
+Exec=psx-xperience
+Icon=psx-xperience
+Categories=Game;Emulator;
+Terminal=false

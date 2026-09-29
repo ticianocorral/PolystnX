@@ -1,0 +1,17 @@
+[package]
+name = "xperience-ra"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[build-dependencies]
+cc = "1"
+
+[dependencies]
+log.workspace = true
+[dependencies.chd]
+version = "0.3"
+
+[dev-dependencies]
+md-5.workspace = true

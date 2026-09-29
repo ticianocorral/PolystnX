@@ -1,0 +1,19 @@
+[package]
+name = "xperience-domain"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+description = "ROM identification (CRC32/MD5/SHA1), portable catalogue and No-Intro naming."
+
+[dependencies]
+thiserror.workspace = true
+log.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+crc32fast.workspace = true
+md-5.workspace = true
+sha1.workspace = true
+roxmltree = "0.21"
+xperience-ra.workspace = true

@@ -1,0 +1,13 @@
+[package]
+name = "xperience-ntsc"
+version.workspace = true
+edition.workspace = true
+license = "LGPL-2.1-or-later"
+rust-version.workspace = true
+repository.workspace = true
+description = "Vendored blargg snes_ntsc 0.2.2 with a safe wrapper and an RF preset."
+
+[dependencies]
+
+[build-dependencies]
+cc = "1"

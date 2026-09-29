@@ -1,0 +1,11 @@
+# Tabela serial → título → região do PSX Xperience.
+#
+# VAZIA de propósito até alguém gerar dados de verdade:
+#
+#   python3 scripts/gen_psx_data.py caminho/gamesettings.ini > este arquivo
+#
+# (o gamesettings.ini vem do repositório do DuckStation — banco de seriais
+# aberto; o gerador também aceita um CSV simples `serial;título;região`.)
+#
+# Formato de cada linha (tab separado):
+#   SERIAL	Título	Região
