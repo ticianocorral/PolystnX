@@ -42,6 +42,24 @@ inteiro compartilha uma versão (`[workspace.package]` em `Cargo.toml`).
   só-desligado com OSD.
 - RA identifica pelo hash de disco (Fase 0) sem mudança de fluxo.
 
+### Correções do estado 0.1.1 (pós-fases)
+
+- **A causa raiz do "quadrado verde girando"**: o default de --system-dir
+  apontava saves/ (herança de SNES) — a BIOS nunca era encontrada e o boot
+  travava na tela escura. Corrigido: dirs::bios_dir() no app e no emu-run.
+  Prova: emu-run com --system-dir saves/ reproduziu byte a byte o frame do
+  app; com bios/, o jogo. (O renderizador, a Metal e o filtro NTSC foram
+  exonerados no caminho — Renderer=Software setado no runner e o filtro
+  composto do blargg removido do PSX.)
+- **O jogo roda no mesmo processo e janela do SNES Xperience** — o caminho
+  do irmão, sem spawn nem piscada de processo.
+- **TV de entrada composta**: sem sinal = tela azul escura com o selo
+  **AV 1** (nada de RF/chuvisco); a estante dissolve para o AV mantendo o
+  painel e o chrome contínuos (só o conteúdo do tubo troca); ligar/desligar
+  colapsam para o preto, como uma TV trocando de entrada.
+- Frames 565→XRGB8888 no CPU (nativo da Metal); matcher de cheats casa
+  nomes-colados (tekken3 ↔ Tekken 3).
+
 ### Fase 5 — empacotar
 
 - Release build verde; THIRD-PARTY-NOTICES reescrito para o fork
