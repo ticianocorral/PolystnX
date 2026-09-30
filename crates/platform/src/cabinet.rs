@@ -3984,9 +3984,16 @@ fn draw_slot_furniture(
     // onde o disco se assenta e gira — o disco entra POR CIMA dele.
     if let Some(reader) = images.get(&CD_READER_IMG) {
         let side_reader = (side as f32 * 1.06).round() as i32;
+        let rcx = disc.x() + disc.width() as i32 / 2;
+        let rcy = disc.y() + disc.height() as i32 / 2;
+        // Anel cinza (a cor dos botões) atrás da foto: disfarça o recorte
+        // circular e assenta o leitor na carcaça, como um aro real.
+        let ring_r = (side_reader as f32 / 2.0 + side as f32 * 0.035) as i32;
+        fill_circle(canvas, PSX_SHELL_EDGE, rcx, rcy, ring_r);
+        fill_circle(canvas, PSX_SHELL, rcx, rcy, ring_r - 2);
         let rr = Rect::new(
-            disc.x() + disc.width() as i32 / 2 - side_reader / 2,
-            disc.y() + disc.height() as i32 / 2 - side_reader / 2,
+            rcx - side_reader / 2,
+            rcy - side_reader / 2,
             side_reader as u32,
             side_reader as u32,
         );
