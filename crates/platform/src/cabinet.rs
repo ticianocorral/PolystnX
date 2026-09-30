@@ -89,6 +89,9 @@ const PSX_HUB: (u8, u8, u8) = (146, 142, 132);
 const PSX_HUB_RING: (u8, u8, u8) = (120, 116, 107);
 const PSX_LED_ON: (u8, u8, u8) = (110, 224, 130);
 const PSX_LED_OFF: (u8, u8, u8) = (56, 58, 54);
+/// O rótulo gravado dentro do botão Power (cinza claro, como a gravação
+/// da carcaça na foto de referência).
+const PSX_BTN_TEXT: (u8, u8, u8) = (168, 166, 158);
 
 /// The set's own nameplate: a small wordmark printed into the chin, left of
 /// the cartridge — a touch lighter than the cabinet plastic, like an embossed
@@ -3748,7 +3751,7 @@ fn fill_circle(canvas: &mut WindowCanvas, color: (u8, u8, u8), cx: i32, cy: i32,
 /// PS1: um arco na borda superior, não um anel inteiro). `half_deg` é o
 /// semi-ângulo do arco a partir do topo; `r_out` é o raio externo e
 /// `r_in` o interno (a espessura do arco é `r_out - r_in`).
-fn fill_arc_top(
+fn fill_arc(
     canvas: &mut WindowCanvas,
     color: (u8, u8, u8),
     cx: i32,
@@ -3756,6 +3759,7 @@ fn fill_arc_top(
     r_out: i32,
     r_in: i32,
     half_deg: f32,
+    bottom: bool,
 ) {
     canvas.set_draw_color(Color::RGB(color.0, color.1, color.2));
     let max_x = (half_deg.to_radians().sin() * r_out as f32).ceil() as i32;
@@ -3770,13 +3774,14 @@ fn fill_arc_top(
         if ho <= hi {
             continue;
         }
-        // duas colunas: de -ho..-hi e de hi..ho, apenas na metade de cima
-        let top = cy - ho;
-        let h = (ho - hi).max(1) as u32;
-        let _ = canvas.fill_rect(Rect::new(cx + hi, top, h, 1));
-        if dx != 0 {
-            let _ = canvas.fill_rect(Rect::new(cx - ho, top, h, 1));
-        }
+        // uma coluna de 1 px por dx: a faixa entre os dois raios, no lado
+        // pedido (baixo: de cy+hi a cy+ho; cima: de cy-ho a cy-hi)
+        let (y0, hgt) = if bottom {
+            (cy + hi, (ho - hi).max(1))
+        } else {
+            (cy - ho, (ho - hi).max(1))
+        };
+        let _ = canvas.fill_rect(Rect::new(cx + dx, y0, 1, hgt as u32));
     }
 }
 
@@ -3850,15 +3855,28 @@ fn draw_slot_furniture(
     let power_cy = btn_cy + reset_r + 10;
     fill_circle(canvas, PSX_SHELL_EDGE, col_l, power_cy, btn_r);
     fill_circle(canvas, PSX_SHELL, col_l, power_cy, btn_r - 1);
-    // O LED verde do PS1 original: um arco na borda de CIMA do botão.
-    fill_arc_top(
+    // O LED verde do PS1 original (foto de referência): uma fenda na borda
+    // de BAIXO do botão, e o rótulo "POWER" gravado dentro do botão.
+    fill_arc(
         canvas,
         if led_on { PSX_LED_ON } else { PSX_LED_OFF },
         col_l,
         power_cy,
         btn_r - 4,
         btn_r - 9,
-        65.0,
+        38.0,
+        true,
+    );
+    let label = "POWER";
+    let lw = label.chars().count() as i32 * GLYPH_W as i32;
+    draw_text_absolute(
+        canvas,
+        font,
+        col_l - lw / 2,
+        power_cy - GLYPH_H as i32 / 2 - 2,
+        TextStyle::new(1, PSX_BTN_TEXT),
+        label,
+        usize::MAX,
     );
     let power_hit = Rect::new(
         col_l - btn_r,
