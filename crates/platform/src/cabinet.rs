@@ -3745,30 +3745,38 @@ fn fill_circle(canvas: &mut WindowCanvas, color: (u8, u8, u8), cx: i32, cy: i32,
         let _ = canvas.fill_rect(Rect::new(cx - half, cy + dy, (half * 2).max(1) as u32, 1));
     }
 }
-
-/// Anel (borda de botão) — a diferença entre dois círculos.
-fn fill_ring(
+/// PS1: um arco na borda superior, não um anel inteiro). `half_deg` é o
+/// semi-ângulo do arco a partir do topo; `r_out` é o raio externo e
+/// `r_in` o interno (a espessura do arco é `r_out - r_in`).
+fn fill_arc_top(
     canvas: &mut WindowCanvas,
     color: (u8, u8, u8),
     cx: i32,
     cy: i32,
     r_out: i32,
     r_in: i32,
+    half_deg: f32,
 ) {
     canvas.set_draw_color(Color::RGB(color.0, color.1, color.2));
-    for dy in -r_out..=r_out {
-        let ho = ((r_out * r_out - dy * dy) as f32).sqrt().round() as i32;
-        let hi = if dy.abs() <= r_in {
-            ((r_in * r_in - dy * dy) as f32).sqrt().round() as i32
+    let max_x = (half_deg.to_radians().sin() * r_out as f32).ceil() as i32;
+    for dx in -max_x..=max_x {
+        let xx = dx.abs() as f32;
+        let ho = ((r_out as f32 * r_out as f32 - xx * xx).sqrt()).round() as i32;
+        let hi = if xx < r_in as f32 {
+            ((r_in as f32 * r_in as f32 - xx * xx).sqrt()).round() as i32
         } else {
             0
         };
         if ho <= hi {
             continue;
         }
-        let y = cy + dy;
-        let _ = canvas.fill_rect(Rect::new(cx - ho, y, (ho - hi).max(1) as u32, 1));
-        let _ = canvas.fill_rect(Rect::new(cx + hi, y, (ho - hi).max(1) as u32, 1));
+        // duas colunas: de -ho..-hi e de hi..ho, apenas na metade de cima
+        let top = cy - ho;
+        let h = (ho - hi).max(1) as u32;
+        let _ = canvas.fill_rect(Rect::new(cx + hi, top, h, 1));
+        if dx != 0 {
+            let _ = canvas.fill_rect(Rect::new(cx - ho, top, h, 1));
+        }
     }
 }
 
@@ -3810,8 +3818,11 @@ fn draw_slot_furniture(
     draw_button(canvas, font, mc1, "MC slot 1", true);
     draw_button(canvas, font, mc2, "MC slot 2", true);
 
-    // Os três botões redondos, centrados na altura útil acima dos MCs.
-    let face_top = block.y() + 6;
+    // Os três botões redondos, centrados na altura útil acima dos MCs. As
+    // primeiras linhas do bloco são faixa exclusiva do wordmark — o disco
+    // girando não pode passar por cima dele.
+    let wordmark_h = 30;
+    let face_top = block.y() + 6 + wordmark_h;
     let face_bottom = mc_y - 10;
     let face_h = (face_bottom - face_top).max(1);
     let btn_r = (face_h as f32 * 0.26).round() as i32;
@@ -3839,34 +3850,16 @@ fn draw_slot_furniture(
     let power_cy = btn_cy + reset_r + 10;
     fill_circle(canvas, PSX_SHELL_EDGE, col_l, power_cy, btn_r);
     fill_circle(canvas, PSX_SHELL, col_l, power_cy, btn_r - 1);
-    fill_ring(
+    // O LED verde do PS1 original: um arco na borda de CIMA do botão.
+    fill_arc_top(
         canvas,
-        PSX_LED_ON,
+        if led_on { PSX_LED_ON } else { PSX_LED_OFF },
         col_l,
-        power_cy + 1,
-        btn_r - 5,
-        btn_r - 8,
+        power_cy,
+        btn_r - 4,
+        btn_r - 9,
+        65.0,
     );
-    fill(
-        canvas,
-        PSX_LED_ON,
-        Rect::new(col_l - 1, power_cy - btn_r + 3, 2, 6),
-    );
-    if !led_on {
-        fill_ring(
-            canvas,
-            PSX_LED_OFF,
-            col_l,
-            power_cy + 1,
-            btn_r - 5,
-            btn_r - 8,
-        );
-        fill(
-            canvas,
-            PSX_LED_OFF,
-            Rect::new(col_l - 1, power_cy - btn_r + 3, 2, 6),
-        );
-    }
     let power_hit = Rect::new(
         col_l - btn_r,
         power_cy - btn_r,
@@ -3910,7 +3903,7 @@ fn draw_slot_furniture(
         let src = Rect::new(tcx as i32, tcy as i32, tcw.min(tag.w), tch.min(tag.h));
         let dst = Rect::new(
             block.x() + ((block.width() as i32 - tw as i32) / 2).max(0),
-            face_top + 4,
+            block.y() + 4,
             tw,
             th,
         );
@@ -3919,8 +3912,8 @@ fn draw_slot_furniture(
 
     // O espaço central livre, entre as duas colunas de botões: é onde o
     // disco se assenta e gira.
-    let disc_l = col_l + btn_r + 8;
-    let disc_r = col_r - btn_r - 8;
+    let disc_l = col_l + btn_r + 3;
+    let disc_r = col_r - btn_r - 3;
     let disc_t = face_top;
     let disc_b = face_bottom;
     let disc_w = (disc_r - disc_l).max(1);
@@ -3975,7 +3968,9 @@ fn draw_panel_slot(
         };
         let p = if ejecting { 1.0 - e } else { e };
         // Assentado: centrado no espaço livre entre os botões.
-        let side = (disc.width().min(disc.height()) as f32) * 0.94;
+        // O disco é redentro dentro do quad da textura: girado, ele
+        // varre o MESMO círculo — cabe inteiro no vão entre os botões.
+        let side = (disc.width().min(disc.height()) as f32) * 0.99;
         let hub_cx = disc.x() as f32 + disc.width() as f32 / 2.0;
         let hub_cy = disc.y() as f32 + disc.height() as f32 / 2.0;
         let hw = side / 2.0;

@@ -1423,7 +1423,26 @@ pub fn run_game(
     );
     let decode_panel_art = |path: &Option<PathBuf>, kind: &str| {
         path.as_ref().and_then(|p| match decode_art(p, 640) {
-            Ok(img) => Some(img),
+            Ok(mut img) => {
+                // A arte do disco (a "capa" do PSX) gira na face do console:
+                // mascarada num círculo inscrito, os cantos do png ficam
+                // transparentes e o giro nunca passa do próprio disco.
+                if kind == "disco" {
+                    let (w, h) = (img.0 as i32, img.1 as i32);
+                    let (cx, cy) = (w as f32 / 2.0, h as f32 / 2.0);
+                    let r = w.min(h) as f32 / 2.0;
+                    for y in 0..h {
+                        for x in 0..w {
+                            let dx = x as f32 + 0.5 - cx;
+                            let dy = y as f32 + 0.5 - cy;
+                            if dx * dx + dy * dy > r * r {
+                                img.2[(y * w + x) as usize * 4 + 3] = 0;
+                            }
+                        }
+                    }
+                }
+                Some(img)
+            }
             Err(e) => {
                 log::warn!("{kind} {}: {e}", p.display());
                 None
@@ -1435,7 +1454,7 @@ pub fn run_game(
     // game launch so a direct `emu-run` shows it too; the baked-in image is
     // the fallback (see `console_art`).
     crate::console_art::load_slot_tag(cab);
-    let cartridge_img = decode_panel_art(&spec.cartridge, "cartridge");
+    let cartridge_img = decode_panel_art(&spec.cartridge, "disco");
     let has_cartridge_art = cartridge_img.is_some();
     cab.set_panel(
         logo_img.as_ref().map(|(w, h, d)| (*w, *h, d.as_slice())),
