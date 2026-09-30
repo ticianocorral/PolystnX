@@ -2203,6 +2203,68 @@ impl Cabinet {
         true
     }
 
+    /// Faixas de erro de leitura sobre a imagem corrente (o "disco
+    /// arranhado"): bandas horizontais deslocadas/tingidas, linhas de ruído
+    /// e cintilações — puramente visual, sobre a área do tubo. `rng` é o
+    /// gerador do chamador (xorshift), para o padrão mudar a cada tick.
+    pub fn draw_glitch_overlay(&mut self, rng: &mut u32) {
+        let prev = self.canvas.blend_mode();
+        self.canvas.set_blend_mode(sdl3::render::BlendMode::Blend);
+        let (x, y, w, h) = (
+            self.screen.x(),
+            self.screen.y(),
+            self.screen.width() as i32,
+            self.screen.height() as i32,
+        );
+        let next = |rng: &mut u32| {
+            *rng ^= *rng << 13;
+            *rng ^= *rng >> 17;
+            *rng ^= *rng << 5;
+            *rng
+        };
+        // 2-4 bandas tintadas (dados corrompidos)
+        let bands = 2 + (next(rng) % 3) as i32;
+        for _ in 0..bands {
+            let bh = 8 + (next(rng) % 44) as i32;
+            let by = y + (next(rng) % (h - bh).max(1) as u32) as i32;
+            let tint = [
+                (90, 220, 140, 46),
+                (220, 90, 160, 42),
+                (90, 140, 240, 44),
+                (240, 220, 90, 36),
+            ][(next(rng) % 4) as usize];
+            self.canvas
+                .set_draw_color(sdl3::pixels::Color::RGBA(tint.0, tint.1, tint.2, tint.3));
+            let inset = (next(rng) % 30) as i32;
+            let _ = self.canvas.fill_rect(Rect::new(
+                x + inset,
+                by,
+                (w - inset * 2).max(8) as u32,
+                bh as u32,
+            ));
+        }
+        // linhas finas de ruído
+        for _ in 0..5 {
+            let ly = y + (next(rng) % h.max(1) as u32) as i32;
+            self.canvas.set_draw_color(sdl3::pixels::Color::RGBA(
+                255,
+                255,
+                255,
+                (18 + next(rng) % 40) as u8,
+            ));
+            let _ = self
+                .canvas
+                .fill_rect(Rect::new(x, ly, w as u32, 1 + next(rng) % 2));
+        }
+        // cintilação ocasional de quadro inteiro
+        if next(rng) % 5 == 0 {
+            self.canvas
+                .set_draw_color(sdl3::pixels::Color::RGBA(255, 255, 255, 12));
+            let _ = self.canvas.fill_rect(Rect::new(x, y, w as u32, h as u32));
+        }
+        self.canvas.set_blend_mode(prev);
+    }
+
     /// Um tick da máquina de som do leitor de CD: `on` = o core está
     /// hesitando (boot, load, FMV) e o drive "lê". O loop entra com fade de
     /// ~150 ms e sai com fade igual — nenhum corte seco no meio do som.

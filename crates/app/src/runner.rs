@@ -1628,6 +1628,12 @@ pub fn run_game(
     // presente (removível só com a tampa aberta).
     let mut lid_open = false;
     let mut disc_in = true;
+    // "Disco arranhado": remover o disco com o console ligado simula erro
+    // de leitura — a imagem rasga por ~2,8 s (overlay) e congela. Reset
+    // boota a BIOS; inserir outro disco destrava.
+    let mut disc_glitch: Option<Instant> = None;
+    let mut bios_pending = false;
+    let mut glitch_rng: u32 = 0xC0FF_EEDD;
     let commands = command_rows(
         &flash,
         !cheat_defs.is_empty(),
@@ -2249,7 +2255,10 @@ pub fn run_game(
                         disc_in = false;
                         cab.set_drive(lid_open, disc_in);
                         crate::sfx::play(cab, crate::sfx::Sfx::Eject);
-                        cab.push_osd(&["DISCO REMOVIDO"], None, Duration::from_secs(2));
+                        // Erro de leitura (plano revision: "e se simular erro
+                        // de leitura como se o disco estivesse arranhado?"):
+                        // o core para, a imagem rasga e congela.
+                        disc_glitch = Some(Instant::now());
                     }
                 }
                 UiEvent::InsertDisc => {
@@ -2370,6 +2379,8 @@ pub fn run_game(
                             let _ = core_tx.send(CoreCmd::Reset);
                         } else {
                             // Sem disco + Reset: o console boota a BIOS.
+                            bios_pending = true;
+                            disc_glitch = None;
                             let _ = core_tx.send(CoreCmd::BootBios);
                             cab.push_osd(
                                 &["SEM DISCO — BOOT PELA BIOS"],
@@ -2804,6 +2815,8 @@ pub fn run_game(
                         });
                         if d_rx.recv().unwrap_or(false) {
                             disc_in = true;
+                            bios_pending = false;
+                            disc_glitch = None;
                             current_disc = path.clone();
                             cab.set_drive(lid_open, disc_in);
                             crate::sfx::play(cab, crate::sfx::Sfx::Insert);
@@ -2920,7 +2933,7 @@ pub fn run_game(
 
         if !paused && modal == Modal::None {
             // Mantém o worker alimentado: um Run em voo por vez.
-            if !in_flight {
+            if !in_flight && (disc_in || bios_pending) {
                 let mut snap = PadSnapshot::default();
                 for port in 0..MAX_PORTS {
                     for (rb, pb) in PAD {
@@ -3099,6 +3112,14 @@ pub fn run_game(
             if let Some((lf, aspect)) = &last_render {
                 cab.set_session_time(live_session_time(powered_elapsed, powered_since));
                 cab.present_frame(&lf.fref(), *aspect);
+            }
+            // O rasgo do "disco arranhado" durante a janela de erro.
+            if let Some(t0) = disc_glitch {
+                if t0.elapsed() < Duration::from_millis(2800) {
+                    cab.draw_glitch_overlay(&mut glitch_rng);
+                } else {
+                    disc_glitch = None; // pendurou: quadro congelado
+                }
             }
             // O drive "lê" quando o core hesita: mais de 250 ms desde o
             // último quadro real (ou desde o ligar — o boot lê o disco).
