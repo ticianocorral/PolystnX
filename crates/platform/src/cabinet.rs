@@ -271,6 +271,8 @@ pub struct Cabinet {
     /// XORSHIFT state for the hiss samples — same generator the power
     /// bursts use, so the texture of the noise matches.
     hiss_rng: u32,
+    /// O cache da face do console (tampa/botões por estado).
+    face_cache: Option<FaceCache>,
     /// The idle screen's core-download prompt (plan revision): `Some(label)`
     /// draws a warning plus this button in the idle panel — the label is the
     /// app's own live status ("Baixar núcleo" / progress text). `None`
@@ -915,6 +917,7 @@ impl Cabinet {
             noise: Vec::new(),
             noise_stamp: None,
             rng: 0x9E37_79B9,
+            face_cache: None,
             spin: 0.0,
             font,
             images: HashMap::new(),
@@ -1760,13 +1763,14 @@ impl Cabinet {
             &mut self.canvas,
             &mut self.font,
             &self.images,
+            &mut self.face_cache,
             self.panel.as_ref(),
             panel,
             self.session,
             self.idle_core_prompt.as_deref(),
             self.dev_mode,
             self.core_status.as_deref(),
-        self.spin,
+            self.spin,
         );
         self.canvas.set_viewport(None);
         // DEBUG-CI: dump do composto (o que a Metal desenhou de fato).
@@ -1851,13 +1855,14 @@ impl Cabinet {
                 c,
                 font,
                 images,
+                &mut None,
                 panel_info,
                 panel,
                 session,
                 idle_core_prompt,
                 dev_mode,
                 core_status,
-            self.spin,
+                self.spin,
             );
             c.set_viewport(None);
             saved = c
@@ -1897,9 +1902,7 @@ impl Cabinet {
                 );
             }
             if let Ok(base) = std::env::var("PSX_XPERIENCE_DEBUG_RAW") {
-                if matches!(n, 30 | 300 | 1500)
-                    && frame.format == crate::PixelFormat::Xrgb8888
-                {
+                if matches!(n, 30 | 300 | 1500) && frame.format == crate::PixelFormat::Xrgb8888 {
                     let mut bmp = vec![0u8; 54 + frame.pixels.len()];
                     bmp[0..2].copy_from_slice(b"BM");
                     let size = (54 + frame.pixels.len()) as u32;
@@ -1911,11 +1914,7 @@ impl Cabinet {
                     bmp[26..28].copy_from_slice(&1u16.to_le_bytes());
                     bmp[28..30].copy_from_slice(&32u16.to_le_bytes());
                     bmp[54..].copy_from_slice(frame.pixels);
-                    let name = format!(
-                        "{}.raw{}.bmp",
-                        base.trim_end_matches(".bmp"),
-                        n
-                    );
+                    let name = format!("{}.raw{}.bmp", base.trim_end_matches(".bmp"), n);
                     let _ = std::fs::write(name, bmp);
                 }
             }
@@ -2262,13 +2261,14 @@ impl Cabinet {
             &mut self.canvas,
             &mut self.font,
             &self.images,
+            &mut self.face_cache,
             self.panel.as_ref(),
             panel,
             self.session,
             self.idle_core_prompt.as_deref(),
             self.dev_mode,
             self.core_status.as_deref(),
-        self.spin,
+            self.spin,
         );
         self.close_button = draw_close_button(&mut self.canvas, &mut self.font);
         self.minimize_button = draw_minimize_button(&mut self.canvas, &mut self.font);
@@ -2340,13 +2340,14 @@ impl Cabinet {
             &mut self.canvas,
             &mut self.font,
             &self.images,
+            &mut self.face_cache,
             self.panel.as_ref(),
             panel,
             self.session,
             self.idle_core_prompt.as_deref(),
             self.dev_mode,
             self.core_status.as_deref(),
-        self.spin,
+            self.spin,
         );
         self.close_button = draw_close_button(&mut self.canvas, &mut self.font);
         self.minimize_button = draw_minimize_button(&mut self.canvas, &mut self.font);
@@ -2408,13 +2409,14 @@ impl Cabinet {
                 c,
                 font,
                 images,
+                &mut None,
                 panel_info,
                 panel,
                 session,
                 idle_core_prompt,
                 dev_mode,
                 core_status,
-            self.spin,
+                self.spin,
             );
             close_button = draw_close_button(c, font);
             minimize_button = draw_minimize_button(c, font);
@@ -2786,13 +2788,14 @@ impl Cabinet {
             &mut self.canvas,
             &mut self.font,
             &self.images,
+            &mut self.face_cache,
             self.panel.as_ref(),
             panel,
             self.session,
             self.idle_core_prompt.as_deref(),
             self.dev_mode,
             self.core_status.as_deref(),
-        self.spin,
+            self.spin,
         );
         self.canvas.set_viewport(None);
         self.present_and_time();
@@ -2909,13 +2912,14 @@ impl Cabinet {
                 c,
                 font,
                 images,
+                &mut None,
                 panel_info,
                 panel,
                 session,
                 idle_core_prompt,
                 dev_mode,
                 core_status,
-            self.spin,
+                self.spin,
             );
             close_button = draw_close_button(c, font);
             minimize_button = draw_minimize_button(c, font);
@@ -3784,8 +3788,9 @@ const PSX_SEAT_FRAC: f32 = 0.80; // raio do disco / raio da tampa
 const PSX_BTN_R: i32 = 17; // raio dos botões redondos (Power/Eject)
 
 /// Um retângulo de clique devolvido pela face para o painel.
-#[derive(Default, Clone, Copy)]
+#[derive(Clone, Copy)]
 struct FaceHits {
+    seat: Rect,
     power: Option<Rect>,
     eject: Option<Rect>,
     reset: Option<Rect>,
@@ -3793,13 +3798,7 @@ struct FaceHits {
 }
 
 /// Círculo preenchido rasterizado linha a linha (o canvas só tem retângulos).
-fn fill_circle(
-    canvas: &mut WindowCanvas,
-    color: (u8, u8, u8),
-    cx: i32,
-    cy: i32,
-    r: i32,
-) {
+fn fill_circle(canvas: &mut WindowCanvas, color: (u8, u8, u8), cx: i32, cy: i32, r: i32) {
     canvas.set_draw_color(Color::RGB(color.0, color.1, color.2));
     for dy in -r..=r {
         let half = ((r * r - dy * dy) as f32).sqrt().round() as i32;
@@ -3845,8 +3844,18 @@ fn lid_geometry(block: Rect) -> (i32, i32, i32) {
 /// Desenha a face do PS1 FAT e devolve os retângulos clicáveis (Power,
 /// Eject, Reset, o par de slots de memory card) + o retângulo do assento
 /// do disco (onde o disco encaixa e gira).
+/// O cache da face: a arte estática (tampa, botões, rótulos) por estado.
+/// A face desenha ~700 retângulos — renderizar por frame custa fluidez.
+struct FaceCache {
+    key: (i32, i32, u32, u32, bool, bool, bool),
+    tex: Texture,
+    hits: FaceHits,
+    seat: Rect,
+}
+
 #[allow(clippy::too_many_arguments)]
 fn draw_console_face(
+    face_cache: &mut Option<FaceCache>,
     canvas: &mut WindowCanvas,
     images: &HashMap<u64, ImgTex>,
     font: &mut Texture,
@@ -3855,11 +3864,91 @@ fn draw_console_face(
     reset_pressed: bool,
     disc_seated: bool,
 ) -> (FaceHits, Rect) {
+    let key = (
+        block.x(),
+        block.y(),
+        block.width(),
+        block.height(),
+        led_on,
+        reset_pressed,
+        disc_seated,
+    );
+    if let Some(c) = face_cache {
+        if c.key == key {
+            let _ = canvas.copy(&c.tex, None, None);
+            return (c.hits, c.seat);
+        }
+    }
+
+    let mut hits = FaceHits {
+        seat: Rect::new(0, 0, 1, 1),
+        power: None,
+        eject: None,
+        reset: None,
+        cards: None,
+    };
+
+    // Renderiza a face num target zero-origin (o desenho todo usa o bloco
+    // como origem) e copia pronto — o cache evita ~700 fill_rects por frame.
+    let mut target = canvas
+        .create_texture_target(
+            sdl3::pixels::PixelFormat::RGBA32,
+            block.width(),
+            block.height(),
+        )
+        .expect("create face target");
+    let _ = canvas.with_texture_canvas(&mut target, |c| {
+        c.set_draw_color(Color::RGBA(0, 0, 0, 0));
+        let _ = c.clear();
+    });
+    let zblock = Rect::new(0, 0, block.width(), block.height());
+    let _ = canvas.with_texture_canvas(&mut target, |c| {
+        draw_console_face_inner(
+            c,
+            images,
+            font,
+            zblock,
+            led_on,
+            reset_pressed,
+            disc_seated,
+            &mut hits,
+        );
+    });
+    target.set_blend_mode(sdl3::render::BlendMode::Blend);
+    let _ = canvas.copy(&target, None, None);
+    let seat_r = (lid_geometry(zblock).2 as f32 * PSX_SEAT_FRAC).round() as i32;
+    let (lcx, lcy, _) = lid_geometry(zblock);
+    let seat = Rect::new(
+        lcx - seat_r,
+        lcy - seat_r,
+        (seat_r * 2) as u32,
+        (seat_r * 2) as u32,
+    );
+    *face_cache = Some(FaceCache {
+        key,
+        tex: target,
+        hits,
+        seat,
+    });
+    return (hits, seat);
+}
+
+/// O desenho em si da face (sem cache), zero-origin no alvo.
+#[allow(clippy::too_many_arguments)]
+fn draw_console_face_inner(
+    canvas: &mut WindowCanvas,
+    images: &HashMap<u64, ImgTex>,
+    font: &mut Texture,
+    block: Rect,
+    led_on: bool,
+    reset_pressed: bool,
+    disc_seated: bool,
+    hits: &mut FaceHits,
+) {
     let fill = |canvas: &mut WindowCanvas, color: (u8, u8, u8), r: Rect| {
         canvas.set_draw_color(Color::RGB(color.0, color.1, color.2));
         let _ = canvas.fill_rect(r);
     };
-    let mut hits = FaceHits::default();
 
     // Corpo: a base do console sob a tampa (aresta de sombra na base).
     let body_h = (block.height() as f32 * 0.20).round() as i32;
@@ -3909,9 +3998,26 @@ fn draw_console_face(
             Rect::new(reset.x() + 2, reset.y() + 2, reset.width() - 4, 4),
         );
     }
-    let power = Rect::new(col_l - btn_r, lid_cy + 4, (btn_r * 2) as u32, (btn_r * 2) as u32);
-    fill_circle(canvas, PSX_SHELL_EDGE, col_l, lid_cy + 4 + btn_r as i32, btn_r);
-    fill_circle(canvas, PSX_SHELL, col_l, lid_cy + 4 + btn_r as i32, btn_r - 2);
+    let power = Rect::new(
+        col_l - btn_r,
+        lid_cy + 4,
+        (btn_r * 2) as u32,
+        (btn_r * 2) as u32,
+    );
+    fill_circle(
+        canvas,
+        PSX_SHELL_EDGE,
+        col_l,
+        lid_cy + 4 + btn_r as i32,
+        btn_r,
+    );
+    fill_circle(
+        canvas,
+        PSX_SHELL,
+        col_l,
+        lid_cy + 4 + btn_r as i32,
+        btn_r - 2,
+    );
     hits.power = Some(power);
     hits.reset = Some(reset);
     // O LED do power: um ponto verde na borda superior do botão (aceso).
@@ -3928,8 +4034,20 @@ fn draw_console_face(
         (btn_r * 2) as u32,
         (btn_r * 2) as u32,
     );
-    fill_circle(canvas, PSX_SHELL_EDGE, col_r, lid_cy + 4 + btn_r as i32, btn_r);
-    fill_circle(canvas, PSX_SHELL, col_r, lid_cy + 4 + btn_r as i32, btn_r - 2);
+    fill_circle(
+        canvas,
+        PSX_SHELL_EDGE,
+        col_r,
+        lid_cy + 4 + btn_r as i32,
+        btn_r,
+    );
+    fill_circle(
+        canvas,
+        PSX_SHELL,
+        col_r,
+        lid_cy + 4 + btn_r as i32,
+        btn_r - 2,
+    );
     hits.eject = Some(eject);
 
     // Rótulos pequenos (usabilidade — o hardware real usa só símbolos).
@@ -4003,13 +4121,12 @@ fn draw_console_face(
 
     // O assento do disco: centrado no eixo, do tamanho da tampa útil.
     let seat_r = (lid_r as f32 * PSX_SEAT_FRAC).round() as i32;
-    let seat = Rect::new(
+    hits.seat = Rect::new(
         lid_cx - seat_r,
         lid_cy - seat_r,
         (seat_r * 2) as u32,
         (seat_r * 2) as u32,
     );
-    (hits, seat)
 }
 
 /// Um frame do disco no leitor: `t` 0.0..=1.0 desce o disco de cima até
@@ -4048,8 +4165,7 @@ fn draw_panel_disc(
         block.x(),
         block.y(),
         block.width(),
-        (block.height() as i32 + (seat.bottom() - block.bottom()).max(0))
-            .max(1) as u32,
+        (block.height() as i32 + (seat.bottom() - block.bottom()).max(0)).max(1) as u32,
     );
     canvas.set_clip_rect(Some(clip));
 
@@ -4103,6 +4219,7 @@ fn draw_panel_disc(
 fn draw_panel_slot(
     canvas: &mut WindowCanvas,
     images: &HashMap<u64, ImgTex>,
+    face_cache: &mut Option<FaceCache>,
     font: &mut Texture,
     block: Rect,
     t: f32,
@@ -4111,21 +4228,18 @@ fn draw_panel_slot(
     reset_pressed: bool,
     spin_deg: f32,
 ) -> FaceHits {
-    let disc_seated = images.contains_key(&PANEL_CARTRIDGE_IMG)
-        && t >= 1.0
-        && !ejecting;
-    let (hits, seat) =
-        draw_console_face(canvas, images, font, block, led_on, reset_pressed, disc_seated);
-    draw_panel_disc(
+    let disc_seated = images.contains_key(&PANEL_CARTRIDGE_IMG) && t >= 1.0 && !ejecting;
+    let (hits, seat) = draw_console_face(
+        face_cache,
         canvas,
         images,
+        font,
         block,
-        seat,
-        t,
-        ejecting,
-        spin_deg,
         led_on,
+        reset_pressed,
+        disc_seated,
     );
+    draw_panel_disc(canvas, images, block, seat, t, ejecting, spin_deg, led_on);
     hits
 }
 
@@ -4139,8 +4253,17 @@ fn draw_idle_slot(
     block: Rect,
     label: &str,
 ) -> Rect {
-    let (hits, seat) = draw_console_face(canvas, images, font, block, false, false, false);
-    let _ = hits;
+    let mut idle_face_cache: Option<FaceCache> = None;
+    let (_, seat) = draw_console_face(
+        &mut idle_face_cache,
+        canvas,
+        images,
+        font,
+        block,
+        false,
+        false,
+        false,
+    );
 
     let btn_w = seat.width().min((block.width() as f32 * 0.62) as u32);
     let btn_h = (GLYPH_H as i32 * 2 + 14) as u32;
@@ -4152,8 +4275,6 @@ fn draw_idle_slot(
     );
     draw_button(canvas, font, btn, label, true)
 }
-
-
 
 /// Scale + colour for one of the absolute-coordinate text helpers below —
 /// bundled so those functions stay under clippy's argument-count limit.
@@ -4265,6 +4386,7 @@ fn draw_panel(
     canvas: &mut WindowCanvas,
     font: &mut Texture,
     images: &HashMap<u64, ImgTex>,
+    face_cache: &mut Option<FaceCache>,
     panel: Option<&PanelInfo>,
     rect: Rect,
     session: Duration,
@@ -4458,6 +4580,7 @@ fn draw_panel(
         let face_hits = draw_panel_slot(
             canvas,
             images,
+            face_cache,
             font,
             Rect::new(x, cy, inner_w, CARTRIDGE_H),
             t,
@@ -6176,10 +6299,7 @@ fn build_font_atlas(canvas: &mut WindowCanvas) -> Result<Texture, PlatformError>
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        fit_aspect_in, ra_badge_rows,
-        screen_area, wrapped_height, GLYPH_H, OSD_GREEN,
-    };
+    use super::{fit_aspect_in, ra_badge_rows, screen_area, wrapped_height, GLYPH_H, OSD_GREEN};
     use sdl3::rect::Rect;
 
     #[test]
@@ -6196,14 +6316,8 @@ mod tests {
     }
 
     #[test]
-
-
     #[test]
-
-
     #[test]
-
-
     #[test]
     fn content_bbox_finds_the_opaque_region() {
         // 4x3 image: only the middle row's middle two pixels are opaque.
@@ -6220,8 +6334,6 @@ mod tests {
     }
 
     #[test]
-
-
     #[test]
     fn screen_area_insets_with_a_wider_chin() {
         let s = screen_area(1000, 1000);
