@@ -85,13 +85,14 @@ const PANEL_BTN_BG: (u8, u8, u8) = (34, 32, 29);
 /// controle e o LED de power.
 const PSX_SHELL: (u8, u8, u8) = (176, 172, 162);
 const PSX_SHELL_EDGE: (u8, u8, u8) = (126, 122, 112);
-const PSX_HUB: (u8, u8, u8) = (146, 142, 132);
 const PSX_HUB_RING: (u8, u8, u8) = (120, 116, 107);
 const PSX_LED_ON: (u8, u8, u8) = (110, 224, 130);
 const PSX_LED_OFF: (u8, u8, u8) = (56, 58, 54);
 /// O rótulo "POWER" gravado dentro do botão — verde escuro, como na foto
 /// de referência.
 const PSX_BTN_TEXT: (u8, u8, u8) = (52, 128, 74);
+/// O rótulo "OPEN" do botão de eject — azul escuro, mesmo tratamento.
+const PSX_BTN_OPEN: (u8, u8, u8) = (52, 82, 148);
 
 /// The set's own nameplate: a small wordmark printed into the chin, left of
 /// the cartridge — a touch lighter than the cabinet plastic, like an embossed
@@ -3852,23 +3853,21 @@ fn draw_slot_furniture(
         (btn_r * 2) as u32,
     );
 
-    // Open/Eject: redondo do mesmo tamanho, símbolo ▲ sobre barra.
+    // Open/Eject: redondo do mesmo tamanho, o rótulo "OPEN" gravado dentro
+    // em azul escuro — o mesmo tratamento do rótulo "POWER" do outro lado.
     fill_circle(canvas, PSX_SHELL_EDGE, col_r, power_cy, btn_r);
     fill_circle(canvas, PSX_SHELL, col_r, power_cy, btn_r - 1);
-    let tri_w = 5;
-    for i in 0..3 {
-        fill(
-            canvas,
-            PSX_HUB,
-            Rect::new(
-                col_r - tri_w + i,
-                power_cy - 7 + i,
-                (tri_w - i * 2).max(1) as u32,
-                1,
-            ),
-        );
-    }
-    fill(canvas, PSX_HUB, Rect::new(col_r - 5, power_cy - 2, 10, 2));
+    let label = "OPEN";
+    let lw = label.chars().count() as i32 * GLYPH_W as i32;
+    draw_text_absolute(
+        canvas,
+        font,
+        col_r - lw / 2,
+        power_cy - GLYPH_H as i32 / 2 - 2,
+        TextStyle::new(1, PSX_BTN_OPEN),
+        label,
+        usize::MAX,
+    );
     let eject_hit = Rect::new(
         col_r - btn_r,
         power_cy - btn_r,
