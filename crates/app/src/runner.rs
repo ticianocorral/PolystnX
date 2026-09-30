@@ -376,7 +376,6 @@ struct CoreOut {
 /// Core bruto (handles de dlopen) atravessando uma fronteira de thread.
 struct CoreRunning(Core);
 unsafe impl Send for CoreRunning {}
-
 fn spawn_core_worker(
     core: Core,
     runahead: usize,
@@ -406,9 +405,6 @@ fn spawn_core_worker(
                 match cmd {
                     CoreCmd::Quit => break,
                     CoreCmd::Run { input } => {
-                        if std::env::var_os("PSX_DEBUG_CORE").is_some() {
-                            eprintln!("dbg: worker rodou frame");
-                        }
                         for (port, btn, held) in &input.buttons {
                             core.set_button(*port, *btn, *held);
                         }
@@ -2204,6 +2200,8 @@ pub fn run_game(
                         // O core JÁ é acionado aqui, em paralelo ao ritual: o
                         // primeiro quadro chega junto com o fim da estática em
                         // vez de um "nada acontece" depois do clique.
+                        // A luz do Power acende NO CLIQUE — antes do ritual.
+                        cab.set_powered(true);
                         if !in_flight {
                             let mut snap = PadSnapshot::default();
                             for port in 0..MAX_PORTS {
@@ -2224,7 +2222,6 @@ pub fn run_game(
                         power_on_burst(plat, cab);
                         powered = true;
                         powered_since = Some(Instant::now());
-                        cab.set_powered(true);
                         cab.flash_ch3(CH3_FLASH);
                         // Console power-on re-arms the RA hit counts (plan
                         // fase 5) — earned stays authoritative locally, and
