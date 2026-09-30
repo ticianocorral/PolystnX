@@ -2213,18 +2213,17 @@ impl Cabinet {
         self.ensure_mesh(self.screen);
         self.update_noise_tex(level);
 
-        // Azul de AV como base (opaco) e a estante por cima com alpha caindo.
-        let av_blue = {
-            let k = level.clamp(0.0, 1.0);
-            Color::RGB(8, 20 + (16.0 * k) as u8, (60.0 + 140.0 * k) as u8)
-        };
-        self.canvas.set_draw_color(av_blue);
+        // Idêntico ao present_static — painel, brand, OSDs e botões no lugar —
+        // trocando SÓ o conteúdo do tubo: o azul de AV por baixo e o último
+        // quadro da estante (screen_tex) com alpha caindo por cima. O painel
+        // permanece contínuo: muda o que está na TV, não a tela inteira.
+        let mesh = self.mesh.take().unwrap();
+        self.canvas
+            .set_draw_color(Color::RGB(RECESS.0, RECESS.1, RECESS.2));
         self.canvas.clear();
         self.canvas.set_viewport(Some(canvas_rect));
-
         let st = self.screen_tex.as_mut().unwrap();
         st.tex.set_alpha_mod(((1.0 - t) * 255.0) as u8);
-        let mesh = self.mesh.take().unwrap();
         let _ = self
             .canvas
             .render_geometry(&mesh.verts, Some(&st.tex), &mesh.indices[..]);
@@ -2235,8 +2234,34 @@ impl Cabinet {
             .render_geometry(&bezel.verts, None, &bezel.indices[..]);
         self.bezel = Some(bezel);
         self.mesh = Some(mesh);
-
+        self.update_arrows = draw_brand(
+            &mut self.canvas,
+            &mut self.font,
+            self.screen,
+            wh,
+            &self.nameplate,
+            self.nameplate_updates,
+        );
         draw_ch3_osd(&mut self.canvas, &mut self.font, self.screen);
+        self.draw_ra_badge();
+        if self.static_hiss {
+            self.queue_static_hiss(level);
+        } else if let Some(h) = &self.hiss {
+            h.clear();
+        }
+        self.panel_buttons = draw_panel(
+            &mut self.canvas,
+            &mut self.font,
+            &self.images,
+            self.panel.as_ref(),
+            panel,
+            self.session,
+            self.idle_core_prompt.as_deref(),
+            self.dev_mode,
+            self.core_status.as_deref(),
+        );
+        self.close_button = draw_close_button(&mut self.canvas, &mut self.font);
+        self.minimize_button = draw_minimize_button(&mut self.canvas, &mut self.font);
         self.canvas.set_viewport(None);
         self.present_and_time();
     }
