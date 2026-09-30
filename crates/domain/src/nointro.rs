@@ -43,6 +43,12 @@ pub struct NoIntroGameInfo {
 pub struct NoIntroDat {
     by_crc32: HashMap<String, NoIntroGameInfo>,
     by_serial: HashMap<String, NoIntroGameInfo>,
+    /// Índice pela **base** do serial: o DAT Redump registra variantes com
+    /// sufixo (`SLUS-00923D` demo, `SLUS-00923GH` Greatest Hits), mas o
+    /// `SYSTEM.CNF` do disco só carrega `SLUS-00923`. Primeiro registro com
+    /// a mesma base vence (variantes com nomes diferentes são raras e
+    /// indistinguíveis sem mais metadado).
+    by_serial_base: HashMap<String, NoIntroGameInfo>,
 }
 
 /// Child element of `<game>`, if present and non-empty, as plain text.
@@ -101,6 +107,27 @@ impl NoIntroDat {
             }
             (by_crc32, by_serial)
         };
+        // A base do serial alimenta o índice de variantes — vale para os
+        // dois sabores de DAT, que chegam aqui no mesmo mapa.
+        let mut by_serial_base: HashMap<String, (usize, NoIntroGameInfo)> = HashMap::new();
+        for (serial, info) in &by_serial {
+            let Some(base) = base_serial(serial) else {
+                continue;
+            };
+            match by_serial_base.get(base) {
+                // Empate de base: o serial mais curto (menos sufixo de
+                // variante) é a entrada menos especializada e vence —
+                // determinístico, diferente da ordem do HashMap.
+                Some((len, _)) if *len <= serial.len() => {}
+                _ => {
+                    by_serial_base.insert(base.to_string(), (serial.len(), info.clone()));
+                }
+            }
+        }
+        let mut by_serial_base = by_serial_base
+            .into_iter()
+            .map(|(k, (_, v))| (k, v))
+            .collect();
         log::info!(
             "no-intro DAT: {} entradas por CRC, {} por serial, de {}",
             by_crc32.len(),
@@ -110,6 +137,7 @@ impl NoIntroDat {
         Ok(Self {
             by_crc32,
             by_serial,
+            by_serial_base,
         })
     }
 
@@ -118,10 +146,27 @@ impl NoIntroDat {
     }
 
     /// PSX: o serial de fábrica (`SLUS-00402`) — o que o scan do disco já
-    /// extrai — casa direto com o `serial` que o DAT Redump carrega.
+    /// extrai — casa direto com o `serial` que o DAT Redump carrega; sem
+    /// entrada exata, pela base (`SLUS-00923` acha as variantes `…D`/`…GH`).
     pub fn lookup_serial(&self, serial: &str) -> Option<&NoIntroGameInfo> {
-        self.by_serial.get(&normalize_serial(serial))
+        let serial = normalize_serial(serial);
+        self.by_serial
+            .get(&serial)
+            .or_else(|| base_serial(&serial).and_then(|b| self.by_serial_base.get(b)))
     }
+}
+
+/// `SLUS-00923D` → `SLUS-00923`: os 10 primeiros caracteres quando o serial
+/// normalizado tem o formato canônico (`LLLL-ddddd`) seguido de sufixo de
+/// variante. `None` para um serial que nem tem base.
+fn base_serial(serial: &str) -> Option<&str> {
+    let b = serial.get(..10)?;
+    let bytes = b.as_bytes();
+    let shaped = bytes.len() == 10
+        && bytes[..4].iter().all(u8::is_ascii_uppercase)
+        && bytes[4] == b'-'
+        && bytes[5..].iter().all(u8::is_ascii_digit);
+    shaped.then_some(b)
 }
 
 /// `slus_004.02` → `SLUS-00402` — a mesma normalização do scan de discos
@@ -351,6 +396,43 @@ game (
             Some("Tekken 3 (USA)")
         );
         assert!(dat.lookup_serial("SCUS-00000").is_none());
+        let _ = fs::remove_file(&path);
+    }
+
+    #[test]
+    fn base_serial_matches_discs_the_dat_registers_as_variants() {
+        // O caso real: o disco carrega SLUS-00923; o DAT Redump só tem as
+        // variantes …D (demo) e …GH (Greatest Hits).
+        let path = write_dat(
+            r#"clrmamepro (
+)
+
+game (
+	name "Resident Evil 3 - Nemesis (USA, Canada)"
+	region "USA"
+	serial "SLUS-00923D"
+	rom ( name "a.bin" size 1 crc 00000001 )
+)
+
+game (
+	name "Resident Evil 3 - Nemesis (USA, Canada) (GH)"
+	region "USA"
+	serial "SLUS-00923GH"
+	rom ( name "b.bin" size 1 crc 00000002 )
+)
+"#,
+        );
+        let dat = NoIntroDat::load(&path).unwrap();
+        assert_eq!(
+            dat.lookup_serial("SLUS-00923").map(|i| i.name.as_str()),
+            Some("Resident Evil 3 - Nemesis (USA, Canada)")
+        );
+        // Exato continua vencendo a base.
+        assert_eq!(
+            dat.lookup_serial("SLUS-00923GH").map(|i| i.name.as_str()),
+            Some("Resident Evil 3 - Nemesis (USA, Canada) (GH)")
+        );
+        assert_eq!(base_serial("SLUS-00923"), Some("SLUS-00923"));
         let _ = fs::remove_file(&path);
     }
 }
