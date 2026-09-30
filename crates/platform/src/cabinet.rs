@@ -106,9 +106,7 @@ const PSX_SHELL: (u8, u8, u8) = (176, 172, 162);
 const PSX_SHELL_EDGE: (u8, u8, u8) = (126, 122, 112);
 const PSX_LID: (u8, u8, u8) = (163, 159, 149);
 const PSX_LID_EDGE: (u8, u8, u8) = (118, 114, 105);
-const PSX_LID_SEAM: (u8, u8, u8) = (104, 100, 92);
 const PSX_HUB: (u8, u8, u8) = (146, 142, 132);
-const PSX_HUB_RING: (u8, u8, u8) = (120, 116, 107);
 const PSX_MOUTH: (u8, u8, u8) = (16, 16, 18);
 const PSX_MC_SLOT: (u8, u8, u8) = (44, 44, 48);
 const PSX_MC_RIM: (u8, u8, u8) = (126, 122, 112);
@@ -120,8 +118,6 @@ const PSX_LED_OFF: (u8, u8, u8) = (56, 58, 54);
 /// (tampa fechada) ele fica **inteiro** escondido — o carimbo de fração
 /// passa de 1.0 de propósito (o `hidden` precisa cobrir o conteúdo inteiro,
 /// com folga, para o clip não deixar nem uma linha do disco à mostra).
-const CART_WIDTH_FRAC: f32 = 0.86;
-const SEAT_HIDDEN_FRAC: f32 = 1.18;
 
 /// The set's own nameplate: a small wordmark printed into the chin, left of
 /// the cartridge — a touch lighter than the cabinet plastic, like an embossed
@@ -215,6 +211,8 @@ pub struct Cabinet {
     // Era o gerador do ruído de RF; a tela azul de AV não sorteia.
     #[allow(dead_code)]
     rng: u32,
+    /// Ângulo do disco girando (graus) — incrementa a cada frame ligado.
+    spin: f32,
     /// 128 glyphs laid out horizontally, white on transparent (2D path).
     font: Texture,
     images: HashMap<u64, ImgTex>,
@@ -917,6 +915,7 @@ impl Cabinet {
             noise: Vec::new(),
             noise_stamp: None,
             rng: 0x9E37_79B9,
+            spin: 0.0,
             font,
             images: HashMap::new(),
             screen: screen_area(canvas_rect.width(), canvas_rect.height()),
@@ -1685,6 +1684,14 @@ impl Cabinet {
 
     /// Draw one frame to the window. `aspect_ratio <= 0` means "use 4:3".
     pub fn present_frame(&mut self, frame: &FrameRef, aspect_ratio: f32) {
+        // O disco gira enquanto o console está ligado com disco assentado.
+        if self
+            .panel
+            .as_ref()
+            .is_some_and(|p| p.has_cartridge && p.powered)
+        {
+            self.spin = (self.spin + 2.4) % 360.0;
+        }
         self.ensure_src(frame.width, frame.height, frame.format);
         self.upload(frame);
 
@@ -1759,6 +1766,7 @@ impl Cabinet {
             self.idle_core_prompt.as_deref(),
             self.dev_mode,
             self.core_status.as_deref(),
+        self.spin,
         );
         self.canvas.set_viewport(None);
         // DEBUG-CI: dump do composto (o que a Metal desenhou de fato).
@@ -1849,6 +1857,7 @@ impl Cabinet {
                 idle_core_prompt,
                 dev_mode,
                 core_status,
+            self.spin,
             );
             c.set_viewport(None);
             saved = c
@@ -2259,6 +2268,7 @@ impl Cabinet {
             self.idle_core_prompt.as_deref(),
             self.dev_mode,
             self.core_status.as_deref(),
+        self.spin,
         );
         self.close_button = draw_close_button(&mut self.canvas, &mut self.font);
         self.minimize_button = draw_minimize_button(&mut self.canvas, &mut self.font);
@@ -2336,6 +2346,7 @@ impl Cabinet {
             self.idle_core_prompt.as_deref(),
             self.dev_mode,
             self.core_status.as_deref(),
+        self.spin,
         );
         self.close_button = draw_close_button(&mut self.canvas, &mut self.font);
         self.minimize_button = draw_minimize_button(&mut self.canvas, &mut self.font);
@@ -2403,6 +2414,7 @@ impl Cabinet {
                 idle_core_prompt,
                 dev_mode,
                 core_status,
+            self.spin,
             );
             close_button = draw_close_button(c, font);
             minimize_button = draw_minimize_button(c, font);
@@ -2780,6 +2792,7 @@ impl Cabinet {
             self.idle_core_prompt.as_deref(),
             self.dev_mode,
             self.core_status.as_deref(),
+        self.spin,
         );
         self.canvas.set_viewport(None);
         self.present_and_time();
@@ -2902,6 +2915,7 @@ impl Cabinet {
                 idle_core_prompt,
                 dev_mode,
                 core_status,
+            self.spin,
             );
             close_button = draw_close_button(c, font);
             minimize_button = draw_minimize_button(c, font);
@@ -3765,113 +3779,96 @@ fn draw_image_absolute(
 /// The cartridge enters the frame from above and sinks into the mouth,
 /// which occludes everything past its top edge — the clip trick that keeps
 /// the seated cartridge's base hidden inside the console.
-fn panel_slot_base(block: Rect) -> Rect {
-    let bh = (block.height() as f32 * 0.40).round() as u32;
-    Rect::new(
-        block.x(),
-        block.bottom() - bh.max(1) as i32,
-        block.width(),
-        bh.max(1),
-    )
+const PSX_LID_R_FRAC: f32 = 0.36; // raio da tampa / altura do bloco
+const PSX_SEAT_FRAC: f32 = 0.80; // raio do disco / raio da tampa
+const PSX_BTN_R: i32 = 17; // raio dos botões redondos (Power/Eject)
+
+/// Um retângulo de clique devolvido pela face para o painel.
+#[derive(Default, Clone, Copy)]
+struct FaceHits {
+    power: Option<Rect>,
+    eject: Option<Rect>,
+    reset: Option<Rect>,
+    cards: Option<Rect>,
 }
 
-/// The slot opening: a dark band across the base's top edge, near the base's
-/// full width — where the cartridge enters and below which it is never
-/// drawn. Its top edge is the clip line the cartridge art is drawn against.
-fn panel_slot_mouth(block: Rect, base: Rect) -> Rect {
-    Rect::new(
-        block.x() + 4,
-        base.y() + 2,
-        block.width().saturating_sub(8).max(1),
-        8.min(base.height().saturating_sub(2)).max(1),
-    )
+/// Círculo preenchido rasterizado linha a linha (o canvas só tem retângulos).
+fn fill_circle(
+    canvas: &mut WindowCanvas,
+    color: (u8, u8, u8),
+    cx: i32,
+    cy: i32,
+    r: i32,
+) {
+    canvas.set_draw_color(Color::RGB(color.0, color.1, color.2));
+    for dy in -r..=r {
+        let half = ((r * r - dy * dy) as f32).sqrt().round() as i32;
+        let _ = canvas.fill_rect(Rect::new(cx - half, cy + dy, (half * 2).max(1) as u32, 1));
+    }
 }
 
-/// Where the cartridge sprite is at progress `t` (0.0..=1.0) of the insert
-/// — or, with `ejecting`, the mirrored eject — inside the panel's cartridge
-/// block. `iw, ih` is the art texture's own size and `content` its opaque
-/// bounding box (`ImgTex::content`): the fit and the seating key off the
-/// *content*, not the canvas, so the cart's actual body spans the base's
-/// full width and its visible base sits right at the slot mouth — no float
-/// gap from transparent margins (plan revision: the user's annotated
-/// screenshot). Returns the full-texture destination rect plus the clip
-/// rect the caller must draw it under (the block's area above the mouth's
-/// top edge, so whatever has passed the lip is hidden). At `t = 1.0`
-/// (insert done, or eject at 0.0) the cart is seated: content base just
-/// past the mouth's lip, label standing proud of the console.
-fn panel_cartridge_rects(
-    t: f32,
-    ejecting: bool,
-    block: Rect,
-    mouth: Rect,
-    iw: u32,
-    ih: u32,
-    content: (u32, u32, u32, u32),
-) -> (Rect, Rect) {
-    let t = t.clamp(0.0, 1.0);
-    // Insert eases in with a smoothstep (gentle start, slides home, settles);
-    // eject mirrors it as an out-quad pop — quick off the seat, slowing as it
-    // rises clear.
-    let e = if ejecting {
-        1.0 - (1.0 - t) * (1.0 - t)
-    } else {
-        t * t * (3.0 - 2.0 * t)
-    };
-    // 0.0 = entirely above the block, 1.0 = seated in the slot.
-    let p = if ejecting { 1.0 - e } else { e };
-    let (cx, cy, cw, ch) = content;
-    let (cw, ch) = (cw.max(1), ch.max(1));
-    // Fit the disc a shade inside the fenda's span. Sem bound de "sala em
-    // pé": o disco em repouso vive inteiro dentro do console
-    // (`SEAT_HIDDEN_FRAC` > 1 cobre o conteúdo com folga), não na janela.
-    let scale = (block.width() as f32 * CART_WIDTH_FRAC / cw as f32).max(0.01);
-    let w = ((iw as f32) * scale).round().max(1.0) as u32;
-    let h = ((ih as f32) * scale).round().max(1.0) as u32;
-    // Centre the *content* on the block — the transparent margins may be
-    // asymmetric, so the canvas rect itself can sit off-centre.
-    let x = block.x() + block.width() as i32 / 2
-        - ((cx as f32 + cw as f32 / 2.0) * scale).round() as i32;
-    let content_bottom_in_dst = (cy as f32 + ch as f32) * scale;
-    // Seated: the cart's base reaches `hidden` pixels past the lip — the
-    // clip trims everything below the mouth's edge, so that much of the
-    // body is visibly inside the console. Enter: the content fully above
-    // the block, the slot empty.
-    let hidden = SEAT_HIDDEN_FRAC * ch as f32 * scale;
-    let seated_top = mouth.y() as f32 + hidden - content_bottom_in_dst;
-    let enter_top = block.y() as f32 - content_bottom_in_dst;
-    let top = enter_top + (seated_top - enter_top) * p;
-    let dst = Rect::new(x, top.round() as i32, w, h);
-    let clip = Rect::new(
-        block.x(),
-        block.y(),
-        block.width(),
-        (mouth.y() - block.y()).max(1) as u32,
-    );
-    (dst, clip)
+/// Anel (borda da tampa) — só a diferença entre dois círculos.
+fn fill_ring(
+    canvas: &mut WindowCanvas,
+    color: (u8, u8, u8),
+    cx: i32,
+    cy: i32,
+    r_out: i32,
+    r_in: i32,
+) {
+    canvas.set_draw_color(Color::RGB(color.0, color.1, color.2));
+    for dy in -r_out..=r_out {
+        let ho = ((r_out * r_out - dy * dy) as f32).sqrt().round() as i32;
+        let hi = if dy.abs() <= r_in {
+            ((r_in * r_in - dy * dy) as f32).sqrt().round() as i32
+        } else {
+            0
+        };
+        if ho <= hi {
+            continue;
+        }
+        let y = cy + dy;
+        let _ = canvas.fill_rect(Rect::new(cx - ho, y, (ho - hi).max(1) as u32, 1));
+        let _ = canvas.fill_rect(Rect::new(cx + hi, y, (ho - hi).max(1) as u32, 1));
+    }
 }
 
-/// Draw the console furniture into `block`: o PSX de frente — corpo cinza
-/// na base do bloco, tampa apoiada em cima com o hub ao centro, a fenda
-/// escura entre tampa e corpo por onde o disco entra, e na face do corpo:
-/// slots de memory card e portas de controle à direita, LED de power à
-/// esquerda, e o wordmark (`SLOT_TAG_IMG`, plano §6) quando houver. Shared
-/// by the game panel's disc (`draw_panel_slot`) and the idle screen's
-/// insert button (`draw_idle_slot`). Returns the mouth rect — a fenda onde
-/// o disco cruza para dentro do console.
-fn draw_slot_furniture(
+/// O centro e o raio da tampa dentro do bloco (compartilhado pela face e
+/// pelo disco, para o encaixe ser exato).
+fn lid_geometry(block: Rect) -> (i32, i32, i32) {
+    let cx = block.x() + block.width() as i32 / 2;
+    let cy = block.y() + block.height() as i32 * 42 / 100;
+    let r = ((block.width() as f32).min(block.height() as f32) * PSX_LID_R_FRAC) as i32;
+    (cx, cy, r.max(30))
+}
+
+/// Desenha a face do PS1 FAT e devolve os retângulos clicáveis (Power,
+/// Eject, Reset, o par de slots de memory card) + o retângulo do assento
+/// do disco (onde o disco encaixa e gira).
+#[allow(clippy::too_many_arguments)]
+fn draw_console_face(
     canvas: &mut WindowCanvas,
     images: &HashMap<u64, ImgTex>,
+    font: &mut Texture,
     block: Rect,
     led_on: bool,
-) -> (Rect, Rect) {
+    reset_pressed: bool,
+    disc_seated: bool,
+) -> (FaceHits, Rect) {
     let fill = |canvas: &mut WindowCanvas, color: (u8, u8, u8), r: Rect| {
         canvas.set_draw_color(Color::RGB(color.0, color.1, color.2));
         let _ = canvas.fill_rect(r);
     };
-    let body = panel_slot_base(block);
-    let mouth = panel_slot_mouth(block, body);
+    let mut hits = FaceHits::default();
 
-    // Corpo: a laje cinza com a aresta de sombra na base.
+    // Corpo: a base do console sob a tampa (aresta de sombra na base).
+    let body_h = (block.height() as f32 * 0.20).round() as i32;
+    let body = Rect::new(
+        block.x(),
+        block.bottom() - body_h,
+        block.width(),
+        body_h.max(1) as u32,
+    );
     fill(canvas, PSX_SHELL, body);
     fill(
         canvas,
@@ -3884,110 +3881,97 @@ fn draw_slot_furniture(
         ),
     );
 
-    // Tampa: a faixa apoiada sobre o corpo, com a aresta inferior marcando
-    // a fenda (o `mouth`) por onde o disco desaparece. O hub fica ao centro
-    // da tampa — o círculo rasterizado por linhas, como um disco de verdade.
-    let lid_h = ((body.height() as f32) * 0.42).round() as i32;
-    let lid = Rect::new(
-        body.x() + 5,
-        mouth.y() - lid_h - 2,
-        body.width().saturating_sub(10).max(1),
-        lid_h.max(1) as u32,
-    );
-    fill(canvas, PSX_LID, lid);
-    fill(
-        canvas,
-        PSX_LID_EDGE,
-        Rect::new(lid.x(), lid.y(), lid.width(), 2.min(lid.height()).max(1)),
-    );
-    fill(
-        canvas,
-        PSX_MOUTH,
-        Rect::new(mouth.x(), mouth.y(), mouth.width(), mouth.height()),
-    );
-    fill(
-        canvas,
-        PSX_LID_SEAM,
-        Rect::new(
-            lid.x(),
-            lid.bottom() - 2,
-            lid.width(),
-            2.min(lid.height()).max(1),
-        ),
-    );
-    // O hub: círculo concêntrico da tampa, barra a barra.
-    let hub_r = (lid_h as f32 * 0.38).round().max(4.0);
-    let hub_cx = lid.x() + lid.width() as i32 / 2;
-    let hub_cy = lid.y() + lid.height() as i32 / 2;
-    for dy in -(hub_r as i32)..=(hub_r as i32) {
-        let half = ((hub_r * hub_r - (dy * dy) as f32).sqrt()).round() as i32;
-        if half <= 0 {
-            continue;
-        }
-        let y = hub_cy + dy;
-        if y < lid.y() + 2 || y >= lid.bottom() - 2 {
-            continue;
-        }
-        fill(
-            canvas,
-            PSX_HUB,
-            Rect::new(hub_cx - half, y, (half * 2).max(1) as u32, 1),
-        );
-    }
-    fill(
-        canvas,
-        PSX_HUB_RING,
-        Rect::new(hub_cx - 4, hub_cy - 2, 8, 4),
-    );
+    let (lid_cx, lid_cy, lid_r) = lid_geometry(block);
 
-    // Face do corpo, da esquerda: LED de power, wordmark (quando há), e à
-    // direita os dois slots de memory card em cima das portas de controle.
-    let face_top = mouth.bottom() + 6;
-    let face_bottom = body.bottom() - 6;
-    let face_h = (face_bottom - face_top).max(1);
-    let led = Rect::new(body.x() + 10, face_top + face_h / 2 - 2, 6, 4);
-    fill(canvas, if led_on { PSX_LED_ON } else { PSX_LED_OFF }, led);
-    if let Some(tag) = images.get(&SLOT_TAG_IMG) {
-        let (tcx, tcy, tcw, tch) = tag.content;
-        let (tcw, tch) = (tcw.max(1), tch.max(1));
-        let max_h = (face_h as f32).min((body.width() as f32 * 0.16).min(40.0));
-        let scale = (max_h / tch as f32).min(((body.width() as f32 * 0.5).max(1.0)) / tcw as f32);
-        let tw = (tcw as f32 * scale).round().max(1.0) as u32;
-        let th = (tch as f32 * scale).round().max(1.0) as u32;
-        let src = Rect::new(tcx as i32, tcy as i32, tcw.min(tag.w), tch.min(tag.h));
-        let dst = Rect::new(
-            body.x() + 24,
-            face_top + ((face_h - th as i32) / 2).max(0),
-            tw,
-            th,
-        );
-        let _ = canvas.copy(&tag.tex, src, dst);
-    } else {
+    // Tampa circular: anel externo (borda elevada) + face da tampa.
+    fill_ring(canvas, PSX_LID_EDGE, lid_cx, lid_cy, lid_r, lid_r - 4);
+    fill_circle(canvas, PSX_LID, lid_cx, lid_cy, lid_r - 4);
+
+    // O leitor: sem disco assentado, o eixo aparece no centro (o poço
+    // escuro com o hub). Com disco, o disco cobre — a face fica por baixo.
+    if !disc_seated {
+        let well_r = (lid_r as f32 * PSX_SEAT_FRAC * 0.55) as i32;
+        fill_circle(canvas, PSX_MOUTH, lid_cx, lid_cy, well_r);
+        fill_circle(canvas, PSX_HUB, lid_cx, lid_cy, well_r * 4 / 10);
+    }
+
+    // Coluna esquerda: Reset (pequeno, acima) e Power (redondo, LED em cima
+    // da borda). Coluna direita: Open/Eject, do mesmo tamanho do Power.
+    let col_l = block.x() + 28;
+    let col_r = block.right() - 28;
+    let btn_r = PSX_BTN_R;
+    let reset = Rect::new(col_l - 20, lid_cy - 62, 40, 14);
+    fill(canvas, PSX_MC_SLOT, reset);
+    if reset_pressed {
         fill(
             canvas,
-            PSX_LID_SEAM,
-            Rect::new(
-                body.x() + 24,
-                face_top + face_h / 2 - 1,
-                40.min(body.width() / 3),
-                3,
-            ),
+            PSX_MC_RIM,
+            Rect::new(reset.x() + 2, reset.y() + 2, reset.width() - 4, 4),
         );
     }
+    let power = Rect::new(col_l - btn_r, lid_cy + 4, (btn_r * 2) as u32, (btn_r * 2) as u32);
+    fill_circle(canvas, PSX_SHELL_EDGE, col_l, lid_cy + 4 + btn_r as i32, btn_r);
+    fill_circle(canvas, PSX_SHELL, col_l, lid_cy + 4 + btn_r as i32, btn_r - 2);
+    hits.power = Some(power);
+    hits.reset = Some(reset);
+    // O LED do power: um ponto verde na borda superior do botão (aceso).
+    let led_cy = power.y() + 2;
+    if led_on {
+        fill_circle(canvas, PSX_LED_ON, col_l, led_cy, 4);
+    } else {
+        fill_circle(canvas, PSX_LED_OFF, col_l, led_cy, 3);
+    }
+
+    let eject = Rect::new(
+        col_r - btn_r,
+        lid_cy + 4,
+        (btn_r * 2) as u32,
+        (btn_r * 2) as u32,
+    );
+    fill_circle(canvas, PSX_SHELL_EDGE, col_r, lid_cy + 4 + btn_r as i32, btn_r);
+    fill_circle(canvas, PSX_SHELL, col_r, lid_cy + 4 + btn_r as i32, btn_r - 2);
+    hits.eject = Some(eject);
+
+    // Rótulos pequenos (usabilidade — o hardware real usa só símbolos).
+    let mut label = move |canvas: &mut WindowCanvas, x: i32, y: i32, text: &str| {
+        draw_text_absolute(
+            canvas,
+            font,
+            x,
+            y,
+            TextStyle::new(1, PANEL_DIM),
+            text,
+            usize::MAX,
+        );
+    };
+    let lw = |text: &str| GLYPH_W as i32 * text.len() as i32;
+    label(canvas, block.x() + 4, power.bottom() + 4, "POWER");
+    label(canvas, col_r - lw("OPEN") / 2, eject.bottom() + 4, "OPEN");
+    label(canvas, block.x() + 4, reset.bottom() + 2, "RESET");
+
+    // Slots de memory card e portas de controle na face do corpo.
     let mc_w = 16u32.min(body.width() / 8).max(6);
-    let mc_h = 5u32.min(face_h.unsigned_abs() / 2).max(3);
+    let mc_h = 5u32.min(body.height() / 2).max(3);
     let mut mc_hit = Rect::new(0, 0, 0, 0);
     for i in 0..2u32 {
-        let mc_x = body.right() - 12 - ((mc_w + 8) * (2 - i)) as i32;
-        let mc = Rect::new(mc_x, face_top + face_h / 2 - mc_h as i32 / 2, mc_w, mc_h);
+        let mc_x = body.x() + 18 + ((mc_w + 8) * i) as i32;
+        let mc = Rect::new(
+            mc_x,
+            body.y() + body.height() as i32 / 2 - mc_h as i32 / 2,
+            mc_w,
+            mc_h,
+        );
         fill(
             canvas,
             PSX_MC_RIM,
             Rect::new(mc.x() - 1, mc.y() - 1, mc.width() + 2, mc.height() + 2),
         );
         fill(canvas, PSX_MC_SLOT, mc);
-        // As portas de controle, logo abaixo dos slots.
-        fill(canvas, PSX_PORT, Rect::new(mc_x, face_bottom - 6, mc_w, 3));
+        fill(
+            canvas,
+            PSX_PORT,
+            Rect::new(mc_x, body.bottom() - 7, mc_w, 3.max(1)),
+        );
         mc_hit = if mc_hit.width() == 0 {
             mc
         } else {
@@ -3999,40 +3983,154 @@ fn draw_slot_furniture(
             )
         };
     }
-    (mouth, mc_hit)
+    hits.cards = Some(mc_hit);
+
+    // Wordmark na tampa quando não há disco cobrindo (a arte do jogo fica
+    // no centro quando assentado).
+    if !disc_seated {
+        if let Some(tag) = images.get(&SLOT_TAG_IMG) {
+            let (tcx, tcy, tcw, tch) = tag.content;
+            let (tcw, tch) = (tcw.max(1), tch.max(1));
+            let max_w = (lid_r as f32 * 1.2).max(1.0);
+            let scale = (max_w / tcw as f32).min(((lid_r as f32 * 0.5).max(1.0)) / tch as f32);
+            let tw = (tcw as f32 * scale).round().max(1.0) as u32;
+            let th = (tch as f32 * scale).round().max(1.0) as u32;
+            let src = Rect::new(tcx as i32, tcy as i32, tcw.min(tag.w), tch.min(tag.h));
+            let dst = Rect::new(lid_cx - tw as i32 / 2, lid_cy - th as i32 / 2, tw, th);
+            let _ = canvas.copy(&tag.tex, src, dst);
+        }
+    }
+
+    // O assento do disco: centrado no eixo, do tamanho da tampa útil.
+    let seat_r = (lid_r as f32 * PSX_SEAT_FRAC).round() as i32;
+    let seat = Rect::new(
+        lid_cx - seat_r,
+        lid_cy - seat_r,
+        (seat_r * 2) as u32,
+        (seat_r * 2) as u32,
+    );
+    (hits, seat)
 }
 
-/// Draw the panel's console block: o PSX com o disco do jogo entrando pela
-/// fenda da tampa. `t`/`ejecting` come from `PanelInfo::cartridge_motion`
-/// (`None` outside the animation means seated — tampa fechada, disco
-/// inteiro escondido dentro do console, `SEAT_HIDDEN_FRAC` > 1 garante o
-/// clip cem por cento opaco). Requires `PANEL_CARTRIDGE_IMG` to be loaded —
-/// `draw_panel` only calls this under `has_cartridge`.
+/// Um frame do disco no leitor: `t` 0.0..=1.0 desce o disco de cima até
+/// encaixar no eixo (centro da tampa); `ejecting` devolve. Assentado e
+/// ligado, o disco GIRA (`spin` em graus) — a etiqueta é quadrada com os
+/// cantos transparentes, então a rotação gira o arte todo em torno do eixo.
+#[allow(clippy::too_many_arguments)]
+fn draw_panel_disc(
+    canvas: &mut WindowCanvas,
+    images: &HashMap<u64, ImgTex>,
+    block: Rect,
+    seat: Rect,
+    t: f32,
+    ejecting: bool,
+    spin_deg: f32,
+    spinning: bool,
+) {
+    let Some(art) = images.get(&PANEL_CARTRIDGE_IMG) else {
+        return;
+    };
+    let t = t.clamp(0.0, 1.0);
+    let e = if ejecting {
+        1.0 - (1.0 - t) * (1.0 - t)
+    } else {
+        t * t * (3.0 - 2.0 * t)
+    };
+    let p = if ejecting { 1.0 - e } else { e };
+
+    let side = seat.width() as f32;
+    let cx = seat.x() as f32 + seat.width() as f32 / 2.0;
+    let seated_y = seat.y() as f32;
+    let enter_y = (block.y() - side as i32) as f32;
+    let y = enter_y + (seated_y - enter_y) * p;
+
+    let clip = Rect::new(
+        block.x(),
+        block.y(),
+        block.width(),
+        (block.height() as i32 + (seat.bottom() - block.bottom()).max(0))
+            .max(1) as u32,
+    );
+    canvas.set_clip_rect(Some(clip));
+
+    let angle = if spinning && p >= 1.0 && !ejecting {
+        spin_deg
+    } else {
+        0.0
+    };
+    let s = angle.to_radians().sin();
+    let c = angle.to_radians().cos();
+    let hw = side / 2.0;
+    // O pivô da rotação é o CENTRO do disco (na tampa), não o canto.
+    let (ccx, ccy) = (cx, y + hw);
+    let corner = |sx: f32, sy: f32| -> (f32, f32) {
+        let (lx, ly) = (sx * hw, sy * hw);
+        (ccx + lx * c - ly * s, ccy + lx * s + ly * c)
+    };
+    let (ax, ay) = corner(-1.0, -1.0);
+    let (bx2, by2) = corner(1.0, -1.0);
+    let (cx2, cy2) = corner(1.0, 1.0);
+    let (dx2, dy2) = corner(-1.0, 1.0);
+    let white = sdl3::pixels::FColor::WHITE;
+    let verts = [
+        Vertex {
+            position: sdl3::render::FPoint::new(ax, ay),
+            color: white,
+            tex_coord: sdl3::render::FPoint::new(0.0, 0.0),
+        },
+        Vertex {
+            position: sdl3::render::FPoint::new(bx2, by2),
+            color: white,
+            tex_coord: sdl3::render::FPoint::new(1.0, 0.0),
+        },
+        Vertex {
+            position: sdl3::render::FPoint::new(cx2, cy2),
+            color: white,
+            tex_coord: sdl3::render::FPoint::new(1.0, 1.0),
+        },
+        Vertex {
+            position: sdl3::render::FPoint::new(dx2, dy2),
+            color: white,
+            tex_coord: sdl3::render::FPoint::new(0.0, 1.0),
+        },
+    ];
+    let _ = canvas.render_geometry(&verts, Some(&art.tex), &[0, 1, 2, 0, 2, 3]);
+    canvas.set_clip_rect(None);
+}
+
+/// Draw the panel's console block: a face do PS1 FAT — sem disco mostra o
+/// leitor; com disco, ele encaixa no eixo e GIRA quando ligado.
 fn draw_panel_slot(
     canvas: &mut WindowCanvas,
     images: &HashMap<u64, ImgTex>,
+    font: &mut Texture,
     block: Rect,
     t: f32,
     ejecting: bool,
     led_on: bool,
-) -> Rect {
-    let (mouth, mc_hit) = draw_slot_furniture(canvas, images, block, led_on);
-
-    if let Some(art) = images.get(&PANEL_CARTRIDGE_IMG) {
-        let (dst, clip) =
-            panel_cartridge_rects(t, ejecting, block, mouth, art.w, art.h, art.content);
-        // Everything below the mouth's top edge is "inside the console" —
-        // the clip hides the disc past the lid seam instead of drawing over
-        // it. Reset right after, like every other shared-state user here.
-        canvas.set_clip_rect(Some(clip));
-        let _ = canvas.copy(&art.tex, None, dst);
-        canvas.set_clip_rect(None);
-    }
-    mc_hit
+    reset_pressed: bool,
+    spin_deg: f32,
+) -> FaceHits {
+    let disc_seated = images.contains_key(&PANEL_CARTRIDGE_IMG)
+        && t >= 1.0
+        && !ejecting;
+    let (hits, seat) =
+        draw_console_face(canvas, images, font, block, led_on, reset_pressed, disc_seated);
+    draw_panel_disc(
+        canvas,
+        images,
+        block,
+        seat,
+        t,
+        ejecting,
+        spin_deg,
+        led_on,
+    );
+    hits
 }
 
-/// The idle screen's console block: o mesmo gabinete PSX, com a fenda
-/// vazia e o botão "Inserir disco" centrado na área livre acima da tampa.
+/// The idle screen's console block: o leitor vazio à mostra (o eixo no
+/// centro da tampa) e o botão "Estante de games" centrado na tampa.
 /// Returns the button's rect as the clickable area (`PanelButton::Insert`).
 fn draw_idle_slot(
     canvas: &mut WindowCanvas,
@@ -4041,17 +4139,21 @@ fn draw_idle_slot(
     block: Rect,
     label: &str,
 ) -> Rect {
-    let (mouth, _mc_hit) = draw_slot_furniture(canvas, images, block, false);
-    let btn_w = (block.width() as f32 * 0.7).round() as u32;
-    let btn_h = (GLYPH_H as i32 * 2 + 16) as u32;
+    let (hits, seat) = draw_console_face(canvas, images, font, block, false, false, false);
+    let _ = hits;
+
+    let btn_w = seat.width().min((block.width() as f32 * 0.62) as u32);
+    let btn_h = (GLYPH_H as i32 * 2 + 14) as u32;
     let btn = Rect::new(
-        block.x() + (block.width() as i32 - btn_w as i32) / 2,
-        block.y() + 6 + ((mouth.y() - block.y() - 12 - btn_h as i32) / 2).max(0),
+        seat.center().x - btn_w as i32 / 2,
+        seat.center().y - btn_h as i32 / 2,
         btn_w,
         btn_h,
     );
     draw_button(canvas, font, btn, label, true)
 }
+
+
 
 /// Scale + colour for one of the absolute-coordinate text helpers below —
 /// bundled so those functions stay under clippy's argument-count limit.
@@ -4169,6 +4271,7 @@ fn draw_panel(
     idle_core_prompt: Option<&str>,
     dev_mode: bool,
     core_status: Option<&str>,
+    spin: f32,
 ) -> Vec<(PanelButton, Rect)> {
     if rect.width() == 0 {
         return Vec::new();
@@ -4346,22 +4449,24 @@ fn draw_panel(
     // entra pela fenda na animação e fica escondido em repouso — arte ou
     // sem arte, o console está sempre na cena. Os slots de memory card do
     // corpo viram o hit da biblioteca de cards (plano §3).
-    let mut console_cards_hit = None;
+    #[allow(unused_assignments)] // o valor só é lido no item 2 quando o bloco roda
+    let mut console_face_hits: Option<FaceHits> = None;
     {
         cy += 8;
         const CARTRIDGE_H: u32 = 220;
         let (t, ejecting) = panel.cartridge_motion.unwrap_or((1.0, false));
-        let mc_hit = draw_panel_slot(
+        let face_hits = draw_panel_slot(
             canvas,
             images,
+            font,
             Rect::new(x, cy, inner_w, CARTRIDGE_H),
             t,
             ejecting,
             panel.powered,
+            panel.reset_pressed,
+            spin,
         );
-        if mc_hit.width() > 0 {
-            console_cards_hit = Some(mc_hit);
-        }
+        console_face_hits = Some(face_hits);
         cy += CARTRIDGE_H as i32;
     }
 
@@ -4373,75 +4478,23 @@ fn draw_panel(
     // see `docs/fase-4.md`'s revision note).
     let limit = rect.bottom() - pad - (GLYPH_H as i32 + 12);
 
-    // 2. Power / Eject / Reset (plan revision): styled after the real
-    // console's own controls instead of three more text rows — Power and
-    // Reset are rocker switches (see `draw_rocker`), Eject sits between
-    // them the way the cartridge-slot label does on the actual hardware.
-    // Pulled out of the generic command loop below (which skips these three
-    // by kind) so they get this dedicated look instead of a plain button.
-    const SWITCH_TRACK_H: i32 = 64;
-    const SWITCH_GROUP_H: i32 = SWITCH_TRACK_H + 4 + GLYPH_H as i32;
+    // 2. Power / Eject / Reset vivem NA FACE do console agora (a foto do
+    // PS1 FAT: Power redondo com LED, Reset pequeno acima dele, Open/Eject
+    // do outro lado no mesmo tamanho). Os hits chegam do bloco 1b.
     let mut buttons = Vec::new();
-    // O hit dos memory cards (coletado no bloco do console acima) entra na
-    // lista antes dos switches — a ordem dos hits não importa, só a presença.
-    if let Some(hit) = console_cards_hit {
-        buttons.push((PanelButton::Cards, hit));
-    }
-    if cy + SWITCH_GROUP_H <= limit {
-        cy += 14;
-        let gap = 10i32;
-        // Eject gets first claim on width (its "EJETAR" label doesn't
-        // shrink), the two switches split whatever's left evenly — on a
-        // narrow panel that leaves them tighter, not the label overflowing
-        // its box.
-        let eject_w = (GLYPH_W as i32) * "EJETAR".len() as i32 + 16;
-        let switch_w = ((inner_w as i32 - gap * 2 - eject_w) / 2).max(1);
-        let eject_w = (inner_w as i32 - gap * 2 - switch_w * 2).max(eject_w);
-        let power_track = Rect::new(x, cy, switch_w as u32, SWITCH_TRACK_H as u32);
-        let eject_rect = Rect::new(
-            x + switch_w + gap,
-            cy + SWITCH_TRACK_H - (GLYPH_H as i32 + 6),
-            eject_w as u32,
-            GLYPH_H + 6,
-        );
-        let reset_track = Rect::new(
-            x + switch_w + gap + eject_w + gap,
-            cy,
-            switch_w as u32,
-            SWITCH_TRACK_H as u32,
-        );
-        buttons.push((
-            PanelButton::Power,
-            draw_rocker(canvas, font, power_track, "POWER", panel.powered, true),
-        ));
-        buttons.push((
-            PanelButton::Eject,
-            draw_button(canvas, font, eject_rect, "EJETAR", !panel.powered),
-        ));
-        buttons.push((
-            PanelButton::Reset,
-            draw_rocker(
-                canvas,
-                font,
-                reset_track,
-                "RESET",
-                panel.reset_pressed,
-                panel.powered,
-            ),
-        ));
-        // Power LED, in the gap above Eject (plan revision) — the rockers
-        // fill the switch group's full height, but Eject's own box only
-        // spans the bottom of it, same as it does on the real hardware.
-        let led_size = 16;
-        let led_top = cy + (eject_rect.y() - cy - led_size) / 2;
-        draw_led(
-            canvas,
-            eject_rect.x() + eject_rect.width() as i32 / 2,
-            led_top,
-            led_size,
-            panel.powered,
-        );
-        cy += SWITCH_TRACK_H + 4 + GLYPH_H as i32;
+    if let Some(hits) = console_face_hits {
+        if let Some(power) = hits.power {
+            buttons.push((PanelButton::Power, power));
+        }
+        if let Some(eject) = hits.eject {
+            buttons.push((PanelButton::Eject, eject));
+        }
+        if let Some(reset) = hits.reset {
+            buttons.push((PanelButton::Reset, reset));
+        }
+        if let Some(cards) = hits.cards {
+            buttons.push((PanelButton::Cards, cards));
+        }
     }
 
     // 3. Commands — the console's own buttons, not the emulator's extras
@@ -6124,8 +6177,8 @@ fn build_font_atlas(canvas: &mut WindowCanvas) -> Result<Texture, PlatformError>
 #[cfg(test)]
 mod tests {
     use super::{
-        fit_aspect_in, panel_cartridge_rects, panel_slot_base, panel_slot_mouth, ra_badge_rows,
-        screen_area, wrapped_height, CART_WIDTH_FRAC, GLYPH_H, OSD_GREEN, SEAT_HIDDEN_FRAC,
+        fit_aspect_in, ra_badge_rows,
+        screen_area, wrapped_height, GLYPH_H, OSD_GREEN,
     };
     use sdl3::rect::Rect;
 
@@ -6143,67 +6196,13 @@ mod tests {
     }
 
     #[test]
-    fn panel_slot_base_and_mouth_nest_in_the_block() {
-        let block = Rect::new(40, 100, 320, 210);
-        let base = panel_slot_base(block);
-        let mouth = panel_slot_mouth(block, base);
-        // The base is a full-width slab at the block's bottom edge; the
-        // mouth sits inside it, near the base's top.
-        assert_eq!(base.width(), block.width());
-        assert_eq!(base.bottom(), block.bottom());
-        assert!(base.y() > block.y());
-        assert!(mouth.x() >= base.x() && mouth.right() <= base.right());
-        assert!(mouth.y() >= base.y() && mouth.bottom() <= base.bottom());
-        // Never collapses on a sliver of a block.
-        let b = panel_slot_base(Rect::new(0, 0, 4, 4));
-        let m = panel_slot_mouth(Rect::new(0, 0, 4, 4), b);
-        assert!(b.width() >= 1 && m.width() >= 1 && m.height() >= 1);
-    }
+
 
     #[test]
-    fn panel_disc_enters_from_above_and_hides_when_seated() {
-        let block = Rect::new(40, 100, 320, 270);
-        let base = panel_slot_base(block);
-        let mouth = panel_slot_mouth(block, base);
-        // t=0: entirely above the block — the clip (block top .. mouth top)
-        // shows nothing yet, o console senta com a fenda vazia.
-        let (r0, c0) = panel_cartridge_rects(0.0, false, block, mouth, 700, 500, (0, 0, 700, 500));
-        assert!(r0.bottom() <= block.y());
-        assert_eq!(c0.y(), block.y());
-        assert_eq!(c0.height() as i32, mouth.y() - block.y());
-        // t=1: sentado — tampa fechada, o disco INTEIRO abaixo da fenda
-        // (o clip não deixa nem uma linha à mostra).
-        let (r1, _) = panel_cartridge_rects(1.0, false, block, mouth, 700, 500, (0, 0, 700, 500));
-        assert!(
-            r1.top() >= mouth.y(),
-            "disco em repouso deve estar 100% escondido"
-        );
-    }
+
 
     #[test]
-    fn panel_disc_seats_by_content_not_canvas() {
-        let block = Rect::new(40, 100, 320, 270);
-        let base = panel_slot_base(block);
-        let mouth = panel_slot_mouth(block, base);
-        // Art with fat transparent margins (like the real scans): the fit
-        // keys off the opaque body, not the canvas — the disc spans the
-        // fenda's width with no float gap.
-        let content = (100u32, 50u32, 500u32, 400u32);
-        let (r1, _) = panel_cartridge_rects(1.0, false, block, mouth, 700, 500, content);
-        let scale = block.width() as f32 * CART_WIDTH_FRAC / 500.0;
-        // The content's centre sits on the block's centre.
-        let content_cx = r1.x() as f32 + (100.0 + 250.0) * scale;
-        assert!((content_cx - (block.x() + block.width() as i32 / 2) as f32).abs() <= 1.0);
-        // Seated: the content's base is past the lip by the hidden fraction,
-        // e o disco inteiro está abaixo da fenda.
-        let content_bottom = r1.y() as f32 + (50.0 + 400.0) * scale;
-        let hidden = SEAT_HIDDEN_FRAC * 400.0 * scale;
-        assert!((content_bottom - (mouth.y() as f32 + hidden)).abs() <= 1.0);
-        assert!(r1.y() as f32 + 50.0 * scale >= mouth.y() as f32);
-        // Entering: the content is entirely above the block.
-        let (r0, _) = panel_cartridge_rects(0.0, false, block, mouth, 700, 500, content);
-        assert!(r0.y() as f32 + 450.0 * scale <= block.y() as f32 + 0.5);
-    }
+
 
     #[test]
     fn content_bbox_finds_the_opaque_region() {
@@ -6221,20 +6220,7 @@ mod tests {
     }
 
     #[test]
-    fn panel_cartridge_eject_mirrors_insert_exactly() {
-        let block = Rect::new(40, 100, 320, 270);
-        let base = panel_slot_base(block);
-        let mouth = panel_slot_mouth(block, base);
-        // Eject at t=0 continues from insert's t=1 spot (seated either way),
-        // and ends where insert began (entirely above the block, gone).
-        let (seated_insert, _) =
-            panel_cartridge_rects(1.0, false, block, mouth, 700, 500, (0, 0, 700, 500));
-        let (seated_eject, _) =
-            panel_cartridge_rects(0.0, true, block, mouth, 700, 500, (0, 0, 700, 500));
-        assert_eq!(seated_insert, seated_eject);
-        let (risen, _) = panel_cartridge_rects(1.0, true, block, mouth, 700, 500, (0, 0, 700, 500));
-        assert!(risen.bottom() <= block.y());
-    }
+
 
     #[test]
     fn screen_area_insets_with_a_wider_chin() {
