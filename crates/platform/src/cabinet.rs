@@ -186,8 +186,12 @@ pub struct Cabinet {
     // Era o gerador do ruído de RF; a tela azul de AV não sorteia.
     #[allow(dead_code)]
     rng: u32,
-    /// Ângulo do disco girando (graus) — incrementa a cada frame ligado.
+    /// Ângulo do disco girando (graus) — avança por RELÓGIO, não por frame
+    /// emulado: quando o core hesita (boot, troca BIOS→jogo, FMV pesada), o
+    /// disco continua na velocidade certa em vez de congelar junto.
     spin: f32,
+    /// Última marca de relógio usada pelo giro (para o delta de ângulo).
+    spin_last: Option<Instant>,
     /// 128 glyphs laid out horizontally, white on transparent (2D path).
     font: Texture,
     images: HashMap<u64, ImgTex>,
@@ -892,6 +896,7 @@ impl Cabinet {
             noise_stamp: None,
             rng: 0x9E37_79B9,
             spin: 0.0,
+            spin_last: None,
             font,
             images: HashMap::new(),
             screen: screen_area(canvas_rect.width(), canvas_rect.height()),
@@ -1660,13 +1665,25 @@ impl Cabinet {
 
     /// Draw one frame to the window. `aspect_ratio <= 0` means "use 4:3".
     pub fn present_frame(&mut self, frame: &FrameRef, aspect_ratio: f32) {
-        // O disco gira enquanto o console está ligado com disco assentado.
+        // O disco gira enquanto o console está ligado com disco assentado —
+        // por relógio: FMV pesada ou hesitação do core atrasa o QUADRO, não
+        // a velocidade do disco.
         if self
             .panel
             .as_ref()
             .is_some_and(|p| p.has_cartridge && p.powered)
         {
-            self.spin = (self.spin + 7.0) % 360.0; // ~1 volta por segundo
+            let now = Instant::now();
+            let dt = self
+                .spin_last
+                .replace(now)
+                .map_or(0.0, |t| (now - t).as_secs_f32());
+            // ~1 volta por segundo (420°/s), sem dar salto gigante depois
+            // de uma pausa longa (teto de um quarto de volta por frame).
+            let step = (420.0 * dt).min(90.0);
+            self.spin = (self.spin + step) % 360.0;
+        } else {
+            self.spin_last = None;
         }
         self.ensure_src(frame.width, frame.height, frame.format);
         self.upload(frame);
