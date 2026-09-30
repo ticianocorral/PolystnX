@@ -127,6 +127,9 @@ pub enum Pick {
         /// Local cartridge art (`assets/cartridge/<rom stem>.*`), if one
         /// exists — shown in the panel alongside the logo (plan revision).
         cartridge: Option<PathBuf>,
+        /// O nome canônico (No-Intro, do DAT) para o topo do painel — os
+        /// arquivos de save/nota continuam chaveados pelo nome do arquivo.
+        title: Option<String>,
     },
     /// Clicked "Voltar", or a gamepad's Back button — back out to the
     /// idle/root screen. The app keeps running.
@@ -481,14 +484,21 @@ fn backcover_id(sha1: &str) -> u64 {
     wheel_id(sha1) ^ 0xC2B2_AE3D_27D4_EB4F
 }
 
-/// `dir/<rom's file stem>.{png,jpg,jpeg}`, in that order — the convention for
-/// locally-supplied art: `roms/Aladdin.sfc` matches `assets/cover/Aladdin.png`.
-/// If the exact stem misses, the trailing "(...)" tags are peeled one group at
-/// a time ("X (USA) (Rev 1)" -> "X (USA)" -> "X"), so a single base-named art
-/// file serves every variant ROM of the same game.
-fn find_local_art(dir: &Path, rom_path: &str) -> Option<PathBuf> {
+/// Art resolution for locally-supplied assets, tried in order for
+/// `dir/<candidate>.{png,jpg,jpeg}`:
+///
+/// 1. the game's canonical display title when there is one (`Tekken 3
+///    (USA)`) — the No-Intro naming the DAT gives, so art downloaded under
+///    the standard name finds its game no matter what the .chd is called;
+/// 2. the rom's file stem — the original convention (`roms/Aladdin.chd`
+///    matches `assets/cover/Aladdin.png`);
+/// 3. the stem with its trailing "(...)" tags peeled one group at a time
+///    ("X (USA) (Rev 1)" -> "X (USA)" -> "X"), so a single base-named art
+///    file serves every variant ROM of the same game.
+fn find_local_art(dir: &Path, rom_path: &str, display: Option<&str>) -> Option<PathBuf> {
     let stem = Path::new(rom_path).file_stem()?.to_str()?;
-    let mut candidates = vec![stem.to_string()];
+    let mut candidates: Vec<String> = display.map(|d| vec![d.to_string()]).unwrap_or_default();
+    candidates.push(stem.to_string());
     let mut cur = stem.to_string();
     while cur.ends_with(')') {
         match cur.rfind(" (") {
@@ -519,12 +529,13 @@ fn pick_play(
     entry: &CatalogEntry,
 ) -> Pick {
     let _ = catalog.mark_played(&entry.rom.sha1);
-    let wheel = find_local_art(logo_dir, &entry.rom.path);
-    let cartridge = find_local_art(cartridge_dir, &entry.rom.path);
+    let wheel = find_local_art(logo_dir, &entry.rom.path, Some(&entry.title()));
+    let cartridge = find_local_art(cartridge_dir, &entry.rom.path, Some(&entry.title()));
     Pick::Play {
         rom: PathBuf::from(&entry.rom.path),
         wheel,
         cartridge,
+        title: Some(entry.title().into_owned()),
     }
 }
 
@@ -1490,9 +1501,11 @@ pub fn run(
                                 if let Some(e) = picked {
                                     let bid = backcover_id(&e.rom.sha1);
                                     if cab.has_image(bid) {
-                                        if let Some(path) =
-                                            find_local_art(&backcover_dir, &e.rom.path)
-                                        {
+                                        if let Some(path) = find_local_art(
+                                            &backcover_dir,
+                                            &e.rom.path,
+                                            Some(&e.title()),
+                                        ) {
                                             if let Ok((w, h, rgba)) = decode_art_scaled(&path, 2048)
                                             {
                                                 cab.set_image(bid, w, h, &rgba);
@@ -1585,9 +1598,11 @@ pub fn run(
                                 if let Some(e) = picked {
                                     let cid = cartridge_id(&e.rom.sha1);
                                     if cab.has_image(cid) {
-                                        if let Some(path) =
-                                            find_local_art(&cartridge_dir, &e.rom.path)
-                                        {
+                                        if let Some(path) = find_local_art(
+                                            &cartridge_dir,
+                                            &e.rom.path,
+                                            Some(&e.title()),
+                                        ) {
                                             if let Ok((w, h, rgba)) = decode_art_scaled(&path, 2048)
                                             {
                                                 cab.set_image(cid, w, h, &rgba);
@@ -1716,7 +1731,7 @@ pub fn run(
             if !tried_cover.insert(entry.rom.sha1.clone()) {
                 continue;
             }
-            if let Some(path) = find_local_art(&cover_dir, &entry.rom.path) {
+            if let Some(path) = find_local_art(&cover_dir, &entry.rom.path, Some(&entry.title())) {
                 if let Ok((w, h, rgba)) = decode_art(&path) {
                     cab.set_image(id, w, h, &rgba);
                     decode_budget -= 1;
@@ -1742,7 +1757,7 @@ pub fn run(
             if !tried_cover.insert(entry.rom.sha1.clone()) {
                 continue;
             }
-            if let Some(path) = find_local_art(&cover_dir, &entry.rom.path) {
+            if let Some(path) = find_local_art(&cover_dir, &entry.rom.path, Some(&entry.title())) {
                 if let Ok((w, h, rgba)) = decode_art(&path) {
                     cab.set_image(id, w, h, &rgba);
                     fav_budget -= 1;
@@ -1770,7 +1785,7 @@ pub fn run(
             if !tried_cover.insert(entry.rom.sha1.clone()) {
                 continue;
             }
-            if let Some(path) = find_local_art(&cover_dir, &entry.rom.path) {
+            if let Some(path) = find_local_art(&cover_dir, &entry.rom.path, Some(&entry.title())) {
                 if let Ok((w, h, rgba)) = decode_art(&path) {
                     cab.set_image(id, w, h, &rgba);
                     recent_budget -= 1;
@@ -1816,7 +1831,7 @@ pub fn run(
         if let Some(e) = focused {
             let wid = wheel_id(&e.rom.sha1);
             if !cab.has_image(wid) && tried_logo.insert(e.rom.sha1.clone()) {
-                if let Some(path) = find_local_art(&logo_dir, &e.rom.path) {
+                if let Some(path) = find_local_art(&logo_dir, &e.rom.path, Some(&e.title())) {
                     if let Ok((w, h, rgba)) = decode_art(&path) {
                         cab.set_image(wid, w, h, &rgba);
                     }
@@ -1824,7 +1839,7 @@ pub fn run(
             }
             let cid = cartridge_id(&e.rom.sha1);
             if !cab.has_image(cid) && tried_cartridge.insert(e.rom.sha1.clone()) {
-                if let Some(path) = find_local_art(&cartridge_dir, &e.rom.path) {
+                if let Some(path) = find_local_art(&cartridge_dir, &e.rom.path, Some(&e.title())) {
                     if let Ok((w, h, rgba)) = decode_art(&path) {
                         cab.set_image(cid, w, h, &rgba);
                     }
@@ -1832,7 +1847,7 @@ pub fn run(
             }
             let bid = backcover_id(&e.rom.sha1);
             if !cab.has_image(bid) && tried_backcover.insert(e.rom.sha1.clone()) {
-                if let Some(path) = find_local_art(&backcover_dir, &e.rom.path) {
+                if let Some(path) = find_local_art(&backcover_dir, &e.rom.path, Some(&e.title())) {
                     if let Ok((w, h, rgba)) = decode_art(&path) {
                         cab.set_image(bid, w, h, &rgba);
                     }
@@ -2691,15 +2706,15 @@ mod tests {
         std::fs::write(&base, b"jpg").unwrap();
 
         // Exact stem hits.
-        let hit = find_local_art(&dir, "/x/Killer Instinct (USA).sfc").unwrap();
+        let hit = find_local_art(&dir, "/x/Killer Instinct (USA).sfc", None).unwrap();
         assert_eq!(hit, base);
         // A variant ROM ("Rev 1") peels tags down to the base-named file.
-        let hit = find_local_art(&dir, "/x/Killer Instinct (USA) (Rev 1).sfc").unwrap();
+        let hit = find_local_art(&dir, "/x/Killer Instinct (USA) (Rev 1).sfc", None).unwrap();
         assert_eq!(hit, base);
 
         // PNG wins over JPG for the same stem.
         std::fs::write(dir.join("Killer Instinct (USA).png"), b"png").unwrap();
-        let hit = find_local_art(&dir, "/x/Killer Instinct (USA).sfc").unwrap();
+        let hit = find_local_art(&dir, "/x/Killer Instinct (USA).sfc", None).unwrap();
         assert_eq!(hit.extension().unwrap(), "png");
 
         std::fs::remove_dir_all(&dir).unwrap();
@@ -2709,10 +2724,13 @@ mod tests {
     fn nothing_found_leaves_none() {
         let dir = std::env::temp_dir().join(format!("shelf-art-none-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
-        assert_eq!(find_local_art(&dir, "/x/Missing Game (USA).sfc"), None);
+        assert_eq!(
+            find_local_art(&dir, "/x/Missing Game (USA).sfc", None),
+            None
+        );
         // A stem that only shares a prefix must not match anything.
         std::fs::write(dir.join("Game (USA).jpg"), b"x").unwrap();
-        assert_eq!(find_local_art(&dir, "/x/Gam.sfc"), None);
+        assert_eq!(find_local_art(&dir, "/x/Gam.sfc", None), None);
         std::fs::remove_dir_all(&dir).unwrap();
     }
 }

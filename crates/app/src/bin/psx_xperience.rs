@@ -214,12 +214,19 @@ fn main() -> Result<()> {
 
     // Re-run whenever the player hits "Atualizar" on the shelf (plan
     // revision) — a fresh scan of roms/ merged with the same persisted
-    // sidecar, no app restart needed. Discos: título vem da tabela embutida
-    // por serial; sem fluxo de DAT no caminho.
+    // sidecar, no app restart needed. Discos: título canônico do DAT
+    // (No-Intro/Redump, pelo serial) quando instalado; sem DAT, tabela
+    // embutida; sem ambos, o nome do arquivo.
     let open_catalog = || {
-        Catalog::open(
+        let dat = xperience_app::dat_update::dat_installed().then(|| {
+            xperience_domain::nointro::NoIntroDat::load(&xperience_app::dirs::nointro_dat_path())
+                .map_err(|e| log::warn!("DAT no-intro: {e}"))
+                .ok()
+        });
+        Catalog::open_with_dat(
             &xperience_app::dirs::roms_dir(),
             &xperience_app::dirs::library_path(),
+            dat.as_ref().and_then(|d| d.as_ref()),
         )
     };
     let mut catalog = open_catalog().with_context(|| "opening the catalog")?;
@@ -254,6 +261,7 @@ fn main() -> Result<()> {
             logo: None,
             card1: None,
             card2: None,
+            display_title: None,
             cartridge,
             shot_off: false,
             debug_note_capture: false,
@@ -386,7 +394,7 @@ fn main() -> Result<()> {
         }
 
         'shelf: loop {
-            let (rom, logo, cartridge) =
+            let (rom, logo, cartridge, display_title) =
                 match shelf::run(&mut plat, &mut cab, &catalog, &shelf_opts)? {
                     Pick::Quit => break 'app,
                     Pick::Back => {
@@ -413,7 +421,8 @@ fn main() -> Result<()> {
                             rom,
                             wheel,
                             cartridge,
-                        } => (rom, wheel, cartridge),
+                            title,
+                        } => (rom, wheel, cartridge, title),
                         Pick::Settings => {
                             let quit = settings::run(&mut plat, &mut cab, &mut cfg)?;
                             if quit {
@@ -431,7 +440,8 @@ fn main() -> Result<()> {
                         rom,
                         wheel,
                         cartridge,
-                    } => (rom, wheel, cartridge),
+                        title,
+                    } => (rom, wheel, cartridge, title),
                     // "Atualizar" (plan revision) — rescan roms/ and come
                     // straight back to the shelf with the fresh catalog.
                     Pick::Refresh => {
@@ -471,6 +481,7 @@ fn main() -> Result<()> {
                 logo,
                 card1: None,
                 card2: None,
+                display_title,
                 cartridge,
                 shot_off: false,
                 debug_note_capture: false,

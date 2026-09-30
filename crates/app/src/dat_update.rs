@@ -17,9 +17,12 @@ use std::time::Duration;
 use crate::core_update::CoreUpdateMsg;
 
 /// Where the setup screen / this module fetch `nointro.dat` from — the
-/// libretro-database mirror's SNES file, on the repo's default branch.
+/// libretro-database mirror's **Redump `Sony - PlayStation`** file, on the
+/// repo's default branch. É o DAT que carrega o serial de fábrica por jogo
+/// (`serial "SLUS-00402"`), a chave pela qual os discos deste app já se
+/// identificam — o nome canônico "Tekken 3 (USA)" casa sem ler o disco.
 pub fn dat_download_url() -> &'static str {
-    "https://raw.githubusercontent.com/libretro/libretro-database/master/metadat/no-intro/Nintendo%20-%20Super%20Nintendo%20Entertainment%20System.dat"
+    "https://raw.githubusercontent.com/libretro/libretro-database/master/metadat/redump/Sony%20-%20PlayStation.dat"
 }
 
 /// Where the DAT is installed — `dirs::nointro_dat_path()`, restated here
@@ -103,8 +106,7 @@ mod tests {
     fn url_is_the_libretro_database_mirror() {
         assert!(dat_download_url()
             .starts_with("https://raw.githubusercontent.com/libretro/libretro-database/"));
-        assert!(dat_download_url()
-            .ends_with("Nintendo%20-%20Super%20Nintendo%20Entertainment%20System.dat"));
+        assert!(dat_download_url().ends_with("Sony%20-%20PlayStation.dat"));
     }
 
     /// Hits the real network — not run by default (`cargo test` skips

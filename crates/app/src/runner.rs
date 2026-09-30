@@ -83,6 +83,10 @@ pub struct GameSpec {
     /// O mesmo para o slot 2 (`mem_id` 1 no libretro). `None` = slot vazio
     /// até o jogador escolher um card no botão "MC slot 2".
     pub card2: Option<PathBuf>,
+    /// O nome canônico (No-Intro, do DAT) para o TOPO DO PAINEL. Os arquivos
+    /// de save/nota/cheat continuam chaveados pelo nome do arquivo do jogo —
+    /// trocar o nome canônico nunca orfana um save.
+    pub display_title: Option<String>,
     /// Local cartridge art (`assets/cartridge/<rom>.*`), shown in the panel
     /// alongside the logo when present (plan revision) — `None` just skips
     /// that block, no fallback needed.
@@ -1220,6 +1224,9 @@ pub fn run_game(
         .context("core rejected the disc")?;
 
     let title = rom_title(&spec.rom);
+    // Painel: o nome canônico do DAT quando há — os arquivos continuam
+    // chaveados pelo stem.
+    let panel_title = spec.display_title.clone().unwrap_or_else(|| title.clone());
 
     // Per-game persistence — one folder per game, named for the title like
     // notes already are (plan revision — used to be a flat file per kind,
@@ -1435,7 +1442,7 @@ pub fn run_game(
         cartridge_img
             .as_ref()
             .map(|(w, h, d)| (*w, *h, d.as_slice())),
-        &title,
+        &panel_title,
         &commands,
     );
     // Never inherited from whatever screen ran before (idle/shelf/settings

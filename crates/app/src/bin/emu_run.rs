@@ -276,6 +276,7 @@ fn main() -> Result<()> {
         logo: args.logo,
         card1: args.card1,
         card2: args.card2,
+        display_title: None,
         cartridge: args.cartridge,
         shot_off: args.shot_off,
         debug_note_capture: args.debug_note_capture,

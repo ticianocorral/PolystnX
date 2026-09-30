@@ -36,11 +36,13 @@ pub struct NoIntroGameInfo {
     pub category: Option<String>,
 }
 
-/// Game info, keyed by the ROM's headerless CRC32 in upper hex (e.g.
-/// `"05FBB855"`) — matches `RomId::crc32`'s own formatting exactly, so
-/// lookups need no reformatting on that side.
+/// Game info, keyed two ways: SNES-era lookup by the ROM's headerless CRC32
+/// in upper hex (e.g. `"05FBB855"`), and — what PSX discs use — the factory
+/// **serial** (`SLUS-00402`), which the Redump/libretro DATs carry per game
+/// and which is exactly the identity the disc scan already extracts.
 pub struct NoIntroDat {
     by_crc32: HashMap<String, NoIntroGameInfo>,
+    by_serial: HashMap<String, NoIntroGameInfo>,
 }
 
 /// Child element of `<game>`, if present and non-empty, as plain text.
@@ -67,11 +69,12 @@ impl NoIntroDat {
             path: path.display().to_string(),
             source,
         })?;
-        let by_crc32 = if text.trim_start().starts_with("clrmamepro") {
+        let (by_crc32, by_serial) = if text.trim_start().starts_with("clrmamepro") {
             parse_clrmamepro(&text)
         } else {
             let doc = roxmltree::Document::parse(&text)?;
             let mut by_crc32 = HashMap::new();
+            let mut by_serial = HashMap::new();
             for game in doc.descendants().filter(|n| n.has_tag_name("game")) {
                 let Some(name) = game.attribute("name") else {
                     continue;
@@ -84,25 +87,51 @@ impl NoIntroDat {
                         .or_else(|| child_text(game, "manufacturer")),
                     category: child_text(game, "category"),
                 };
+                if let Some(serial) = child_text(game, "serial") {
+                    by_serial.insert(normalize_serial(&serial), info.clone());
+                }
                 for rom in game.children().filter(|n| n.has_tag_name("rom")) {
                     if let Some(crc) = rom.attribute("crc") {
                         by_crc32.insert(crc.to_ascii_uppercase(), info.clone());
                     }
+                    if let Some(serial) = rom.attribute("serial") {
+                        by_serial.insert(normalize_serial(serial), info.clone());
+                    }
                 }
             }
-            by_crc32
+            (by_crc32, by_serial)
         };
         log::info!(
-            "no-intro DAT: {} entries loaded from {}",
+            "no-intro DAT: {} entradas por CRC, {} por serial, de {}",
             by_crc32.len(),
+            by_serial.len(),
             path.display()
         );
-        Ok(Self { by_crc32 })
+        Ok(Self {
+            by_crc32,
+            by_serial,
+        })
     }
 
     pub fn lookup(&self, crc32: &str) -> Option<&NoIntroGameInfo> {
         self.by_crc32.get(&crc32.to_ascii_uppercase())
     }
+
+    /// PSX: o serial de fábrica (`SLUS-00402`) — o que o scan do disco já
+    /// extrai — casa direto com o `serial` que o DAT Redump carrega.
+    pub fn lookup_serial(&self, serial: &str) -> Option<&NoIntroGameInfo> {
+        self.by_serial.get(&normalize_serial(serial))
+    }
+}
+
+/// `slus_004.02` → `SLUS-00402` — a mesma normalização do scan de discos
+/// (`xperience_ra::hash::normalize_serial`), replicada aqui para o domain
+/// não depender do crate de RA para uma função de três linhas.
+fn normalize_serial(raw: &str) -> String {
+    raw.trim()
+        .to_ascii_uppercase()
+        .replace('_', "-")
+        .replace('.', "")
 }
 
 /// The quoted value of a `key "value"` line (clrmamepro flavour) — `None`
@@ -113,13 +142,20 @@ fn clrmame_quoted(line: &str, key: &str) -> Option<String> {
     Some(value.to_string())
 }
 
-/// Parse clrmamepro text (what `libretro-database`'s
-/// `metadat/no-intro/*.dat` files are): a `clrmamepro (` header, then one
-/// `game (` block per title carrying a quoted `name`, each with one `rom (`
-/// entry whose `crc XXXXXXXX` token is the lookup key. Only what the
-/// lookups need is kept — none of the region/serializer metadata.
-fn parse_clrmamepro(text: &str) -> HashMap<String, NoIntroGameInfo> {
+/// Parse clrmamepro text (what `libretro-database`'s `metadat/no-intro/`
+/// DATs — and the Redump `Sony - PlayStation` one the PSX app fetches —
+/// are): a `clrmamepro (` header, then one `game (` block per title
+/// carrying a quoted `name` (plus `serial`/`region` where the DAT has
+/// them), each with one `rom (` entry whose `crc XXXXXXXX` token is the CRC
+/// lookup key. Only what the lookups need is kept.
+fn parse_clrmamepro(
+    text: &str,
+) -> (
+    HashMap<String, NoIntroGameInfo>,
+    HashMap<String, NoIntroGameInfo>,
+) {
     let mut by_crc32 = HashMap::new();
+    let mut by_serial = HashMap::new();
     let mut game: Option<NoIntroGameInfo> = None;
     let mut in_rom = false;
     for line in text.lines() {
@@ -136,6 +172,14 @@ fn parse_clrmamepro(text: &str) -> HashMap<String, NoIntroGameInfo> {
             if !in_rom {
                 if let Some(name) = clrmame_quoted(line, "name") {
                     info.name = name;
+                } else if let Some(region) = clrmame_quoted(line, "region") {
+                    // A região vira o `category` quando o DAT não traz um —
+                    // é o que sobra de metadado para o painel do catálogo.
+                    if info.category.is_none() {
+                        info.category = Some(region);
+                    }
+                } else if let Some(serial) = clrmame_quoted(line, "serial") {
+                    by_serial.insert(normalize_serial(&serial), info.clone());
                 }
             }
             if let Some(crc_start) = line.find("crc ") {
@@ -148,6 +192,12 @@ fn parse_clrmamepro(text: &str) -> HashMap<String, NoIntroGameInfo> {
                     by_crc32.insert(crc.to_ascii_uppercase(), info.clone());
                 }
             }
+            // Serial dentro do `rom (...)` (o DAT Redump repete lá).
+            if in_rom {
+                if let Some(serial) = clrmame_quoted(line, "serial") {
+                    by_serial.insert(normalize_serial(&serial), info.clone());
+                }
+            }
         }
         if line == ")" {
             if in_rom {
@@ -157,7 +207,7 @@ fn parse_clrmamepro(text: &str) -> HashMap<String, NoIntroGameInfo> {
             }
         }
     }
-    by_crc32
+    (by_crc32, by_serial)
 }
 
 #[cfg(test)]
@@ -273,6 +323,34 @@ game (
         assert!(plain.publisher.is_none());
         assert!(plain.category.is_none());
 
+        let _ = fs::remove_file(&path);
+    }
+
+    #[test]
+    fn redump_serial_lookup_gives_the_canonical_name() {
+        let path = write_dat(
+            r#"clrmamepro (
+	name "Sony - PlayStation"
+)
+
+game (
+	name "Tekken 3 (USA)"
+	region "USA"
+	serial "SLUS-00402"
+	rom ( name "Tekken 3 (USA) (Track 1).bin" size 632532768 crc 8131AF42 serial "SLUS-00402" )
+)
+"#,
+        );
+        let dat = NoIntroDat::load(&path).unwrap();
+        assert_eq!(
+            dat.lookup_serial("SLUS-00402").map(|i| i.name.as_str()),
+            Some("Tekken 3 (USA)")
+        );
+        assert_eq!(
+            dat.lookup_serial("slus_004.02").map(|i| i.name.as_str()),
+            Some("Tekken 3 (USA)")
+        );
+        assert!(dat.lookup_serial("SCUS-00000").is_none());
         let _ = fs::remove_file(&path);
     }
 }

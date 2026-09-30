@@ -13,6 +13,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use serde::{Deserialize, Serialize};
 
 use crate::library;
+use crate::nointro::NoIntroDat;
 
 #[derive(Debug, thiserror::Error)]
 pub enum CatalogError {
@@ -149,8 +150,19 @@ pub struct Catalog {
 impl Catalog {
     /// Scan `roms_dir`, merge in whatever `store_path` (the JSON sidecar)
     /// remembers about each game by serial. Scans once, up front — a
-    /// corrected title is there from the shelf's first frame.
+    /// corrected title is there from the shelf's first frame. `dat` is the
+    /// optional No-Intro/Redump DAT: quando indexa o serial do disco, o
+    /// nome canônico (com a tag de região) vira o título da estante.
+    /// Scan sem DAT — o nome canônico fica por conta da tabela embutida.
     pub fn open(roms_dir: &Path, store_path: &Path) -> Result<Self> {
+        Self::open_with_dat(roms_dir, store_path, None)
+    }
+
+    pub fn open_with_dat(
+        roms_dir: &Path,
+        store_path: &Path,
+        dat: Option<&NoIntroDat>,
+    ) -> Result<Self> {
         // O cache de identificação ride next to this sidecar: a warm boot
         // with an unchanged `roms/` folder skips re-opening every disc.
         let hashcache_path = store_path.with_file_name("hashcache.json");
@@ -181,13 +193,19 @@ impl Catalog {
                     favorite: false,
                     title: None,
                 });
-                // Título: a tabela PSX embutida, pelo serial. (O fluxo de
-                // DAT No-Intro do irmão de SNES não participa — casamento
-                // por CRC32 de bins não existe para CHD.)
+                // Título: primeiro o DAT (No-Intro/Redump, pelo serial — o
+                // nome canônico "Tekken 3 (USA)"); sem DAT, a tabela PSX
+                // embutida, também pelo serial; sem ambos, o nome do arquivo.
                 let psx_hit = crate::psx::lookup(&r.id.serial);
-                let nointro_name = psx_hit.as_ref().map(|p| p.title.clone());
+                let dat_hit = dat.and_then(|d| d.lookup_serial(&r.id.serial));
+                let nointro_name = dat_hit
+                    .map(|p| p.name.clone())
+                    .or_else(|| psx_hit.as_ref().map(|p| p.title.clone()));
                 let mut nointro_extra = Vec::new();
-                if let Some(region) = psx_hit.as_ref().and_then(|p| p.region.clone()) {
+                if let Some(region) = dat_hit
+                    .and_then(|p| p.category.clone())
+                    .or_else(|| psx_hit.as_ref().and_then(|p| p.region.clone()))
+                {
                     nointro_extra.push(("região".to_string(), region));
                 }
                 RomRow {
