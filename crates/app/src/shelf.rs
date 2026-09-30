@@ -24,11 +24,11 @@ use xperience_platform::{
 
 use crate::idle;
 
-// Quase quadrado, levemente mais alto que largo: capa de PSX é a fronda da
-// caixa de CD (jewel case), não a caixa 4:3 paisagem do SNES — `image_fit`
-// completa o encaixe para scans um pouco mais largos ou mais altos.
-const TILE_W: u32 = 230;
-const TILE_H: u32 = 244;
+// Quadrado: capa de PSX é a fronda da caixa de CD (jewel case) — a
+// referência do Spawn tem 850x850 — e não a caixa 4:3 paisagem do SNES.
+// `image_fit` completa o encaixe para os raros scans não-quadrados.
+const TILE_W: u32 = 236;
+const TILE_H: u32 = 236;
 const GAP: u32 = 18;
 const MARGIN: i32 = 28;
 /// Room reserved at the header row for the "N games" label and the filter
@@ -55,8 +55,8 @@ type RaExtras = (Option<String>, Vec<(String, String)>);
 /// A "jogados recentemente" strip above the main grid/list (plan revision) —
 /// the last played games, always in a single row. Both strips scroll
 /// horizontally now (see `STRIP_CAP`), so no fixed five-item cap anymore.
-const RECENT_TILE_W: u32 = 146;
-const RECENT_TILE_H: u32 = 155;
+const RECENT_TILE_W: u32 = 150;
+const RECENT_TILE_H: u32 = 150;
 const RECENT_GAP: u32 = 14;
 const RECENT_LABEL_H: i32 = 24;
 
