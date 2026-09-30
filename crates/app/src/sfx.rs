@@ -30,6 +30,11 @@ pub enum Sfx {
     /// ao ganhar uma conquista") — a synthesized ascending chime, made
     /// in-repo (no Pixabay credit due), same fixed format as the foley set.
     Achievement,
+    /// O leitor de CD-ROM lendo (hesitação do core: boot, load, FMV) —
+    /// foley real da produção de um vídeo, cortado num loop sem emenda
+    /// (crossfade de 250 ms; ver THIRD-PARTY-NOTICES.md). Toca em loop
+    /// pelo `tick_cd_noise` do Cabinet, não pelo `play` one-shot.
+    CdSeek,
 }
 
 struct Embedded(&'static [u8]);
@@ -42,6 +47,7 @@ fn embedded(name: Sfx) -> Embedded {
         Sfx::PowerOff => Embedded(include_bytes!("sfx/power_off.wav")),
         Sfx::Reset => Embedded(include_bytes!("sfx/reset.wav")),
         Sfx::Achievement => Embedded(include_bytes!("sfx/achievement.wav")),
+        Sfx::CdSeek => Embedded(include_bytes!("sfx/cd_seek.wav")),
     }
 }
 
@@ -56,6 +62,7 @@ struct Bank {
     power_off: Option<Vec<i16>>,
     reset: Option<Vec<i16>>,
     achievement: Option<Vec<i16>>,
+    cd_seek: Option<Vec<i16>>,
 }
 
 static BANK: OnceLock<Bank> = OnceLock::new();
@@ -68,6 +75,7 @@ fn bank() -> &'static Bank {
         power_off: decode(embedded(Sfx::PowerOff).0),
         reset: decode(embedded(Sfx::Reset).0),
         achievement: decode(embedded(Sfx::Achievement).0),
+        cd_seek: decode(embedded(Sfx::CdSeek).0),
     })
 }
 
@@ -84,6 +92,7 @@ pub fn play(cab: &mut Cabinet, name: Sfx) -> bool {
         Sfx::PowerOff => &b.power_off,
         Sfx::Reset => &b.reset,
         Sfx::Achievement => &b.achievement,
+        Sfx::CdSeek => &b.cd_seek,
     };
     let Some(samples) = bank_match else {
         return false;
@@ -123,6 +132,13 @@ fn decode(bytes: &[u8]) -> Option<Vec<i16>> {
         pos += 8 + len + (len & 1); // chunks are word-aligned
     }
     samples
+}
+
+/// O loop do leitor de CD (para o `tick_cd_noise` do Cabinet). `None` quando
+/// o embutido não decodificou.
+pub fn cd_seek_loop() -> Option<&'static [i16]> {
+    let b = bank();
+    b.cd_seek.as_deref()
 }
 
 #[cfg(test)]

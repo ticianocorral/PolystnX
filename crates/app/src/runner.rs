@@ -1853,6 +1853,11 @@ pub fn run_game(
         spec.rom.clone(),
     );
     let mut in_flight = false;
+    // Som do leitor de CD (plano revision: "na hesitação do core ou atraso
+    // do quadro, inserir o som de leitura do cd"): a última vez que um
+    // quadro REAL chegou — `None` desde o ligar (o drive lê no boot).
+    let cd_loop: Option<&'static [i16]> = crate::sfx::cd_seek_loop();
+    let mut last_frame_at: Option<Instant> = None;
     /// Último quadro apresentável (já convertido para XRGB8888).
     struct LastFrame {
         w: u32,
@@ -2837,6 +2842,7 @@ pub fn run_game(
                     }
 
                     if let Some(frame) = &out.frame {
+                        last_frame_at = Some(Instant::now());
                         // O clique do "Printscreen" que estava pendente segura
                         // ESTE quadro (o primeiro depois do clique) e abre a
                         // modal de slots — a captura original do fluxo antigo.
@@ -2925,9 +2931,19 @@ pub fn run_game(
                 cab.set_session_time(live_session_time(powered_elapsed, powered_since));
                 cab.present_frame(&lf.fref(), *aspect);
             }
+            // O drive "lê" quando o core hesita: mais de 250 ms desde o
+            // último quadro real (ou desde o ligar — o boot lê o disco).
+            if let Some(loop_samples) = cd_loop {
+                let hesitating =
+                    last_frame_at.is_none_or(|t| t.elapsed() > Duration::from_millis(250));
+                cab.tick_cd_noise(hesitating, loop_samples, crate::sfx::RATE);
+            }
         } else if paused {
             // Paused, not stepping: the book, not a frozen game frame.
             cab.present_pause();
+            if let Some(loop_samples) = cd_loop {
+                cab.tick_cd_noise(false, loop_samples, crate::sfx::RATE);
+            }
         } else {
             // A save/load-state or print slot picker is open (plan
             // revision): the modal, frozen same as the book is.

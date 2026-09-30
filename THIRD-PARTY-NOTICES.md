@@ -149,3 +149,13 @@ Parser de PDF usado pelo leitor de manuais (`crates/app/src/manual.rs`):
 [lopdf](https://github.com/J-F-Liu/lopdf), licenciado sob **MIT** — o app
 apenas extrai as imagens de páginas embutidas dos PDFs que o próprio
 usuário coloca em `assets/manual/`; nada de PDF é distribuído com o app.
+
+## Sons de foley (insert/eject/power/reset — Pixabay; cd_seek — YouTube)
+
+Os efeitos `insert.wav`, `eject.wav`, `power_on.wav`, `power_off.wav` e
+`reset.wav` vêm do Pixabay (licença de conteúdo do Pixabay, sem atribuição
+obrigatória — mantida aqui por cortesia). `cd_seek.wav` é um recorte de
+3 s (com crossfade de loop) do som de leitura do drive de CD-ROM do
+PlayStation publicado em
+[youtube.com/watch?v=5avty_d1rTI](https://www.youtube.com/watch?v=5avty_d1rTI),
+usado como efeito sonoro do leitor durante as hesitações do emulador.

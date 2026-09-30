@@ -166,6 +166,14 @@ pub struct FrameRef<'a> {
     pub pixels: &'a [u8],
 }
 
+/// O stream do leitor de CD: posição no loop embutido e volume corrente
+/// (fade de entrada/saída em passos de tick).
+struct CdNoise {
+    stream: AudioOut,
+    pos: usize,
+    level: f32,
+}
+
 pub struct Cabinet {
     canvas: WindowCanvas,
     /// Streaming texture at the incoming frame's resolution (game path).
@@ -273,6 +281,9 @@ pub struct Cabinet {
     /// the queued audio before the device ever plays it (the bug that made
     /// the first foley attempt silent).
     foley: Option<AudioOut>,
+    /// O loop do leitor de CD (hesitação do core): stream dedicado com fade
+    /// de entrada/saída — nunca corta o som no meio seco.
+    cd_noise: Option<CdNoise>,
     /// The "CH 3" channel banner's deadline during gameplay (plan revision:
     /// "quando ligar o console, mostrar por 3 segundos e remover da tela")
     /// — `None` means not showing. The static path (`present_static`)
@@ -920,6 +931,7 @@ impl Cabinet {
             hiss: None,
             hiss_rng: 0x2545_f491,
             foley: None,
+            cd_noise: None,
             ch3_until: None,
             canvas_rect,
             nameplate: BRAND.to_string(),
@@ -2158,6 +2170,58 @@ impl Cabinet {
             a.queue(&buf);
         }
         true
+    }
+
+    /// Um tick da máquina de som do leitor de CD: `on` = o core está
+    /// hesitando (boot, load, FMV) e o drive "lê". O loop entra com fade de
+    /// ~150 ms e sai com fade igual — nenhum corte seco no meio do som.
+    /// Chame uma vez por tick de interface; a fila anda sozinha.
+    pub fn tick_cd_noise(&mut self, on: bool, samples: &'static [i16], rate: u32) {
+        const FADE_TICKS: f32 = 9.0; // ~150 ms a 60 fps
+        const CHUNK: usize = 368; // ~1/60 s de 22 050 Hz
+        if on {
+            if self.cd_noise.is_none() {
+                match AudioOut::new(&self.audio, rate) {
+                    Ok(stream) => {
+                        self.cd_noise = Some(CdNoise {
+                            stream,
+                            pos: 0,
+                            level: 0.0,
+                        });
+                    }
+                    Err(e) => {
+                        log::warn!("cd noise stream: {e}");
+                        return;
+                    }
+                }
+            }
+            if let Some(cd) = &mut self.cd_noise {
+                cd.level = (cd.level + 1.0 / FADE_TICKS).min(1.0);
+                let mut buf = Vec::with_capacity(CHUNK * 2);
+                for i in 0..CHUNK {
+                    let s = samples[(cd.pos + i) % samples.len()] as f32 * cd.level;
+                    let v = s.clamp(-32000.0, 32000.0) as i16;
+                    buf.push(v);
+                    buf.push(v);
+                }
+                cd.pos = (cd.pos + CHUNK) % samples.len();
+                cd.stream.queue(&buf);
+            }
+        } else if let Some(mut cd) = self.cd_noise.take() {
+            // Saída com fade: fila o que falta do fade e encerra o stream.
+            while cd.level > 0.0 {
+                cd.level = (cd.level - 1.0 / FADE_TICKS).max(0.0);
+                let mut buf = Vec::with_capacity(CHUNK * 2);
+                for i in 0..CHUNK {
+                    let s = samples[(cd.pos + i) % samples.len()] as f32 * cd.level;
+                    let v = s.clamp(-32000.0, 32000.0) as i16;
+                    buf.push(v);
+                    buf.push(v);
+                }
+                cd.pos = (cd.pos + CHUNK) % samples.len();
+                cd.stream.queue(&buf);
+            }
+        }
     }
 
     /// Queue one frame's worth of hiss at `level` (the same 0..1 the visual
