@@ -56,7 +56,7 @@ const RA_ROW_SENHA: usize = 2;
 fn row_count(sec: usize, cfg: &Config) -> usize {
     match sec {
         SEC_JOGO => 2,
-        SEC_VIDEO => 2,
+        SEC_VIDEO => 3,
         SEC_SISTEMA => 3,
         // usuário / token / senha / testar login / hardcore
         SEC_CONQUISTAS => 5,
@@ -464,10 +464,14 @@ fn activate_row(
                 cab.toggle_fullscreen();
                 let _ = cfg.save();
             }
-            _ => {
+            1 => {
                 cfg.hiss_on_static = !cfg.hiss_on_static;
                 let _ = cfg.save();
                 cab.set_static_hiss(cfg.hiss_on_static);
+            }
+            _ => {
+                cfg.mute_game = !cfg.mute_game;
+                let _ = cfg.save();
             }
         },
         SEC_SISTEMA => match i {
@@ -536,6 +540,10 @@ fn adjust_row(cfg: &mut Config, sec: usize, sel: usize, cab: &mut Cabinet, right
             cfg.hiss_on_static = !cfg.hiss_on_static;
             let _ = cfg.save();
             cab.set_static_hiss(cfg.hiss_on_static);
+        }
+        (SEC_VIDEO, 2) => {
+            cfg.mute_game = !cfg.mute_game;
+            let _ = cfg.save();
         }
         (SEC_SISTEMA, 1) => {
             cfg.check_updates_on_start = !cfg.check_updates_on_start;
@@ -702,6 +710,10 @@ fn draw_video(d: &mut Screen, cfg: &Config, sel: usize) {
             } else {
                 "desligado"
             }
+        ),
+        format!(
+            "Silenciar o jogo (só o leitor): {}",
+            if cfg.mute_game { "ligado" } else { "desligado" }
         ),
     ];
     for (i, row) in rows.iter().enumerate() {

@@ -29,6 +29,8 @@ pub struct Config {
     /// — plan revision: "som de chiado de tv fora do ar ... colocar na
     /// configuração para tocar ou não. por padrão vem desligado".
     pub hiss_on_static: bool,
+    /// Silencia o áudio do jogo (só o som de ambiente do leitor toca).
+    pub mute_game: bool,
     /// RetroAchievements account (plan: `docs/plano-retroachievements.md`,
     /// fase 1) — the username and the web-API token the user generates on
     /// retroachievements.org (Settings → Web API). Both empty (the default)
@@ -67,6 +69,7 @@ struct Raw {
     check_updates_on_start: Option<bool>,
     #[serde(default)]
     hiss_on_static: Option<bool>,
+    mute_game: Option<bool>,
     #[serde(default)]
     ra_user: Option<String>,
     #[serde(default)]
@@ -102,6 +105,7 @@ impl Config {
             fullscreen: true,
             check_updates_on_start: true,
             hiss_on_static: false,
+            mute_game: false,
             ra_user: String::new(),
             ra_token: String::new(),
             ra_hardcore: true,
@@ -149,6 +153,9 @@ impl Config {
         }
         if let Some(h) = raw.hiss_on_static {
             self.hiss_on_static = h;
+        }
+        if let Some(m) = raw.mute_game {
+            self.mute_game = m;
         }
         if let Some(u) = raw.ra_user {
             self.ra_user = u;
@@ -223,6 +230,10 @@ impl Config {
             self.check_updates_on_start
         ));
         s.push_str(&format!("hiss_on_static = {}\n\n", self.hiss_on_static));
+        s.push_str(&format!(
+            "# mute_game: silencia o áudio do jogo (fica só o som ambiente do leitor).\nmute_game = {}\n\n",
+            self.mute_game
+        ));
         s.push_str("# RetroAchievements\n");
         s.push_str(&format!("ra_user = {:?}\n", self.ra_user));
         s.push_str(&format!("ra_token = {:?}\n", self.ra_token));
@@ -265,6 +276,7 @@ mod tests {
             fullscreen: false,
             check_updates_on_start: true,
             hiss_on_static: false,
+            mute_game: false,
             ra_user: String::new(),
             ra_token: String::new(),
             ra_hardcore: true,

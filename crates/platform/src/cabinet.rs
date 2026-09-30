@@ -2178,6 +2178,7 @@ impl Cabinet {
     /// Chame uma vez por tick de interface; a fila anda sozinha.
     pub fn tick_cd_noise(&mut self, on: bool, samples: &'static [i16], rate: u32) {
         const FADE_TICKS: f32 = 9.0; // ~150 ms a 60 fps
+        const AMBIENT: f32 = 0.20; // bem abaixo do áudio do jogo
         const CHUNK: usize = 368; // ~1/60 s de 22 050 Hz
         if on {
             if self.cd_noise.is_none() {
@@ -2199,7 +2200,7 @@ impl Cabinet {
                 cd.level = (cd.level + 1.0 / FADE_TICKS).min(1.0);
                 let mut buf = Vec::with_capacity(CHUNK * 2);
                 for i in 0..CHUNK {
-                    let s = samples[(cd.pos + i) % samples.len()] as f32 * cd.level;
+                    let s = samples[(cd.pos + i) % samples.len()] as f32 * cd.level * AMBIENT;
                     let v = s.clamp(-32000.0, 32000.0) as i16;
                     buf.push(v);
                     buf.push(v);
@@ -2213,7 +2214,7 @@ impl Cabinet {
                 cd.level = (cd.level - 1.0 / FADE_TICKS).max(0.0);
                 let mut buf = Vec::with_capacity(CHUNK * 2);
                 for i in 0..CHUNK {
-                    let s = samples[(cd.pos + i) % samples.len()] as f32 * cd.level;
+                    let s = samples[(cd.pos + i) % samples.len()] as f32 * cd.level * AMBIENT;
                     let v = s.clamp(-32000.0, 32000.0) as i16;
                     buf.push(v);
                     buf.push(v);

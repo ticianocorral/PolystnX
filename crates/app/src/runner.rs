@@ -2775,7 +2775,7 @@ pub fn run_game(
                     if spec.debug_note_capture && frames == debug_note_frame {
                         note_request = Some(note_slot);
                     }
-                    if audio.queued_frames() < audio_cap {
+                    if audio.queued_frames() < audio_cap && !cfg.mute_game {
                         audio.queue(&out.audio);
                     }
 
