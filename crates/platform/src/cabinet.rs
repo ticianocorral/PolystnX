@@ -821,17 +821,14 @@ struct ImgTex {
     tex: Texture,
     w: u32,
     h: u32,
-    /// The opaque content's bounding box inside the texture, in texture
-    /// pixels — the art's transparent margins excluded (`content_bbox`).
-    /// The cartridge slot scene fits and seats the cartridge by this box, so
-    /// the cart's actual body — not its empty canvas — spans the base and
-    /// meets the slot mouth.
-    content: (u32, u32, u32, u32),
 }
 
 /// The bounding box of pixels with any alpha, in texture pixels — an
 /// image-sized box when the art has no transparency at all. Scans at most
 /// one pass over the RGBA buffer (art textures are loaded once).
+/// Só os testes usam hoje (o encaixe por bounding box saiu com o corpo do
+/// console); mantida pela verificação de regressão.
+#[cfg_attr(not(test), allow(dead_code))]
 fn content_bbox(w: u32, h: u32, rgba: &[u8]) -> (u32, u32, u32, u32) {
     let (mut min_x, mut min_y) = (w, h);
     let (mut max_x, mut max_y) = (0u32, 0u32);
@@ -1983,8 +1980,7 @@ impl Cabinet {
         }
         tex.set_blend_mode(BlendMode::Blend);
         tex.set_scale_mode(SdlScaleMode::Linear);
-        let content = content_bbox(w, h, rgba);
-        self.images.insert(id, ImgTex { tex, w, h, content });
+        self.images.insert(id, ImgTex { tex, w, h });
     }
 
     /// Draw a 2D frame: `draw` renders into a screen-sized buffer (coords
