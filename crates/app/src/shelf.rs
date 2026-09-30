@@ -552,35 +552,18 @@ fn pick_play(
 /// panel's buttons.)
 fn game_info_lines(entry: &CatalogEntry, playtime_secs: u64) -> Vec<(String, String)> {
     vec![
-        ("cartucho".to_string(), cart_size(entry.rom.size)),
+        ("disco".to_string(), cart_size(entry.rom.size)),
         ("tempo total".to_string(), format_playtime(playtime_secs)),
     ]
 }
 
-/// The cartridge size the box used to print, in megabits (plan revision:
-/// "abaixo do tamanho do jogo ... o tamanho do cartucho (ex: SF Alpha 2 é
-/// 32 mega)") — the ROM's size with a 512-byte copier header stripped,
-/// rounded up to the mask sizes SNES carts actually came in (a 512 KB game
-/// is "4 megas", a 4 MB one "32 megas").
+/// O tamanho do disco de CD-ROM em MB ("disco: 652 MB"). Discos de PSX não
+/// têm os "mask sizes" de cartucho de SNES — é o tamanho real do arquivo,
+/// arredondado para cima para o MB inteiro.
 fn cart_size(bytes: u64) -> String {
     const MIB: u64 = 1024 * 1024;
-    const MASK_SIZES: [u64; 12] = [2, 4, 8, 12, 16, 20, 24, 28, 32, 40, 48, 64];
-    let eff = if bytes % 0x2000 == 512 {
-        bytes - 512
-    } else {
-        bytes
-    };
-    let mbit = (eff * 8).div_ceil(MIB); // round up to whole megabits
-    let snapped = MASK_SIZES
-        .iter()
-        .copied()
-        .find(|&s| mbit <= s)
-        .unwrap_or(mbit);
-    if snapped == 1 {
-        "1 mega".to_string()
-    } else {
-        format!("{snapped} megas")
-    }
+    let mb = bytes.div_ceil(MIB);
+    format!("{mb} MB")
 }
 
 /// Total powered-on time for a game (plan revision: "mostrar tempo total de
@@ -2740,16 +2723,11 @@ mod cart_tests {
     use super::*;
 
     #[test]
-    fn cart_size_matches_the_box_labels() {
+    fn cart_size_shows_the_disc_mb() {
         let mib = 1024 * 1024;
-        assert_eq!(cart_size(4 * mib), "32 megas"); // SF Alpha 2
-        assert_eq!(cart_size(512 * 1024), "4 megas"); // Super Mario World
-        assert_eq!(cart_size(3 * mib), "24 megas"); // e.g. Mortal Kombat II? no — 24 Mbit carts exist
-        assert_eq!(cart_size(6 * mib), "48 megas"); // Tales of Phantasia
-                                                    // Copier headers don't inflate the cartridge.
-        assert_eq!(cart_size(512 * 1024 + 512), "4 megas");
-        assert_eq!(cart_size(4 * mib + 512), "32 megas");
-        // Below the smallest mask: rounds up to it.
-        assert_eq!(cart_size(8 * 1024), "2 megas");
+        // Discos de PSX: o tamanho real do arquivo, em MB inteiros.
+        assert_eq!(cart_size(652 * mib + 4096), "653 MB"); // Tekken 3 (Track 1 ~652 MB)
+        assert_eq!(cart_size(mib), "1 MB");
+        assert_eq!(cart_size(0), "0 MB");
     }
 }

@@ -240,7 +240,7 @@ default keys (gameplay only): arrows=dpad  Z=B X=A A=Y S=X Q=L W=R\n\
 Everything else — power, eject, reset, the notebook (Anotacoes: free text\n\
 and a fixed 15-slot photo album per game, pin a slot to feature it in the\n\
 side panel), Cheats (a checklist modal sourced from the full\n\
-libretro-database SNES set, matched by the ROM's own title — absent when\n\
+libretro-database PSX set, matched by the ROM's own title — absent when\n\
 nothing in there matches), Printscreen, save/load state (all three open a\n\
 slot-picker modal) — is a clickable button in the side panel (or the\n\
 pause book's own buttons once paused); none of it is keyboard-bindable\n\

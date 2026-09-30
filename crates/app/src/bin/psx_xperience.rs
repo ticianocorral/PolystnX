@@ -5,7 +5,7 @@
 //! `xperience_app::dirs`) — next to the executable on Windows/Linux,
 //! `~/Documents/PSX Xperience` on macOS — drop ROMs in `roms/` and go.
 //!
-//! The idle screen (TV off, "Inserir cartucho"/"Configurações" in place of
+//! The idle screen (TV off, "Estante de games"/"Configurações" in place of
 //! the logo) is the app's home: it's what you see at startup, after backing
 //! out of the shelf, and after ejecting a game — only closing the window
 //! ends the app. Nothing here uses the keyboard (plan revision:

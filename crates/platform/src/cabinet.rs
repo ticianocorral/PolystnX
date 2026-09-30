@@ -3659,7 +3659,7 @@ fn draw_brand(
         return arrows;
     }
     // A '\n' in the label stacks lines (plan revision: "no nameplate colocar
-    // a versão do SwanStation abaixo do snes xperience") — the block centred in
+    // a versão do SwanStation abaixo do psx xperience") — the block centred in
     // the chin. When the chin can't fit them all, keep only the first (the
     // app's own name/version) rather than spilling over the bezel.
     let lines: Vec<&str> = label.split('\n').collect();

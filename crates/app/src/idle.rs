@@ -667,11 +667,11 @@ fn draw_setup(
     let center_x = |s: &str, scale: u32| (w - s.chars().count() as i32 * CELL * scale as i32) / 2;
 
     d.text(
-        center_x("bem-vindo ao snes xperience", 3),
+        center_x("bem-vindo ao psx xperience", 3),
         h * 12 / 100,
         3,
         SETUP_TEXT,
-        "bem-vindo ao snes xperience",
+        "bem-vindo ao psx xperience",
     );
     d.text(
         center_x("para jogar, faltam dois downloads", 1),
