@@ -386,6 +386,8 @@ enum ChinOsd {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum PanelButton {
     Insert,
+    /// "Ligar sem disco" — boot direto na BIOS a partir da tela inicial.
+    BootBios,
     Settings,
     /// The idle screen's dev-mode button (plan revision: "habilitar botão em
     /// cima da configuração") — only drawn while the app's dev mode is on,
@@ -4232,6 +4234,7 @@ fn draw_panel(
         // Same footprint as the game panel's cartridge block, so backing out
         // of the shelf or ejecting lands on a panel shaped exactly like the
         // gameplay one.
+        let mut buttons_idle: Option<Rect> = None;
         const INSERT_H: u32 = 230;
         let insert_block = Rect::new(x, cy, inner_w, INSERT_H);
         let insert_drawn = draw_idle_slot(
@@ -4244,6 +4247,15 @@ fn draw_panel(
         );
         cy += INSERT_H as i32;
 
+        // "Ligar sem disco": boot direto na BIOS do console — faixa própria
+        // abaixo do bloco do console, mesma largura.
+        let btn_h = (GLYPH_H + 12) as i32;
+        if cy + btn_h + 60 <= rect.bottom() {
+            let bios_btn = Rect::new(x, cy + 4, inner_w, btn_h as u32);
+            buttons_idle = Some(draw_button(canvas, font, bios_btn, "Ligar sem disco", true));
+            cy += btn_h + 8;
+        }
+
         // The console's own controls, the same geometry the game panel
         // draws (plan revision: "é como se fosse a tela do jogo mesmo") —
         // Power/Reset/Eject e os MC slots já vivem na face do console —
@@ -4255,6 +4267,10 @@ fn draw_panel(
         let settings = Rect::new(x, rect.bottom() - pad - btn_h, inner_w, btn_h as u32);
         let mut buttons = vec![
             (PanelButton::Insert, insert_drawn),
+            (
+                PanelButton::BootBios,
+                buttons_idle.unwrap_or_else(|| Rect::new(0, 0, 0, 0)),
+            ),
             (
                 PanelButton::Settings,
                 draw_button(canvas, font, settings, "Configurações", true),

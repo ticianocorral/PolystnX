@@ -142,6 +142,8 @@ pub enum UiEvent {
     OpenCards,
     /// O mesmo para o "MC slot 2".
     OpenCards2,
+    /// Ligar o console SEM disco — boot direto na BIOS.
+    BootBios,
     /// Abrir o seletor de discos do jogo (m3u, plano §6) — o bloco
     /// "Discos" da pausa.
     OpenDiscos,

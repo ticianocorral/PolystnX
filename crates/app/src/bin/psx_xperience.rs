@@ -45,6 +45,7 @@ struct Args {
     core: Option<PathBuf>,
     config: Option<PathBuf>,
     save_dir: PathBuf,
+    #[allow(dead_code)] // a BIOS escolhida define o system_dir efetivo
     system_dir: PathBuf,
     notes_dir: PathBuf,
     order: Order,
@@ -233,6 +234,12 @@ fn main() -> Result<()> {
             dat.as_ref().and_then(|d| d.as_ref()),
         )
     };
+    // A BIOS padrão (configurações → bios): o core recebe o diretório de
+    // staging com o symlink da escolhida; sem escolha, a pasta raiz.
+    let effective_system_dir = xperience_app::bios::selected_system_dir(
+        &xperience_app::dirs::bios_dir(),
+        cfg.bios_default.as_deref(),
+    );
     let mut catalog = open_catalog().with_context(|| "opening the catalog")?;
     log::info!("{} rom(s) in roms/", catalog.counts()?);
 
@@ -266,6 +273,7 @@ fn main() -> Result<()> {
             card1: None,
             card2: None,
             display_title: None,
+            bios: false,
             cartridge,
             shot_off: false,
             debug_note_capture: false,
@@ -376,6 +384,39 @@ fn main() -> Result<()> {
         match exit {
             IdleExit::Quit => break 'app,
             IdleExit::OpenShelf => shelf_opts.fade_in = Some(idle_static),
+            IdleExit::BootBios => {
+                // Ligar SEM disco: boot direto na BIOS (menu do console).
+                let Some(core) = core_path.clone() else {
+                    continue;
+                };
+                let spec = GameSpec {
+                    core,
+                    rom: PathBuf::new(),
+                    system_dir: effective_system_dir.clone(),
+                    save_dir: args.save_dir.clone(),
+                    notes_dir: args.notes_dir.clone(),
+                    runahead: None,
+                    shot: None,
+                    logo: None,
+                    card1: None,
+                    card2: None,
+                    display_title: None,
+                    bios: true,
+                    cartridge: None,
+                    shot_off: false,
+                    debug_note_capture: false,
+                    debug_shot_pause: false,
+                    debug_shot_modal: None,
+                    debug_cart_anim: None,
+                };
+                match run_game(&mut plat, &mut cab, &spec, &cfg)? {
+                    GameExit::Ejected { static_level } => {
+                        idle_static = static_level;
+                    }
+                    GameExit::Quit => break 'app,
+                }
+                continue;
+            }
             IdleExit::OpenDev => {
                 // O menu do devmode (plan revision: "por enquanto criar menu
                 // em branco apenas com o botão voltar") — `true` aqui é o
@@ -477,7 +518,7 @@ fn main() -> Result<()> {
             let spec = GameSpec {
                 core: core.clone(),
                 rom,
-                system_dir: args.system_dir.clone(),
+                system_dir: effective_system_dir.clone(),
                 save_dir: args.save_dir.clone(),
                 notes_dir: args.notes_dir.clone(),
                 runahead: args.runahead,
@@ -486,6 +527,7 @@ fn main() -> Result<()> {
                 card1: None,
                 card2: None,
                 display_title,
+                bios: false,
                 cartridge,
                 shot_off: false,
                 debug_note_capture: false,

@@ -345,7 +345,28 @@ impl Core {
     }
 
     /// Load a ROM. `data` is the ROM bytes; `path` is its on-disk location,
-    /// required by cores whose `need_fullpath` is set.
+    /// Carrega SEM disco: `retro_load_game` com conteúdo nulo — o
+    /// SwanStation boota a BIOS (menu do console).
+    pub fn load_bios(&mut self) -> Result<(), CoreError> {
+        let info = retro_game_info {
+            path: ptr::null(),
+            data: ptr::null(),
+            size: 0,
+            meta: ptr::null(),
+        };
+        let ok = self.enter(|api| unsafe { (api.retro_load_game)(&info) });
+        if !ok {
+            return Err(CoreError::LoadRejected);
+        }
+        self.loaded = true;
+        self.enter(|api| unsafe {
+            (api.retro_set_controller_port_device)(0, RETRO_DEVICE_JOYPAD);
+            (api.retro_set_controller_port_device)(1, RETRO_DEVICE_JOYPAD);
+        });
+        self.refresh_av_info();
+        Ok(())
+    }
+
     pub fn load_game(&mut self, path: &Path, data: &[u8]) -> Result<(), CoreError> {
         let c_path = CString::new(path.to_string_lossy().into_owned()).unwrap_or_default();
         let info = if self.needs_fullpath {

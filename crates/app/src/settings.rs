@@ -38,12 +38,20 @@ const RUNAHEAD_MAX: u32 = 4;
 /// The settings sections, in panel order — the tube shows one section's
 /// rows at a time; the panel's `Section(i)` buttons switch between them
 /// (plan revision: "se for interessante faça secoes na configuração").
-const SECTION_NAMES: [&str; 5] = ["jogo", "vídeo", "sistema", "conquistas", "controles"];
+const SECTION_NAMES: [&str; 6] = [
+    "jogo",
+    "vídeo",
+    "sistema",
+    "conquistas",
+    "controles",
+    "bios",
+];
 const SEC_JOGO: usize = 0;
 const SEC_VIDEO: usize = 1;
 const SEC_SISTEMA: usize = 2;
 const SEC_CONQUISTAS: usize = 3;
 const SEC_CONTROLES: usize = 4;
+const SEC_BIOS: usize = 5;
 
 /// How many rows a section shows — shared by the nav clamps and the click
 /// hit-test so they can't drift apart. `controles` is the key-bind list, so
@@ -61,6 +69,8 @@ fn row_count(sec: usize, cfg: &Config) -> usize {
         // usuário / token / senha / testar login / hardcore
         SEC_CONQUISTAS => 5,
         SEC_CONTROLES => cfg.keymap.describe().len(),
+        // uma linha por arquivo de BIOS na pasta
+        SEC_BIOS => crate::bios::list(&crate::dirs::bios_dir()).len().max(1),
         _ => 0,
     }
 }
@@ -243,6 +253,7 @@ pub fn run(plat: &mut Platform, cab: &mut Cabinet, cfg: &mut Config) -> Result<b
                     draw_conquistas(d, cfg, sel, &login_status, ra_editing, &ra_draft)
                 }
                 SEC_CONTROLES => draw_controls(d, cfg, sel, controls_top, awaiting_key),
+                SEC_BIOS => draw_bios(d, cfg, sel),
                 _ => draw_jogo(d, cfg, sel),
             };
             cab.frame_settings(BG, render);
@@ -419,6 +430,7 @@ pub fn run(plat: &mut Platform, cab: &mut Cabinet, cfg: &mut Config) -> Result<b
             SEC_SISTEMA => draw_sistema(d, cfg, sel, &core_status, rename_status.as_deref()),
             SEC_CONQUISTAS => draw_conquistas(d, cfg, sel, &login_status, ra_editing, &ra_draft),
             SEC_CONTROLES => draw_controls(d, cfg, sel, controls_top, awaiting_key),
+            SEC_BIOS => draw_bios(d, cfg, sel),
             _ => draw_jogo(d, cfg, sel),
         };
         cab.frame_settings(BG, render);
@@ -491,6 +503,18 @@ fn activate_row(
             }
         },
         SEC_CONTROLES => *awaiting_key = Some(*sel),
+        SEC_BIOS => {
+            let files = crate::bios::list(&crate::dirs::bios_dir());
+            if let Some(info) = files.get(*sel) {
+                let same = cfg.bios_default.as_deref() == Some(info.file.as_str());
+                cfg.bios_default = if same { None } else { Some(info.file.clone()) };
+                let _ = cfg.save();
+                crate::bios::selected_system_dir(
+                    &crate::dirs::bios_dir(),
+                    cfg.bios_default.as_deref(),
+                );
+            }
+        }
         _ => {}
     }
 }
@@ -549,6 +573,7 @@ fn adjust_row(cfg: &mut Config, sec: usize, sel: usize, cab: &mut Cabinet, right
             cfg.check_updates_on_start = !cfg.check_updates_on_start;
             let _ = cfg.save();
         }
+        (SEC_BIOS, _) => {}
         (SEC_CONQUISTAS, 4) => {
             cfg.ra_hardcore = !cfg.ra_hardcore;
             let _ = cfg.save();
@@ -901,6 +926,7 @@ pub fn capture_preview(
         SEC_SISTEMA => draw_sistema(d, cfg, 0, &CoreStatus::Idle, None),
         SEC_CONQUISTAS => draw_conquistas(d, cfg, 0, &LoginStatus::Idle, None, ""),
         SEC_CONTROLES => draw_controls(d, cfg, 0, 0, None),
+        SEC_BIOS => draw_bios(d, cfg, 0),
         _ => draw_jogo(d, cfg, 0),
     };
     cab.set_close_button(true);
@@ -911,4 +937,38 @@ pub fn capture_preview(
 fn draw_row(d: &mut Screen, x: i32, y: i32, label: &str, selected: bool) {
     let (cursor, color) = if selected { ("> ", TEXT) } else { ("  ", DIM) };
     d.text(x, y, 1, color, &format!("{cursor}{label}"));
+}
+
+/// A seção BIOS: uma linha por arquivo em `bios/`, com a informação da
+/// própria ROM; a escolhida como padrão leva a marca.
+fn draw_bios(d: &mut Screen, cfg: &Config, sel: usize) {
+    let x = MARGIN;
+    d.text(x, MARGIN, 2, TEXT, "bios");
+    let mut y = LIST_TOP;
+    let files = crate::bios::list(&crate::dirs::bios_dir());
+    if files.is_empty() {
+        d.text(
+            x,
+            y,
+            1,
+            DIM,
+            "nenhuma BIOS em bios/ — coloque o arquivo .BIN lá",
+        );
+        return;
+    }
+    let chosen = cfg
+        .bios_default
+        .clone()
+        .unwrap_or_else(|| "automático (o core varre a pasta)".into());
+    d.text(x, y, 1, DIM, &format!("padrão: {chosen}"));
+    y += ROW_H + 8;
+    for (i, info) in files.iter().enumerate() {
+        let mut label = info.label();
+        if cfg.bios_default.as_deref() == Some(info.file.as_str()) {
+            label.push_str("  ← padrão");
+        }
+        let (cursor, color) = if i == sel { ("> ", TEXT) } else { ("  ", DIM) };
+        d.text(x, y, 1, color, &format!("{cursor}{label}"));
+        y += ROW_H;
+    }
 }

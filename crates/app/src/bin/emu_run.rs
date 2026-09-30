@@ -28,6 +28,7 @@ struct Args {
     /// o conteúdo vira o `SAVE_RAM` da sessão e o flush volta para o arquivo.
     card1: Option<PathBuf>,
     card2: Option<PathBuf>,
+    bios: bool,
     /// Speculative frames past the shown one; `None` = take the config value.
     runahead: Option<u32>,
     /// Headless self-check: run N frames, save the composited window, exit.
@@ -58,6 +59,7 @@ fn parse_args() -> Result<Args> {
     let mut config = None;
     let mut card1 = None;
     let mut card2 = None;
+    let mut bios = false;
     let mut runahead = None;
     let mut shot = None;
     let mut shot_frame = 180u32;
@@ -114,6 +116,7 @@ fn parse_args() -> Result<Args> {
                         .into(),
                 )
             }
+            "--bios" => bios = true,
             "--card2" => {
                 card2 = Some(
                     it.next()
@@ -189,7 +192,11 @@ fn parse_args() -> Result<Args> {
     }
 
     let core = core.ok_or_else(|| anyhow!("no core: pass --core or set $PSX_XPERIENCE_CORE"))?;
-    let rom = rom.ok_or_else(|| anyhow!("no ROM: pass --rom <file>"))?;
+    let rom = rom.or_else(|| if bios { Some(PathBuf::new()) } else { None });
+    let rom = match rom {
+        Some(r) => r,
+        None => anyhow::bail!("no ROM: pass --rom <file>"),
+    };
     let save_dir = save_dir.unwrap_or_else(|| PathBuf::from("."));
     // system directory do core = a BIOS (plano §1.1) — igual ao app.
     let system_dir = system_dir.unwrap_or_else(xperience_app::dirs::bios_dir);
@@ -203,6 +210,7 @@ fn parse_args() -> Result<Args> {
         config,
         card1,
         card2,
+        bios,
         runahead,
         shot,
         shot_frame,
@@ -277,6 +285,7 @@ fn main() -> Result<()> {
         card1: args.card1,
         card2: args.card2,
         display_title: None,
+        bios: args.bios,
         cartridge: args.cartridge,
         shot_off: args.shot_off,
         debug_note_capture: args.debug_note_capture,

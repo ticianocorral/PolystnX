@@ -13,6 +13,7 @@
 //! - [`shelf`] — the selector grid (`selector`, and `xperience` between games).
 //! - [`update_check`] — startup checks for a newer release/SwanStation core.
 
+pub mod bios;
 pub mod config;
 pub mod console_art;
 pub mod core_update;

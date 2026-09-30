@@ -87,6 +87,8 @@ pub struct GameSpec {
     /// de save/nota/cheat continuam chaveados pelo nome do arquivo do jogo —
     /// trocar o nome canônico nunca orfana um save.
     pub display_title: Option<String>,
+    /// Ligar SEM disco: boot direto na BIOS do console (menu de clock).
+    pub bios: bool,
     /// Local cartridge art (`assets/cartridge/<rom>.*`), shown in the panel
     /// alongside the logo when present (plan revision) — `None` just skips
     /// that block, no fallback needed.
@@ -1381,17 +1383,30 @@ pub fn run_game(
 
     // Identidade do disco para o log — o serial lido de dentro do CHD
     // (a chave da estante; o core recebe o caminho, disco é need_fullpath).
-    match xperience_domain::DiscId::from_path(&spec.rom) {
-        Ok(id) => log::info!("disco: {} ({} disco/s)", id.serial, id.discs),
-        Err(e) => log::warn!("disco: {e}"),
+    if spec.bios {
+        log::info!("sem disco — boot na BIOS");
+    } else {
+        match xperience_domain::DiscId::from_path(&spec.rom) {
+            Ok(id) => log::info!("disco: {} ({} disco/s)", id.serial, id.discs),
+            Err(e) => log::warn!("disco: {e}"),
+        }
     }
 
     // Discos não cabem em RAM: o core recebe o caminho (need_fullpath) e
     // lê o CHD por conta própria.
-    core.load_game(&spec.rom, &[])
-        .context("core rejected the disc")?;
+    // Sem disco: boot direto na BIOS (menu do console).
+    if spec.bios {
+        core.load_bios().context("core rejected the BIOS boot")?;
+    } else {
+        core.load_game(&spec.rom, &[])
+            .context("core rejected the disc")?;
+    }
 
-    let title = rom_title(&spec.rom);
+    let title = if spec.bios {
+        "BIOS".to_string()
+    } else {
+        rom_title(&spec.rom)
+    };
     // Painel: o nome canônico do DAT quando há — os arquivos continuam
     // chaveados pelo stem.
     let panel_title = spec.display_title.clone().unwrap_or_else(|| title.clone());
@@ -2119,6 +2134,7 @@ pub fn run_game(
                             PanelButton::Notebook => Some(UiEvent::TogglePause),
                             PanelButton::Cheats => Some(UiEvent::OpenCheatsModal),
                             PanelButton::Achievements => Some(UiEvent::OpenAchievementsModal),
+                            PanelButton::BootBios => Some(UiEvent::BootBios),
                             PanelButton::Cards1 => Some(UiEvent::OpenCards),
                             PanelButton::Cards2 => Some(UiEvent::OpenCards2),
                             PanelButton::Discos => Some(UiEvent::OpenDiscos),
@@ -2164,6 +2180,9 @@ pub fn run_game(
             .collect();
         for ev in events {
             match ev {
+                // Sem disco na sessão de jogo: ignorado aqui (o boot da BIOS
+                // vive na tela inicial; este é o painel do jogo).
+                UiEvent::BootBios => {}
                 UiEvent::Quit => {
                     if powered {
                         // Desligar (plan §3.3): flush the cart, then the

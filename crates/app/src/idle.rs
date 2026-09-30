@@ -52,6 +52,8 @@ pub enum IdleExit {
     /// "Dev" clicked — the dev-mode button that only exists once the Konami
     /// code has been entered on this screen (plan revision: "ultra secreto").
     OpenDev,
+    /// "Ligar sem disco" — boot direto na BIOS do console.
+    BootBios,
 }
 
 /// One clickable region of the setup screen, in output coordinates —
@@ -478,6 +480,7 @@ pub fn run(
                 // baixou o SwanStation") — os dois ficam inertes; o painel
                 // oferece o download do core no lugar.
                 Some(PanelButton::Insert) if !core_missing => return Ok(IdleExit::OpenShelf),
+                Some(PanelButton::BootBios) if !core_missing => return Ok(IdleExit::BootBios),
                 Some(PanelButton::Settings) if !core_missing => return Ok(IdleExit::OpenSettings),
                 // O botão só existe com o devmode ligado (só o painel o
                 // desenha), mas o gate fica explícito: sem devmode, cliques

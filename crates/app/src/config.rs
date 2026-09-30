@@ -31,6 +31,9 @@ pub struct Config {
     pub hiss_on_static: bool,
     /// Silencia o áudio do jogo (só o som de ambiente do leitor toca).
     pub mute_game: bool,
+    /// A BIOS padrão (nome do arquivo em `bios/`); `None` = o core varre a
+    /// pasta como sempre fez.
+    pub bios_default: Option<String>,
     /// RetroAchievements account (plan: `docs/plano-retroachievements.md`,
     /// fase 1) — the username and the web-API token the user generates on
     /// retroachievements.org (Settings → Web API). Both empty (the default)
@@ -70,6 +73,7 @@ struct Raw {
     #[serde(default)]
     hiss_on_static: Option<bool>,
     mute_game: Option<bool>,
+    bios_default: Option<String>,
     #[serde(default)]
     ra_user: Option<String>,
     #[serde(default)]
@@ -106,6 +110,7 @@ impl Config {
             check_updates_on_start: true,
             hiss_on_static: false,
             mute_game: false,
+            bios_default: None,
             ra_user: String::new(),
             ra_token: String::new(),
             ra_hardcore: true,
@@ -156,6 +161,9 @@ impl Config {
         }
         if let Some(m) = raw.mute_game {
             self.mute_game = m;
+        }
+        if let Some(b) = raw.bios_default.clone() {
+            self.bios_default = Some(b);
         }
         if let Some(u) = raw.ra_user {
             self.ra_user = u;
@@ -234,6 +242,12 @@ impl Config {
             "# mute_game: silencia o áudio do jogo (fica só o som ambiente do leitor).\nmute_game = {}\n\n",
             self.mute_game
         ));
+        if let Some(b) = &self.bios_default {
+            s.push_str(&format!(
+                "# bios_default: a BIOS ativa (os arquivos ficam em bios/).\nbios_default = \"{}\"\n\n",
+                b
+            ));
+        }
         s.push_str("# RetroAchievements\n");
         s.push_str(&format!("ra_user = {:?}\n", self.ra_user));
         s.push_str(&format!("ra_token = {:?}\n", self.ra_token));
@@ -277,6 +291,7 @@ mod tests {
             check_updates_on_start: true,
             hiss_on_static: false,
             mute_game: false,
+            bios_default: None,
             ra_user: String::new(),
             ra_token: String::new(),
             ra_hardcore: true,
