@@ -24,14 +24,11 @@ use xperience_platform::{
 
 use crate::idle;
 
-// Landscape, not portrait: the cover art dropped into `assets/cover/` is
-// horizontal (box-front scans, not spine-style portrait covers), so the tile
-// itself is wide-short rather than tall-narrow — `image_fit` would otherwise
-// letterbox a landscape image down to a sliver inside a portrait frame. Sized
-// up from the original 200x150 (same 4:3 tile shape, ~30% larger) so covers
-// read clearly on the shelf.
-const TILE_W: u32 = 260;
-const TILE_H: u32 = 195;
+// Quase quadrado, levemente mais alto que largo: capa de PSX é a fronda da
+// caixa de CD (jewel case), não a caixa 4:3 paisagem do SNES — `image_fit`
+// completa o encaixe para scans um pouco mais largos ou mais altos.
+const TILE_W: u32 = 230;
+const TILE_H: u32 = 244;
 const GAP: u32 = 18;
 const MARGIN: i32 = 28;
 /// Room reserved at the header row for the "N games" label and the filter
@@ -58,8 +55,8 @@ type RaExtras = (Option<String>, Vec<(String, String)>);
 /// A "jogados recentemente" strip above the main grid/list (plan revision) —
 /// the last played games, always in a single row. Both strips scroll
 /// horizontally now (see `STRIP_CAP`), so no fixed five-item cap anymore.
-const RECENT_TILE_W: u32 = 160;
-const RECENT_TILE_H: u32 = 120;
+const RECENT_TILE_W: u32 = 146;
+const RECENT_TILE_H: u32 = 155;
 const RECENT_GAP: u32 = 14;
 const RECENT_LABEL_H: i32 = 24;
 
