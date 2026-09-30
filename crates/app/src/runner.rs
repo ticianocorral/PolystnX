@@ -89,6 +89,9 @@ pub struct GameSpec {
     pub display_title: Option<String>,
     /// Ligar SEM disco: boot direto na BIOS do console (menu de clock).
     pub bios: bool,
+    /// A estante inteira (título, caminho) — alimenta o modal "Inserir
+    /// disco" da troca quente com a tampa aberta.
+    pub library: Vec<(String, PathBuf)>,
     /// Local cartridge art (`assets/cartridge/<rom>.*`), shown in the panel
     /// alongside the logo when present (plan revision) — `None` just skips
     /// that block, no fallback needed.
@@ -362,6 +365,8 @@ enum CoreCmd {
         path: PathBuf,
         tx: std::sync::mpsc::Sender<bool>,
     },
+    /// Sem disco + Reset: reseta e boota a BIOS (o console fica ligado).
+    BootBios,
     Quit,
 }
 
@@ -445,6 +450,12 @@ fn spawn_core_worker(
                         });
                     }
                     CoreCmd::Reset => core.reset(),
+                    CoreCmd::BootBios => {
+                        core.reset();
+                        if core.load_bios().is_err() {
+                            log::warn!("worker: boot pela BIOS recusado");
+                        }
+                    }
                     CoreCmd::CheatReset => core.cheat_reset(),
                     CoreCmd::CheatSet { i, on, code } => {
                         core.cheat_set(i, on, &code);
@@ -598,12 +609,16 @@ fn reset_pressed(flash: &HashMap<PanelButton, Instant>) -> bool {
 /// the notebook) is absent entirely when `has_cheats` is false — this
 /// cartridge has no curated codes, so a button that always opened an empty
 /// checklist would just be clutter.
+#[allow(clippy::too_many_arguments)]
 fn command_rows(
     flash: &HashMap<PanelButton, Instant>,
     has_cheats: bool,
     has_achievements: bool,
     has_discs: bool,
     all_slots_pinned: bool,
+    lid_open: bool,
+    disc_in: bool,
+    has_library: bool,
 ) -> Vec<(PanelButton, String)> {
     let label = |b: PanelButton, base: &str| -> String {
         if flashed(flash, b) {
@@ -621,6 +636,15 @@ fn command_rows(
     }
     if has_discs {
         rows.push((PanelButton::Discos, "Discos".to_string()));
+    }
+    // O botão da tampa: remover o disco assentado ou inserir outro — só
+    // existe com a tampa aberta (a trava é física, como no console).
+    if lid_open {
+        if disc_in {
+            rows.push((PanelButton::DiscRemover, "Remover disco".to_string()));
+        } else if has_library {
+            rows.push((PanelButton::DiscInserter, "Inserir disco".to_string()));
+        }
     }
     rows.push((
         PanelButton::PrintScreen,
@@ -1067,6 +1091,9 @@ enum Modal {
     /// O seletor de discos de um jogo m3u (plano §6): troca o disco no
     /// drive com a sessão viva, estado serializado por baixo.
     Discos,
+    /// A troca quente: escolher QUALQUER jogo da estante com a tampa aberta
+    /// e o console ligado (plano revision: "trocar disco com o power ligado").
+    Inserir,
 }
 
 /// One note slot's protection/caption (plan revision) — everything defaults
@@ -1576,7 +1603,7 @@ pub fn run_game(
     let mut flash: HashMap<PanelButton, Instant> = HashMap::new();
     // The command legend's last drawn signature (a "(feito!)" flash active?
     // all print slots pinned?) — `None` forces the first frame to draw it.
-    let mut prev_sig: Option<(bool, bool)> = None;
+    let mut prev_sig: Option<(bool, bool, bool, bool)> = None;
     let _ = &prev_sig;
     // Os discos do jogo (m3u, plano §6): `Some` com 2+ discos liga a linha
     // "Discos" dos comandos; o disco corrente começa no primeiro.
@@ -1597,12 +1624,19 @@ pub fn run_game(
         .as_ref()
         .and_then(|d| d.first().cloned())
         .unwrap_or_else(|| spec.rom.clone());
+    // Drive: tampa translúcida (OPEN abre/fecha sem desligar) e disco
+    // presente (removível só com a tampa aberta).
+    let mut lid_open = false;
+    let mut disc_in = true;
     let commands = command_rows(
         &flash,
         !cheat_defs.is_empty(),
         ra_session.is_some(),
         discs.is_some(),
         all_slots_pinned(&notes_meta),
+        false,
+        true,
+        !spec.library.is_empty(),
     );
     let decode_panel_art = |path: &Option<PathBuf>, kind: &str| {
         path.as_ref().and_then(|p| match decode_art(p, 640) {
@@ -1660,6 +1694,7 @@ pub fn run_game(
     // reached the screen — a real bug, caught by testing the panel's
     // "N cheats ativados" line and finding it never showed up at all.
     cab.set_cheats(&cheat_rows(&cheat_defs, &cheat_state));
+    cab.set_drive(lid_open, disc_in);
 
     // --- notes: the notebook block, empty until the first capture (§3.4) --
     fs::create_dir_all(&spec.notes_dir).ok();
@@ -2136,6 +2171,8 @@ pub fn run_game(
                             PanelButton::Cheats => Some(UiEvent::OpenCheatsModal),
                             PanelButton::Achievements => Some(UiEvent::OpenAchievementsModal),
                             PanelButton::BootBios => Some(UiEvent::BootBios),
+                            PanelButton::DiscRemover => Some(UiEvent::RemoveDisc),
+                            PanelButton::DiscInserter => Some(UiEvent::InsertDisc),
                             PanelButton::Cards1 => Some(UiEvent::OpenCards),
                             PanelButton::Cards2 => Some(UiEvent::OpenCards2),
                             PanelButton::Discos => Some(UiEvent::OpenDiscos),
@@ -2184,6 +2221,54 @@ pub fn run_game(
                 // Sem disco na sessão de jogo: ignorado aqui (o boot da BIOS
                 // vive na tela inicial; este é o painel do jogo).
                 UiEvent::BootBios => {}
+                UiEvent::ToggleLid => {
+                    lid_open = !lid_open;
+                    crate::sfx::play(
+                        cab,
+                        if lid_open {
+                            crate::sfx::Sfx::Eject
+                        } else {
+                            crate::sfx::Sfx::Insert
+                        },
+                    );
+                    cab.set_drive(lid_open, disc_in);
+                    cab.push_osd(
+                        &[if lid_open {
+                            "TAMPA ABERTA"
+                        } else {
+                            "TAMPA FECHADA"
+                        }],
+                        None,
+                        Duration::from_secs(2),
+                    );
+                }
+                UiEvent::RemoveDisc => {
+                    if !lid_open {
+                        cab.push_osd(&["ABRA A TAMPA (OPEN)"], None, Duration::from_secs(2));
+                    } else if disc_in {
+                        disc_in = false;
+                        cab.set_drive(lid_open, disc_in);
+                        crate::sfx::play(cab, crate::sfx::Sfx::Eject);
+                        cab.push_osd(&["DISCO REMOVIDO"], None, Duration::from_secs(2));
+                    }
+                }
+                UiEvent::InsertDisc => {
+                    if !lid_open {
+                        cab.push_osd(&["ABRA A TAMPA (OPEN)"], None, Duration::from_secs(2));
+                    } else if disc_in {
+                        cab.push_osd(&["REMOVA O DISCO ATUAL"], None, Duration::from_secs(2));
+                    } else if spec.library.is_empty() {
+                        cab.push_osd(&["NENHUM JOGO NA ESTANTE"], None, Duration::from_secs(2));
+                    } else {
+                        let rows: Vec<(String, bool)> = spec
+                            .library
+                            .iter()
+                            .map(|(t, _)| (t.clone(), true))
+                            .collect();
+                        modal = Modal::Inserir;
+                        cab.set_modal("Inserir disco", &rows);
+                    }
+                }
                 UiEvent::Quit => {
                     if powered {
                         // Desligar (plan §3.3): flush the cart, then the
@@ -2254,7 +2339,19 @@ pub fn run_game(
                 }
                 UiEvent::Eject => {
                     if powered {
-                        eject_clunk(plat); // lock resists while it's still on
+                        // OPEN com o console ligado: só a tampa (a troca de
+                        // disco é fria; o estado segue no core).
+                        eject_clunk(plat);
+                        lid_open = !lid_open;
+                        crate::sfx::play(
+                            cab,
+                            if lid_open {
+                                crate::sfx::Sfx::Eject
+                            } else {
+                                crate::sfx::Sfx::Insert
+                            },
+                        );
+                        cab.set_drive(lid_open, disc_in);
                     } else {
                         if let Some(ra) = &mut ra_session {
                             ra.save_progress();
@@ -2269,7 +2366,17 @@ pub fn run_game(
                 UiEvent::Reset => {
                     if powered {
                         drain_core!();
-                        let _ = core_tx.send(CoreCmd::Reset);
+                        if disc_in {
+                            let _ = core_tx.send(CoreCmd::Reset);
+                        } else {
+                            // Sem disco + Reset: o console boota a BIOS.
+                            let _ = core_tx.send(CoreCmd::BootBios);
+                            cab.push_osd(
+                                &["SEM DISCO — BOOT PELA BIOS"],
+                                None,
+                                Duration::from_secs(3),
+                            );
+                        }
                         crate::sfx::play(cab, crate::sfx::Sfx::Reset);
                         // Momentary rocker (plan revision) — springs back on
                         // its own next frame via `reset_pressed`/`RESET_SPRING`,
@@ -2683,6 +2790,28 @@ pub fn run_game(
                             );
                         }
                     }
+                    Modal::Inserir => {
+                        modal = Modal::None;
+                        cab.clear_modal();
+                        let Some((_, path)) = spec.library.get(i as usize) else {
+                            continue;
+                        };
+                        drain_core!();
+                        let (d_tx, d_rx) = std::sync::mpsc::channel();
+                        let _ = core_tx.send(CoreCmd::SwitchDisc {
+                            path: path.clone(),
+                            tx: d_tx,
+                        });
+                        if d_rx.recv().unwrap_or(false) {
+                            disc_in = true;
+                            current_disc = path.clone();
+                            cab.set_drive(lid_open, disc_in);
+                            crate::sfx::play(cab, crate::sfx::Sfx::Insert);
+                            cab.push_osd(&["DISCO INSERIDO"], None, Duration::from_secs(2));
+                        } else {
+                            cab.push_osd(&["FALHA AO INSERIR"], None, Duration::from_secs(2));
+                        }
+                    }
                     Modal::Discos => {
                         modal = Modal::None;
                         cab.clear_modal();
@@ -2766,7 +2895,7 @@ pub fn run_game(
         // Strings at 60fps for an unchanged panel was churn (perf pass).
         let flashing_now = flash.values().any(|t| t.elapsed() < FLASH_DURATION);
         let all_pinned = all_slots_pinned(&notes_meta);
-        let sig = (flashing_now, all_pinned);
+        let sig = (flashing_now, all_pinned, lid_open, disc_in);
         if Some(sig) != prev_sig {
             cab.set_commands(&command_rows(
                 &flash,
@@ -2774,6 +2903,9 @@ pub fn run_game(
                 ra_session.is_some(),
                 discs.is_some(),
                 all_pinned,
+                lid_open,
+                disc_in,
+                !spec.library.is_empty(),
             ));
             prev_sig = Some(sig);
         }

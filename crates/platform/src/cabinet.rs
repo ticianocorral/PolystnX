@@ -390,6 +390,10 @@ pub enum PanelButton {
     Insert,
     /// "Ligar sem disco" — boot direto na BIOS a partir da tela inicial.
     BootBios,
+    /// Remover o disco (habilitado só com a tampa aberta).
+    DiscRemover,
+    /// Sem disco: inserir — abre o seletor de jogos.
+    DiscInserter,
     Settings,
     /// The idle screen's dev-mode button (plan revision: "habilitar botão em
     /// cima da configuração") — only drawn while the app's dev mode is on,
@@ -701,6 +705,11 @@ struct PanelInfo {
     /// game only inserts the cartridge, it doesn't start it — the player
     /// presses Power themselves, same as the real console).
     powered: bool,
+    /// A tampa translúcida está aberta (botão OPEN) — o disco para de
+    /// girar, o vidro sai de cima e o botão de remover aparece.
+    lid_open: bool,
+    /// Há disco no drive (some quando removido com a tampa aberta).
+    disc_in: bool,
     /// Reset's rocker is momentary (plan revision): true for a short spring
     /// window right after a click, then the caller (`runner`) lets it lapse —
     /// see `Cabinet::set_reset_pressed`. Power's rocker has no such flag; its
@@ -1218,6 +1227,8 @@ impl Cabinet {
             // doesn't boot itself any more — see `run_game`'s initial
             // `powered = false` — so the rocker starts down, not up.
             powered: false,
+            lid_open: false,
+            disc_in: true,
             reset_pressed: false,
             cheats: Vec::new(),
             note_count: 0,
@@ -1244,6 +1255,15 @@ impl Cabinet {
     pub fn set_powered(&mut self, powered: bool) {
         if let Some(panel) = &mut self.panel {
             panel.powered = powered;
+        }
+    }
+
+    /// Estado do drive: tampa aberta/fechada e disco presente/ausente —
+    /// governa o giro, o vidro da tampa e o botão de remover/inserir.
+    pub fn set_drive(&mut self, lid_open: bool, disc_in: bool) {
+        if let Some(p) = self.panel.as_mut() {
+            p.lid_open = lid_open;
+            p.disc_in = disc_in;
         }
     }
 
@@ -1695,7 +1715,7 @@ impl Cabinet {
         if self
             .panel
             .as_ref()
-            .is_some_and(|p| p.has_cartridge && p.powered)
+            .is_some_and(|p| p.has_cartridge && p.powered && !p.lid_open)
         {
             let now = Instant::now();
             let dt = self
@@ -4028,6 +4048,7 @@ fn draw_panel_slot(
     reset_pressed: bool,
     spin_deg: f32,
     spinning: bool,
+    lid_open: bool,
 ) -> FaceHits {
     let (disc, hits) = draw_slot_furniture(canvas, font, images, block, led_on, reset_pressed);
 
@@ -4079,9 +4100,9 @@ fn draw_panel_slot(
         let _ = canvas.render_geometry(&verts, Some(&art.tex), &[0, 1, 2, 0, 2, 3]);
 
         // A tampa translúcida (a "tampa de acrílico" por cima do disco
-        // inserido, como no console): só quando assentado — na animação o
-        // disco entra destapado.
-        if p >= 1.0 && !ejecting {
+        // inserido, como no console): só quando assentado e com a tampa
+        // FECHADA — abrir o OPEN remove o vidro.
+        if p >= 1.0 && !ejecting && !lid_open {
             let prev = canvas.blend_mode();
             canvas.set_blend_mode(sdl3::render::BlendMode::Blend);
             let r = side / 2.0 + 2.0;
@@ -4495,7 +4516,8 @@ fn draw_panel(
             panel.powered,
             panel.reset_pressed,
             spin,
-            panel.powered,
+            panel.powered && !panel.lid_open,
+            panel.lid_open,
         );
         console_face_hits = Some(face_hits);
         cy += CARTRIDGE_H as i32;

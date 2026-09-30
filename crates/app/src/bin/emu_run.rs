@@ -286,6 +286,7 @@ fn main() -> Result<()> {
         card2: args.card2,
         display_title: None,
         bios: args.bios,
+        library: Vec::new(),
         cartridge: args.cartridge,
         shot_off: args.shot_off,
         debug_note_capture: args.debug_note_capture,

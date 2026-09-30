@@ -144,6 +144,12 @@ pub enum UiEvent {
     OpenCards2,
     /// Ligar o console SEM disco — boot direto na BIOS.
     BootBios,
+    /// OPEN: abrir/fechar a tampa translúcida (sem desligar).
+    ToggleLid,
+    /// Remover o disco (só com a tampa aberta).
+    RemoveDisc,
+    /// Inserir disco — abre o seletor de jogos.
+    InsertDisc,
     /// Abrir o seletor de discos do jogo (m3u, plano §6) — o bloco
     /// "Discos" da pausa.
     OpenDiscos,

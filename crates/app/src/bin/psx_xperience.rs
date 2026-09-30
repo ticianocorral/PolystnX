@@ -241,6 +241,14 @@ fn main() -> Result<()> {
         cfg.bios_default.as_deref(),
     );
     let mut catalog = open_catalog().with_context(|| "opening the catalog")?;
+    // A estante inteira para o modal "Inserir disco" da troca quente.
+    let library: Vec<(String, PathBuf)> = catalog
+        .list(xperience_domain::catalog::Order::Name)
+        .unwrap_or_default()
+        .iter()
+        .map(|e| (e.title().into_owned(), PathBuf::from(&e.rom.path)))
+        .collect();
+
     log::info!("{} rom(s) in roms/", catalog.counts()?);
 
     let mut plat = Platform::new().map_err(|e| anyhow!(e.to_string()))?;
@@ -274,6 +282,7 @@ fn main() -> Result<()> {
             card2: None,
             display_title: None,
             bios: false,
+            library: library.clone(),
             cartridge,
             shot_off: false,
             debug_note_capture: false,
@@ -402,6 +411,7 @@ fn main() -> Result<()> {
                     card2: None,
                     display_title: None,
                     bios: true,
+                    library: library.clone(),
                     cartridge: None,
                     shot_off: false,
                     debug_note_capture: false,
@@ -528,6 +538,7 @@ fn main() -> Result<()> {
                 card2: None,
                 display_title,
                 bios: false,
+                library: library.clone(),
                 cartridge,
                 shot_off: false,
                 debug_note_capture: false,
