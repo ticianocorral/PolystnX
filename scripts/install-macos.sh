@@ -12,7 +12,7 @@ APP="/Applications/PSX Xperience.app"
 cargo build --release -p xperience-app --bin psx-xperience
 
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
-cp target/release/xperience "$APP/Contents/MacOS/psx-xperience"
+cp target/release/psx-xperience "$APP/Contents/MacOS/psx-xperience"
 cp packaging/macos/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
 sed "s/__VERSION__/$VERSION/g" packaging/macos/Info.plist > "$APP/Contents/Info.plist"
 codesign --force --deep --sign - "$APP" 2>/dev/null
