@@ -6,6 +6,13 @@ inteiro compartilha uma versão (`[workspace.package]` em `Cargo.toml`).
 
 ## [0.1.2] - 2026-09-30
 
+### Corrigido (revisão)
+- A pasta de updates do app saiu de `saves/update/` e agora é
+  `<raiz>/update/` — o mesmo conserto do SNES Xperience 1.1.5 (saves
+  guardam progresso de jogo, não pacote do app). Um pacote pendente na
+  pasta antiga migra sozinho no arranque, antes do apply; a pasta antiga
+  sai se restar vazia.
+
 ### Fase 0 — provar as premissas
 
 - Fork do SNES Xperience (v1.1.1): a base do app (moldura, estante, pausa,

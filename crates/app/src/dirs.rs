@@ -66,9 +66,10 @@ pub fn roms_dir() -> PathBuf {
 }
 
 /// Onde o download do update do app fica até ser aplicado no arranque
-/// seguinte (plan revision: "será atualizado ao reiniciar").
+/// seguinte — na raiz do app (plan revision: "colocar o update na raiz das
+/// pastas do app nao dentro dos saves"; saves guardam progresso de jogo).
 pub fn update_dir() -> PathBuf {
-    let p = saves_dir().join("update");
+    let p = app_root().join("update");
     let _ = std::fs::create_dir_all(&p);
     p
 }
@@ -76,7 +77,7 @@ pub fn update_dir() -> PathBuf {
 /// Igual a [`update_dir`], sem criar — o apply no arranque não deve ter
 /// efeito colateral em disco.
 pub fn update_dir_opt() -> Option<PathBuf> {
-    Some(saves_dir().join("update"))
+    Some(app_root().join("update"))
 }
 
 pub fn core_dir() -> PathBuf {
@@ -170,5 +171,14 @@ mod tests {
             )
             .join("PSX Xperience")
         );
+    }
+
+    #[test]
+    fn update_dir_lives_at_the_app_root_not_saves() {
+        // Plan revision: "colocar o update na raiz das pastas do app nao
+        // dentro dos saves".
+        let dir = super::update_dir_opt().expect("update dir");
+        assert_eq!(dir, super::app_root().join("update"));
+        assert!(!dir.starts_with(super::saves_dir()));
     }
 }

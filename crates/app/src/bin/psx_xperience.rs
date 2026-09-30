@@ -185,6 +185,10 @@ their canonical No-Intro name.";
 
 fn main() -> Result<()> {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
+    // A pasta de updates mudou de lugar (plan revision 1.1.5 do irmão de
+    // SNES, aplicada aqui) — o pacote pendente que ficou em saves/update/
+    // precisa estar no caminho novo antes de o apply olhar pra ele.
+    migrate_update_out_of_saves();
     // O "será atualizado ao reiniciar" (plan revision): um update baixado
     // pela tela do app vale aqui — substitui o binário/bundle antes de
     // qualquer SDL. Melhor-esforço; falha loga e segue com o atual.
@@ -560,6 +564,39 @@ fn no_core_screen(plat: &mut Platform, cab: &mut Cabinet) -> Result<bool> {
         cab.frame_2d((18, 18, 20), render);
         std::thread::sleep(std::time::Duration::from_millis(16));
     }
+}
+
+/// A pasta de pacotes pendentes saiu de `saves/update/` e passou a ser
+/// `<raiz>/update/` (o mesmo plan revision do SNES Xperience 1.1.5: "colocar
+/// o update na raiz das pastas do app nao dentro dos saves"). Move o que
+/// estiver pendente (ex.: um dmg baixado e ainda não aplicado), pula
+/// dotfiles e remove a pasta antiga se restar vazia. Roda antes do
+/// `apply_pending_update`, que olha o caminho novo. Idempotente: destino já
+/// existente fica como está, nada é sobrescrito.
+fn migrate_update_out_of_saves() {
+    let old = xperience_app::dirs::saves_dir().join("update");
+    let new = xperience_app::dirs::app_root().join("update");
+    let Ok(entries) = std::fs::read_dir(&old) else {
+        return;
+    };
+    let _ = std::fs::create_dir_all(&new);
+    for entry in entries.flatten() {
+        let Ok(name) = entry.file_name().into_string() else {
+            continue;
+        };
+        if name.starts_with('.') {
+            continue;
+        }
+        let dst = new.join(&name);
+        if dst.exists() {
+            continue;
+        }
+        match std::fs::rename(entry.path(), &dst) {
+            Ok(()) => log::info!("migrado: saves/update/{name} -> update/{name}"),
+            Err(e) => log::warn!("migrando saves/update/{name}: {e}"),
+        }
+    }
+    let _ = std::fs::remove_dir(&old); // best-effort — só sai se ficou vazia
 }
 
 /// One-time, best-effort copy of real play progress (saves/notebooks) from
