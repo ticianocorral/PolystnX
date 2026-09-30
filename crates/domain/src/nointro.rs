@@ -94,14 +94,14 @@ impl NoIntroDat {
                     category: child_text(game, "category"),
                 };
                 if let Some(serial) = child_text(game, "serial") {
-                    by_serial.insert(normalize_serial(&serial), info.clone());
+                    insert_preferred(&mut by_serial, normalize_serial(&serial), info.clone());
                 }
                 for rom in game.children().filter(|n| n.has_tag_name("rom")) {
                     if let Some(crc) = rom.attribute("crc") {
                         by_crc32.insert(crc.to_ascii_uppercase(), info.clone());
                     }
                     if let Some(serial) = rom.attribute("serial") {
-                        by_serial.insert(normalize_serial(serial), info.clone());
+                        insert_preferred(&mut by_serial, normalize_serial(serial), info.clone());
                     }
                 }
             }
@@ -115,16 +115,20 @@ impl NoIntroDat {
                 continue;
             };
             match by_serial_base.get(base) {
-                // Empate de base: o serial mais curto (menos sufixo de
-                // variante) é a entrada menos especializada e vence —
-                // determinístico, diferente da ordem do HashMap.
-                Some((len, _)) if *len <= serial.len() => {}
+                // Empate de base: vence a entrada menos específica (retail
+                // acima de Beta/Demo, menos tags, nome mais curto) e, entre
+                // iguais, o serial mais curto — determinístico, diferente da
+                // ordem do HashMap.
+                Some((len, existing))
+                    if entry_rank(&existing.name) <= entry_rank(&info.name)
+                        && (entry_rank(&existing.name) != entry_rank(&info.name)
+                            || *len <= serial.len()) => {}
                 _ => {
                     by_serial_base.insert(base.to_string(), (serial.len(), info.clone()));
                 }
             }
         }
-        let mut by_serial_base = by_serial_base
+        let by_serial_base = by_serial_base
             .into_iter()
             .map(|(k, (_, v))| (k, v))
             .collect();
@@ -187,6 +191,35 @@ fn clrmame_quoted(line: &str, key: &str) -> Option<String> {
     Some(value.to_string())
 }
 
+/// O DAT registra variantes sob o MESMO serial (`SCUS-94204` retail e
+/// `(Beta)`), e o mesmo serial pode aparecer em vários blocos — o último
+/// `insert` vencia, pela ordem do arquivo/HashMap. `insert_preferred` mantém
+/// a entrada menos "específica": sem marcador de compilação não-final
+/// (Beta/Demo/Proto/Sample/Promo/Debug), menos tags entre parênteses, nome
+/// mais curto.
+fn entry_rank(name: &str) -> (usize, usize, usize) {
+    let lower = name.to_ascii_lowercase();
+    const MARKERS: [&str; 7] = [
+        "(beta", "(demo", "(proto", "(sample", "(promo", "(debug", "(review",
+    ];
+    let marked = MARKERS.iter().filter(|m| lower.contains(*m)).count();
+    let parens = name.matches('(').count();
+    (marked, parens, name.len())
+}
+
+fn insert_preferred(
+    map: &mut HashMap<String, NoIntroGameInfo>,
+    key: String,
+    info: NoIntroGameInfo,
+) {
+    match map.get(&key) {
+        Some(existing) if entry_rank(&existing.name) <= entry_rank(&info.name) => {}
+        _ => {
+            map.insert(key, info);
+        }
+    }
+}
+
 /// Parse clrmamepro text (what `libretro-database`'s `metadat/no-intro/`
 /// DATs — and the Redump `Sony - PlayStation` one the PSX app fetches —
 /// are): a `clrmamepro (` header, then one `game (` block per title
@@ -224,7 +257,7 @@ fn parse_clrmamepro(
                         info.category = Some(region);
                     }
                 } else if let Some(serial) = clrmame_quoted(line, "serial") {
-                    by_serial.insert(normalize_serial(&serial), info.clone());
+                    insert_preferred(&mut by_serial, normalize_serial(&serial), info.clone());
                 }
             }
             if let Some(crc_start) = line.find("crc ") {
@@ -234,13 +267,13 @@ fn parse_clrmamepro(
                     .take_while(|c| !c.is_whitespace() && *c != ')')
                     .collect();
                 if crc.len() == 8 {
-                    by_crc32.insert(crc.to_ascii_uppercase(), info.clone());
+                    insert_preferred(&mut by_crc32, crc.to_ascii_uppercase(), info.clone());
                 }
             }
             // Serial dentro do `rom (...)` (o DAT Redump repete lá).
             if in_rom {
                 if let Some(serial) = clrmame_quoted(line, "serial") {
-                    by_serial.insert(normalize_serial(&serial), info.clone());
+                    insert_preferred(&mut by_serial, normalize_serial(&serial), info.clone());
                 }
             }
         }
@@ -433,6 +466,37 @@ game (
             Some("Resident Evil 3 - Nemesis (USA, Canada) (GH)")
         );
         assert_eq!(base_serial("SLUS-00923"), Some("SLUS-00923"));
+        let _ = fs::remove_file(&path);
+    }
+
+    #[test]
+    fn retail_wins_when_the_same_serial_has_a_beta_entry() {
+        // O caso real do Spawn: retail e Beta compartilham o serial
+        // SCUS-94204 — a estante nunca pode virar "(Beta)".
+        let path = write_dat(
+            r#"clrmamepro (
+)
+
+game (
+	name "Spawn - The Eternal (USA) (Beta)"
+	region "USA"
+	serial "SCUS-94204"
+	rom ( name "beta.bin" size 1 crc 00000001 )
+)
+
+game (
+	name "Spawn - The Eternal (USA)"
+	region "USA"
+	serial "SCUS-94204"
+	rom ( name "retail.bin" size 1 crc 00000002 )
+)
+"#,
+        );
+        let dat = NoIntroDat::load(&path).unwrap();
+        assert_eq!(
+            dat.lookup_serial("SCUS-94204").map(|i| i.name.as_str()),
+            Some("Spawn - The Eternal (USA)")
+        );
         let _ = fs::remove_file(&path);
     }
 }
