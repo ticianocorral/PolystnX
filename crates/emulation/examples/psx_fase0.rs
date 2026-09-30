@@ -100,9 +100,11 @@ fn write_bmp(
     let rgba: Vec<u8> = match format {
         xperience_emulation::PixelFormat::Xrgb8888 => pixels.to_vec(),
         xperience_emulation::PixelFormat::Rgb565 => pixels
-            .chunks_exact(2)
+            .as_chunks::<2>()
+            .0
+            .iter()
             .flat_map(|p| {
-                let v = u16::from_le_bytes([p[0], p[1]]) as u32;
+                let v = u16::from_le_bytes(*p) as u32;
                 [
                     (((v >> 11) & 0x1f) * 255 / 31) as u8, // R
                     (((v >> 5) & 0x3f) * 255 / 63) as u8,  // G
@@ -121,7 +123,7 @@ fn write_bmp(
     bmp[10..14].copy_from_slice(&54u32.to_le_bytes());
     bmp[14..18].copy_from_slice(&40u32.to_le_bytes());
     bmp[18..22].copy_from_slice(&(w as i32).to_le_bytes());
-    bmp[22..26].copy_from_slice(&((h as i32) * -1).to_le_bytes()); // top-down
+    bmp[22..26].copy_from_slice(&(-(h as i32)).to_le_bytes()); // top-down
     bmp[26..28].copy_from_slice(&1u16.to_le_bytes());
     bmp[28..30].copy_from_slice(&32u16.to_le_bytes());
     for (y, src_row) in rgba.chunks_exact(w as usize * 4).enumerate() {

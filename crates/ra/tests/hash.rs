@@ -20,9 +20,6 @@ use xperience_ra::hash::psx_disc_hash;
 
 const EXE_NAME: &str = "SCUS_941.63";
 
-/// One 2048-byte "user data" sector of a MODE1/2048 track.
-type Sector = [u8; 2048];
-
 fn iso_dir_record(extent: u32, size: u32, flags: u8, name: &[u8]) -> Vec<u8> {
     let mut rec = vec![0u8; 33 + name.len()];
     if rec.len() % 2 == 1 {

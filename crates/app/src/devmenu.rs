@@ -434,7 +434,11 @@ mod tests {
         let mut progress = 0;
         let mut saw_total = None;
         for m in rx.try_iter() {
-            if let InstallMsg::Progress { downloaded, total } = m {
+            if let InstallMsg::Progress {
+                downloaded: _,
+                total,
+            } = m
+            {
                 progress += 1;
                 saw_total = total;
             }

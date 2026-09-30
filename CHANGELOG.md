@@ -4,6 +4,29 @@ Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/);
 versionamento por [SemVer 2.0.0](https://semver.org/lang/pt-BR/). O workspace
 inteiro compartilha uma versão (`[workspace.package]` em `Cargo.toml`).
 
+## [0.1.3] - 2026-09-30
+
+### Adicionado
+- Nomes canônicos No-Intro via DAT Redump "Sony - PlayStation" (espelho
+  libretro): o disco casa pelo **serial de fábrica** (`SLUS-00402` →
+  "Tekken 3 (USA)"), na estante, no painel do jogo e na busca de arte
+  (`assets/*/Tekken 3 (USA).png`). Casamento também pela **base** do
+  serial (variantes `…D`/`…GH`) e com preferência determinística pela
+  entrada **retail** sobre Beta/Demo/Proto.
+- "Renomear ROMs para o padrão No-Intro" resolve o nome pelo DAT e move
+  saves, notas e arte junto.
+- Memory card do **slot 2** funcional (os botões "MC slot 1 / MC slot 2"
+  do painel abrem a biblioteca do slot correspondente).
+
+### Modificado
+- Painel sem o corpo do console: só Power/Reset/Eject; disco menor
+  girando entre os botões (~1 volta/s).
+- Pasta de updates do app na raiz (`<raiz>/update/`), não dentro de
+  `saves/` — o mesmo conserto do SNES Xperience 1.1.5, com migração no
+  arranque.
+- Corrigido: abrir jogo com arte de disco não fecha mais o app (pânico
+  no dissolve quando o tubo não tinha quadro da estante).
+
 ## [0.1.2] - 2026-09-30
 
 ### Corrigido (revisão)
