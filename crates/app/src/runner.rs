@@ -626,9 +626,13 @@ fn cartridge_insert_animation(plat: &Platform, cab: &mut Cabinet) {
     while start.elapsed() < SPAN {
         let t = (start.elapsed().as_secs_f32() / SPAN.as_secs_f32()).min(1.0);
         cab.set_cartridge_motion(Some((t, false)));
-        // Entra pelo preto (a troca de entrada da TV), assenta no azul.
-        let rise = (t * 3.0).min(1.0);
-        cab.present_static(OFF_STATIC_LEVEL * rise * (1.0 - 0.5 * t));
+        // A estante dissolve para a tela de AV (o disco desce por cima) —
+        // mesma TV trocando de entrada, sem "outra tela".
+        if t < 0.55 {
+            cab.present_shelf_fade(OFF_STATIC_LEVEL, t / 0.55);
+        } else {
+            cab.present_static(OFF_STATIC_LEVEL);
+        }
 
         if let Some(a) = &audio {
             let n = (RATE / 60) as usize;

@@ -1872,7 +1872,7 @@ impl Cabinet {
             frame.pitch
         };
         let r = src.tex.update(None, frame.pixels, pitch);
-        // DEBUG: primeiras uploads
+        // DEBUG: dumps do frame cru (bissecção do quadrado) + log das primeiras.
         {
             static N: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
             let n = N.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
@@ -1886,6 +1886,29 @@ impl Cabinet {
                     pitch,
                     r.is_ok()
                 );
+            }
+            if let Ok(base) = std::env::var("PSX_XPERIENCE_DEBUG_RAW") {
+                if matches!(n, 30 | 300 | 1500)
+                    && frame.format == crate::PixelFormat::Xrgb8888
+                {
+                    let mut bmp = vec![0u8; 54 + frame.pixels.len()];
+                    bmp[0..2].copy_from_slice(b"BM");
+                    let size = (54 + frame.pixels.len()) as u32;
+                    bmp[2..6].copy_from_slice(&size.to_le_bytes());
+                    bmp[10..14].copy_from_slice(&54u32.to_le_bytes());
+                    bmp[14..18].copy_from_slice(&40u32.to_le_bytes());
+                    bmp[18..22].copy_from_slice(&(frame.width as i32).to_le_bytes());
+                    bmp[22..26].copy_from_slice(&(-(frame.height as i32)).to_le_bytes());
+                    bmp[26..28].copy_from_slice(&1u16.to_le_bytes());
+                    bmp[28..30].copy_from_slice(&32u16.to_le_bytes());
+                    bmp[54..].copy_from_slice(frame.pixels);
+                    let name = format!(
+                        "{}.raw{}.bmp",
+                        base.trim_end_matches(".bmp"),
+                        n
+                    );
+                    let _ = std::fs::write(name, bmp);
+                }
             }
         }
         r.expect("upload frame");
@@ -2171,6 +2194,51 @@ impl Cabinet {
         if let Some(a) = &self.hiss {
             a.queue(&buf);
         }
+    }
+
+    /// A transição estante → console (plano §6): o último quadro da estante
+    /// (guardado em `screen_tex`) dissolve sobre o azul de AV — `t` 0.0..=1.0,
+    /// 0 = estante inteira, 1 = só a tela azul. Mesmo tubo, mesma TV: nada de
+    /// "outra tela abrindo por cima".
+    pub fn present_shelf_fade(&mut self, level: f32, t: f32) {
+        let t = t.clamp(0.0, 1.0);
+        let (real_w, real_h) = self.canvas.output_size().unwrap_or((1280, 720));
+        let canvas_rect = cabinet_canvas_rect(real_w, real_h);
+        self.canvas_rect = canvas_rect;
+        let (ww, wh) = (canvas_rect.width(), canvas_rect.height());
+        let panel = panel_rect(ww, wh);
+        let cab_w = ww.saturating_sub(panel.width());
+        self.screen = screen_area(cab_w, wh);
+        self.ensure_bezel(cab_w, wh, self.screen);
+        self.ensure_mesh(self.screen);
+        self.update_noise_tex(level);
+
+        // Azul de AV como base (opaco) e a estante por cima com alpha caindo.
+        let av_blue = {
+            let k = level.clamp(0.0, 1.0);
+            Color::RGB(8, 20 + (16.0 * k) as u8, (60.0 + 140.0 * k) as u8)
+        };
+        self.canvas.set_draw_color(av_blue);
+        self.canvas.clear();
+        self.canvas.set_viewport(Some(canvas_rect));
+
+        let st = self.screen_tex.as_mut().unwrap();
+        st.tex.set_alpha_mod(((1.0 - t) * 255.0) as u8);
+        let mesh = self.mesh.take().unwrap();
+        let _ = self
+            .canvas
+            .render_geometry(&mesh.verts, Some(&st.tex), &mesh.indices[..]);
+        st.tex.set_alpha_mod(255);
+        let bezel = self.bezel.take().unwrap();
+        let _ = self
+            .canvas
+            .render_geometry(&bezel.verts, None, &bezel.indices[..]);
+        self.bezel = Some(bezel);
+        self.mesh = Some(mesh);
+
+        draw_ch3_osd(&mut self.canvas, &mut self.font, self.screen);
+        self.canvas.set_viewport(None);
+        self.present_and_time();
     }
 
     /// One frame of signal-off snow through the tube, cartridge still visible

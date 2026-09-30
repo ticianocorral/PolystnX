@@ -332,6 +332,8 @@ fn main() -> Result<()> {
         update_rx = Some(rx);
     }
 
+    // Dev/CI: pula o idle e abre a estante na primeira iteração.
+    let mut skip_idle_once = std::env::var_os("PSX_XPERIENCE_AUTO_SHELF").is_some();
     'app: loop {
         // O código Konami (↑↑↓↓←→←→BA) só é escutado na tela inicial — o
         // watcher liga aqui e desliga ao sair dela, para que navegar com
@@ -339,14 +341,19 @@ fn main() -> Result<()> {
         // complete a sequência por acidente (plan revision: devmode ultra
         // secreto). Em memória, nunca persistido.
         plat.set_konami_watch(true);
-        let exit = idle::run(
-            &mut plat,
-            &mut cab,
-            idle_static,
-            &mut update_rx,
-            core_path.is_some(),
-            xperience_app::dat_update::dat_installed(),
-        )?;
+        let exit = if skip_idle_once {
+            skip_idle_once = false;
+            IdleExit::OpenShelf
+        } else {
+            idle::run(
+                &mut plat,
+                &mut cab,
+                idle_static,
+                &mut update_rx,
+                core_path.is_some(),
+                xperience_app::dat_update::dat_installed(),
+            )?
+        };
         plat.set_konami_watch(false);
         // The idle screen's own "Baixar núcleo" button may have just
         // installed one — re-resolve (cheap when core/ is unchanged) and
