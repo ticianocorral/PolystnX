@@ -238,7 +238,7 @@ fn main() -> Result<()> {
             .ok()
             .map(PathBuf::from)
     }) {
-        let _cartridge = args.autoplay_cartridge.clone(); // a arte vai via --cartridge do pai
+        let cartridge = args.autoplay_cartridge.clone(); // a arte vai via --cartridge do pai
         let core = xperience_app::dirs::core_dir().join(core_update::core_file_name());
         let spec = GameSpec {
             core,
@@ -253,7 +253,7 @@ fn main() -> Result<()> {
             shot: None,
             logo: None,
             card1: None,
-            cartridge: None,
+            cartridge,
             shot_off: false,
             debug_note_capture: false,
             debug_shot_pause: false,

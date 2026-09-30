@@ -2227,12 +2227,17 @@ impl Cabinet {
             .set_draw_color(Color::RGB(RECESS.0, RECESS.1, RECESS.2));
         self.canvas.clear();
         self.canvas.set_viewport(Some(canvas_rect));
-        let st = self.screen_tex.as_mut().unwrap();
-        st.tex.set_alpha_mod(((1.0 - t) * 255.0) as u8);
-        let _ = self
-            .canvas
-            .render_geometry(&mesh.verts, Some(&st.tex), &mesh.indices[..]);
-        st.tex.set_alpha_mod(255);
+        let st = self.screen_tex.as_mut();
+        // Sem quadro da estante guardado (entrada direta no jogo — autoplay —
+        // ou textura já larga), o tubo mostra só o azul de AV: nada para
+        // dissolver, e nunca um unwrap em None.
+        if let Some(st) = st {
+            st.tex.set_alpha_mod(((1.0 - t) * 255.0) as u8);
+            let _ = self
+                .canvas
+                .render_geometry(&mesh.verts, Some(&st.tex), &mesh.indices[..]);
+            st.tex.set_alpha_mod(255);
+        }
         let bezel = self.bezel.take().unwrap();
         let _ = self
             .canvas
