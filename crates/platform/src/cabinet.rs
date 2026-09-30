@@ -3850,7 +3850,7 @@ struct FaceHits {
 fn draw_slot_furniture(
     canvas: &mut WindowCanvas,
     font: &mut Texture,
-    images: &HashMap<u64, ImgTex>,
+    _images: &HashMap<u64, ImgTex>,
     block: Rect,
     led_on: bool,
     reset_pressed: bool,
@@ -3870,11 +3870,8 @@ fn draw_slot_furniture(
     draw_button(canvas, font, mc1, "MC slot 1", true);
     draw_button(canvas, font, mc2, "MC slot 2", true);
 
-    // Os três botões redondos, centrados na altura útil acima dos MCs. As
-    // primeiras linhas do bloco são faixa exclusiva do wordmark — o disco
-    // girando não pode passar por cima dele.
-    let wordmark_h = 30;
-    let face_top = block.y() + 6 + wordmark_h;
+    // Os três botões redondos, centrados na altura útil acima dos MCs.
+    let face_top = block.y() + 6;
     let face_bottom = mc_y - 10;
     let face_h = (face_bottom - face_top).max(1);
     let btn_r = (face_h as f32 * 0.26).round() as i32;
@@ -3956,25 +3953,6 @@ fn draw_slot_furniture(
         (btn_r * 2) as u32,
         (btn_r * 2) as u32,
     );
-
-    // A marca do console entre os botões (quando há a arte do wordmark).
-    if let Some(tag) = images.get(&SLOT_TAG_IMG) {
-        let (tcx, tcy, tcw, tch) = tag.content;
-        let (tcw, tch) = (tcw.max(1), tch.max(1));
-        let gap_w = (col_r - btn_r - (col_l + btn_r)).max(1) as f32;
-        let max_h = 22.0f32;
-        let scale = (max_h / tch as f32).min(gap_w / tcw as f32);
-        let tw = (tcw as f32 * scale).round().max(1.0) as u32;
-        let th = (tch as f32 * scale).round().max(1.0) as u32;
-        let src = Rect::new(tcx as i32, tcy as i32, tcw.min(tag.w), tch.min(tag.h));
-        let dst = Rect::new(
-            block.x() + ((block.width() as i32 - tw as i32) / 2).max(0),
-            block.y() + 4,
-            tw,
-            th,
-        );
-        let _ = canvas.copy(&tag.tex, src, dst);
-    }
 
     // O espaço central livre, entre as duas colunas de botões: é onde o
     // disco se assenta e gira.
@@ -4083,16 +4061,19 @@ fn draw_idle_slot(
     label: &str,
     reset_pressed: bool,
 ) -> Rect {
-    let (_disc, _hits) = draw_slot_furniture(canvas, font, images, block, false, reset_pressed);
-    let btn_w = (block.width() as f32 * 0.7).round() as u32;
+    // O botão vive numa faixa exclusiva no TOPO do bloco — nunca por cima
+    // dos botões Power/Reset/Open nem do disco; o console ocupa o resto.
     let btn_h = (GLYPH_H as i32 * 2 + 16) as u32;
-    let btn = Rect::new(
-        block.x() + (block.width() as i32 - btn_w as i32) / 2,
-        block.y() + 6 + (((block.height() as i32) - 12 - btn_h as i32) / 2).max(0),
-        btn_w,
-        btn_h,
+    let btn = Rect::new(block.x(), block.y(), block.width(), btn_h);
+    let drawn = draw_button(canvas, font, btn, label, true);
+    let console = Rect::new(
+        block.x(),
+        block.y() + btn_h as i32 + 10,
+        block.width(),
+        block.height() - btn_h - 10,
     );
-    draw_button(canvas, font, btn, label, true)
+    let _ = draw_slot_furniture(canvas, font, images, console, false, reset_pressed);
+    drawn
 }
 
 /// Scale + colour for one of the absolute-coordinate text helpers below —
