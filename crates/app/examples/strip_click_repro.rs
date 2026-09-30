@@ -7,9 +7,9 @@
 
 use std::time::Duration;
 
-use xperience_app::shelf::{self, Pick, ShelfOpts};
+use xperience_app::shelf::{self, ShelfOpts};
 use xperience_domain::Catalog;
-use xperience_platform::{Cabinet, Platform};
+use xperience_platform::Platform;
 
 fn make_catalog(n_favs: usize) -> anyhow::Result<(tempdir::TempDir, Catalog)> {
     let dir = tempdir::TempDir::new()?;
@@ -45,7 +45,7 @@ fn main() -> anyhow::Result<()> {
         preset_filter: None,
         ra: None,
     };
-    let pick = shelf::run(&mut plat, &mut cab, &catalog, &opts)?;
+    let _pick = shelf::run(&mut plat, &mut cab, &catalog, &opts)?;
     println!("first run pick ok (quit by frame cap)");
     // Where is the favorites ">" button, in screen-local coords? Mirror the
     // shelf's own math.
@@ -94,7 +94,7 @@ fn main() -> anyhow::Result<()> {
 
     opts.max_frames = Some(6);
     opts.shot = Some("/tmp/repro_after.bmp".into());
-    let pick = shelf::run(&mut plat, &mut cab, &catalog, &opts)?;
+    let _pick = shelf::run(&mut plat, &mut cab, &catalog, &opts)?;
     println!("second run pick ok");
     println!("shots in /tmp/repro_before.bmp and /tmp/repro_after.bmp");
     Ok(())

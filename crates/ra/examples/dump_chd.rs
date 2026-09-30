@@ -20,8 +20,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
     println!("logical bytes: {}", h.logical_bytes());
     println!("--- metadata ---");
-    let mut refs = chd.metadata_refs();
-    while let Some(entry) = refs.next() {
+    for entry in chd.metadata_refs() {
         let md = entry.read(&mut meta_file)?;
         println!(
             "[tag {:?}] {}",

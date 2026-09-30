@@ -63,6 +63,6 @@ mod tests {
         assert_eq!(table.get("SLUS-00402").unwrap().0, "Tekken 3");
         assert_eq!(table.get("SLUS-00402").unwrap().1, Some("USA"));
         assert_eq!(table.get("SCES-02105").unwrap().1, None);
-        assert!(table.get("NOPE").is_none());
+        assert!(!table.contains_key("NOPE"));
     }
 }

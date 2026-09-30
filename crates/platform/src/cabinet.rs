@@ -109,11 +109,6 @@ const PSX_HUB_RING: (u8, u8, u8) = (120, 116, 107);
 const PSX_LED_ON: (u8, u8, u8) = (110, 224, 130);
 const PSX_LED_OFF: (u8, u8, u8) = (56, 58, 54);
 
-/// O disco entra de cima e desaparece na fenda tampa/corpo; em repouso
-/// (tampa fechada) ele fica **inteiro** escondido — o carimbo de fração
-/// passa de 1.0 de propósito (o `hidden` precisa cobrir o conteúdo inteiro,
-/// com folga, para o clip não deixar nem uma linha do disco à mostra).
-
 /// The set's own nameplate: a small wordmark printed into the chin, left of
 /// the cartridge — a touch lighter than the cabinet plastic, like an embossed
 /// badge rather than a lit label.
@@ -3761,27 +3756,6 @@ fn draw_image_absolute(
     );
 }
 
-/// Where the cartridge sprite is at progress `t` (0.0..=1.0) of the insert
-/// — or, with `ejecting`, the mirrored eject — inside the panel's cartridge
-/// block. `iw, ih` is the art texture's own size and `content` its opaque
-/// bounding box (`ImgTex::content`): the fit and the seating key off the
-/// *content*, not the canvas, so the cart's actual body spans the base's
-/// full width and its visible base sits right at the slot mouth — no float
-/// gap from transparent margins (plan revision: the user's annotated
-/// screenshot). Returns the full-texture destination rect plus the clip
-/// rect the caller must draw it under (the block's area above the mouth's
-/// top edge, so whatever has passed the lip is hidden). At `t = 1.0`
-/// (insert done, or eject at 0.0) the cart is seated: content base just
-/// past the mouth's lip, label standing proud of the console.
-
-/// Draw the console furniture into `block`: o PSX de frente — corpo cinza
-/// na base do bloco, tampa apoiada em cima com o hub ao centro, a fenda
-/// escura entre tampa e corpo por onde o disco entra, e na face do corpo:
-/// slots de memory card e portas de controle à direita, LED de power à
-/// esquerda, e o wordmark (`SLOT_TAG_IMG`, plano §6) quando houver. Shared
-/// by the game panel's disc (`draw_panel_slot`) and the idle screen's
-/// insert button (`draw_idle_slot`). Returns the mouth rect — a fenda onde
-/// o disco cruza para dentro do console.
 /// Círculo preenchido rasterizado linha a linha (o canvas só tem retângulos).
 fn fill_circle(canvas: &mut WindowCanvas, color: (u8, u8, u8), cx: i32, cy: i32, r: i32) {
     canvas.set_draw_color(Color::RGB(color.0, color.1, color.2));
@@ -3993,6 +3967,7 @@ fn draw_slot_furniture(
 /// inteiro escondido dentro do console, `SEAT_HIDDEN_FRAC` > 1 garante o
 /// clip cem por cento opaco). Requires `PANEL_CARTRIDGE_IMG` to be loaded —
 /// `draw_panel` only calls this under `has_cartridge`.
+#[allow(clippy::too_many_arguments)]
 fn draw_panel_slot(
     canvas: &mut WindowCanvas,
     font: &mut Texture,
@@ -6118,7 +6093,6 @@ mod tests {
         assert_ne!(hardcore[1].1, softcore[1].1);
     }
 
-    #[test]
     #[test]
     fn content_bbox_finds_the_opaque_region() {
         // 4x3 image: only the middle row's middle two pixels are opaque.
