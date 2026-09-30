@@ -4084,7 +4084,7 @@ fn draw_panel_slot(
         if p >= 1.0 && !ejecting {
             let prev = canvas.blend_mode();
             canvas.set_blend_mode(sdl3::render::BlendMode::Blend);
-            let r = side as f32 / 2.0 + 2.0;
+            let r = side / 2.0 + 2.0;
             // vidro: véu frio levemente escurecido na borda inferior
             fill_circle_rgba(
                 canvas,
