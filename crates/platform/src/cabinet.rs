@@ -79,25 +79,6 @@ const PANEL_WARN: (u8, u8, u8) = (228, 180, 90);
 /// `PANEL_BG` so it reads as its own control, not flat background text.
 const PANEL_BTN_BG: (u8, u8, u8) = (34, 32, 29);
 
-/// Power/Reset rocker-switch colours (plan revision: styled after the real
-/// console's purple switches, see `draw_rocker`) — a mid violet with a
-/// lighter bevel sliver on the thumb's top edge and a dim grey stand-in for
-/// "not interactive right now" (Reset while powered off).
-const SWITCH_PURPLE: (u8, u8, u8) = (107, 70, 168);
-const SWITCH_PURPLE_HI: (u8, u8, u8) = (152, 112, 214);
-const SWITCH_DIM: (u8, u8, u8) = (58, 55, 62);
-const SWITCH_TRACK_BG: (u8, u8, u8) = (24, 22, 26);
-const SWITCH_TRACK_BORDER: (u8, u8, u8) = (60, 58, 64);
-
-/// Power LED (plan revision: "luz vermelha led indicando o power... igual o
-/// console original") — a real SNES has one lit red next to its switches
-/// whenever the console is on. `LED_ON_HI` is a small glossy highlight dot
-/// drawn on top when lit, the same "cheap bevel via a flat rect" trick
-/// `draw_rocker`'s thumb highlight already uses.
-const LED_ON: (u8, u8, u8) = (214, 44, 40);
-const LED_ON_HI: (u8, u8, u8) = (255, 150, 140);
-const LED_OFF: (u8, u8, u8) = (56, 26, 26);
-
 /// O gabinete do PSX no painel: o console de frente, plástico cinza do
 /// SCPH-1001 — corpo, tampa com o hub ao centro, a fenda entre tampa e corpo
 /// por onde o disco entra, e a face com slots de memory card, portas de
@@ -4227,44 +4208,10 @@ fn draw_panel(
 
         // The console's own controls, the same geometry the game panel
         // draws (plan revision: "é como se fosse a tela do jogo mesmo") —
-        // everything dim, there's no cartridge loaded to command. Purely
-        // decorative here, so none of them get hit targets.
-        const SWITCH_TRACK_H: i32 = 64;
-        const SWITCH_GROUP_H: i32 = SWITCH_TRACK_H + 4 + GLYPH_H as i32;
-        let footer_h = (GLYPH_H + 12) as i32;
-        let limit = rect.bottom() - pad - footer_h;
-        if cy + SWITCH_GROUP_H <= limit {
-            cy += 14;
-            let gap = 10i32;
-            let eject_w = (GLYPH_W as i32) * "EJETAR".len() as i32 + 16;
-            let switch_w = ((inner_w as i32 - gap * 2 - eject_w) / 2).max(1);
-            let eject_w = (inner_w as i32 - gap * 2 - switch_w * 2).max(eject_w);
-            let power_track = Rect::new(x, cy, switch_w as u32, SWITCH_TRACK_H as u32);
-            let eject_rect = Rect::new(
-                x + switch_w + gap,
-                cy + SWITCH_TRACK_H - (GLYPH_H as i32 + 6),
-                eject_w as u32,
-                GLYPH_H + 6,
-            );
-            let reset_track = Rect::new(
-                x + switch_w + gap + eject_w + gap,
-                cy,
-                switch_w as u32,
-                SWITCH_TRACK_H as u32,
-            );
-            draw_rocker(canvas, font, power_track, "POWER", false, false);
-            draw_button(canvas, font, eject_rect, "EJETAR", false);
-            draw_rocker(canvas, font, reset_track, "RESET", false, false);
-            let led_size = 16;
-            let led_top = cy + (eject_rect.y() - cy - led_size) / 2;
-            draw_led(
-                canvas,
-                eject_rect.x() + eject_rect.width() as i32 / 2,
-                led_top,
-                led_size,
-                false,
-            );
-        }
+        // Power/Reset/Eject e os MC slots já vivem na face do console —
+        // os botões redondos do PS1 FAT desenhados pelo draw_idle_slot
+        // acima. (Os rockers deslizantes POWER/RESET/EJETAR do SNES eram
+        // desenhados aqui; saíram junto com o console antigo.)
 
         let btn_h = (GLYPH_H + 12) as i32;
         let settings = Rect::new(x, rect.bottom() - pad - btn_h, inner_w, btn_h as u32);
@@ -5119,120 +5066,6 @@ fn clip_label(text: &str, max_chars: usize) -> Cow<'_, str> {
     }
     let keep: String = text.chars().take(max_chars - 3).collect();
     Cow::Owned(format!("{keep}..."))
-}
-
-/// A small round-ish power LED (plan revision: "luz vermelha led indicando
-/// o power, em cima do botao ejetar, igual o console original") —
-/// approximated with three stacked rects (narrow/wide/narrow) rather than a
-/// true circle, since every other shape in this UI is a flat rect and a real
-/// circle would need its own mesh just for a decoration this small. Lit red
-/// while the console is powered, a dark unlit red otherwise (the same
-/// resting look almost every console's power LED has when off), with a tiny
-/// glossy highlight dot when lit.
-fn draw_led(canvas: &mut WindowCanvas, center_x: i32, top: i32, size: i32, lit: bool) {
-    let (r, g, b) = if lit { LED_ON } else { LED_OFF };
-    canvas.set_draw_color(Color::RGB(r, g, b));
-    // Four rows, widening then narrowing (roughly 60/90/90/60% of `size`) —
-    // a softer step than a plain narrow/wide/narrow, so it reads as a round
-    // dot instead of a plus sign at this small a scale.
-    let step = (size / 4).max(1);
-    let widths = [size * 3 / 5, size * 9 / 10, size * 9 / 10, size * 3 / 5];
-    for (i, w) in widths.into_iter().enumerate() {
-        let w = w.max(2);
-        let h = if i == widths.len() - 1 {
-            (size - step * i as i32).max(1)
-        } else {
-            step
-        };
-        let _ = canvas.fill_rect(Rect::new(
-            center_x - w / 2,
-            top + step * i as i32,
-            w as u32,
-            h as u32,
-        ));
-    }
-    if lit {
-        canvas.set_draw_color(Color::RGB(LED_ON_HI.0, LED_ON_HI.1, LED_ON_HI.2));
-        let hi = (size / 4).max(1) as u32;
-        let hi_x = center_x - (size * 3 / 10);
-        let _ = canvas.fill_rect(Rect::new(hi_x, top + step, hi, hi));
-    }
-}
-
-/// One Power/Reset rocker switch (plan revision — styled after the real
-/// console's own controls, not another text row): a recessed track with a
-/// purple thumb that sits at the top when `up` (Power: on; Reset: mid-press)
-/// or the bottom otherwise, plus a label underneath. `lit` dims the whole
-/// thing the same way `draw_button` does for a control that wouldn't do
-/// anything right now (Reset while the console is off). Returns `track` for
-/// hit-testing — the whole switch body is clickable, not just the thumb.
-fn draw_rocker(
-    canvas: &mut WindowCanvas,
-    font: &mut Texture,
-    track: Rect,
-    label: &str,
-    up: bool,
-    lit: bool,
-) -> Rect {
-    canvas.set_draw_color(Color::RGB(
-        SWITCH_TRACK_BORDER.0,
-        SWITCH_TRACK_BORDER.1,
-        SWITCH_TRACK_BORDER.2,
-    ));
-    let _ = canvas.fill_rect(track);
-    let inset = Rect::new(
-        track.x() + 2,
-        track.y() + 2,
-        track.width().saturating_sub(4),
-        track.height().saturating_sub(4),
-    );
-    canvas.set_draw_color(Color::RGB(
-        SWITCH_TRACK_BG.0,
-        SWITCH_TRACK_BG.1,
-        SWITCH_TRACK_BG.2,
-    ));
-    let _ = canvas.fill_rect(inset);
-
-    let thumb_h = (inset.height() / 2).saturating_sub(3).max(1);
-    let thumb_y = if up {
-        inset.y() + 2
-    } else {
-        inset.bottom() - thumb_h as i32 - 2
-    };
-    let thumb = Rect::new(
-        inset.x() + 2,
-        thumb_y,
-        inset.width().saturating_sub(4),
-        thumb_h,
-    );
-    let base = if lit { SWITCH_PURPLE } else { SWITCH_DIM };
-    canvas.set_draw_color(Color::RGB(base.0, base.1, base.2));
-    let _ = canvas.fill_rect(thumb);
-    if lit {
-        // A lighter sliver along the thumb's top edge — cheap stand-in for a
-        // bevel/highlight with only flat-fill rects to work with.
-        let hi = Rect::new(thumb.x(), thumb.y(), thumb.width(), thumb.height().min(3));
-        canvas.set_draw_color(Color::RGB(
-            SWITCH_PURPLE_HI.0,
-            SWITCH_PURPLE_HI.1,
-            SWITCH_PURPLE_HI.2,
-        ));
-        let _ = canvas.fill_rect(hi);
-    }
-
-    let text_w = (GLYPH_W as i32) * label.chars().count() as i32;
-    let tx = track.x() + (track.width() as i32 - text_w).max(0) / 2;
-    let ty = track.bottom() + 4;
-    draw_text_absolute(
-        canvas,
-        font,
-        tx,
-        ty,
-        TextStyle::new(1, if lit { PANEL_TEXT } else { PANEL_DIM }),
-        label,
-        usize::MAX,
-    );
-    track
 }
 
 /// Where the pause book's two pages sit: a symmetric spread with a spine gap
