@@ -4378,7 +4378,9 @@ fn draw_panel(
         // of the shelf or ejecting lands on a panel shaped exactly like the
         // gameplay one.
         let mut buttons_idle: Option<Rect> = None;
-        const INSERT_H: u32 = 230;
+        // O console da tela inicial tem o MESMO tamanho do da tela de jogo
+        // (220) + a faixa do botão "Estante de games" (40) + respiro.
+        const INSERT_H: u32 = 270;
         let insert_block = Rect::new(x, cy, inner_w, INSERT_H);
         let insert_drawn = draw_idle_slot(
             canvas,
