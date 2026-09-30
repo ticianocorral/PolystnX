@@ -3751,6 +3751,7 @@ fn fill_circle(canvas: &mut WindowCanvas, color: (u8, u8, u8), cx: i32, cy: i32,
 /// PS1: um arco na borda superior, não um anel inteiro). `half_deg` é o
 /// semi-ângulo do arco a partir do topo; `r_out` é o raio externo e
 /// `r_in` o interno (a espessura do arco é `r_out - r_in`).
+#[allow(clippy::too_many_arguments)]
 fn fill_arc(
     canvas: &mut WindowCanvas,
     color: (u8, u8, u8),
