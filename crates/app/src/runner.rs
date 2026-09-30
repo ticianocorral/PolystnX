@@ -708,7 +708,7 @@ fn power_off_burst(plat: &Platform, cab: &mut Cabinet) -> f32 {
 /// exactly where it was paused.
 fn power_on_burst(plat: &Platform, cab: &mut Cabinet) {
     const RATE: u32 = 22_050;
-    const SPAN: Duration = Duration::from_millis(180);
+    const SPAN: Duration = Duration::from_millis(120);
     let has_sfx = crate::sfx::play(cab, crate::sfx::Sfx::PowerOn);
     let audio = (!has_sfx).then(|| plat.open_audio(RATE).ok()).flatten();
     let frame = Duration::from_millis(16);
@@ -2201,6 +2201,26 @@ pub fn run_game(
                         // it was, no reload. The "CH 3" banner flashes for a
                         // few seconds over the picture, the way a TV shows
                         // the channel when you tune it (plan revision).
+                        // O core JÁ é acionado aqui, em paralelo ao ritual: o
+                        // primeiro quadro chega junto com o fim da estática em
+                        // vez de um "nada acontece" depois do clique.
+                        if !in_flight {
+                            let mut snap = PadSnapshot::default();
+                            for port in 0..MAX_PORTS {
+                                for (rb, pb) in PAD {
+                                    snap.buttons.push((port, rb, input.held(port, pb)));
+                                }
+                                snap.analog.push((
+                                    port,
+                                    input.analog(port, 0).0,
+                                    input.analog(port, 0).1,
+                                    input.analog(port, 1).0,
+                                    input.analog(port, 1).1,
+                                ));
+                            }
+                            let _ = core_tx.send(CoreCmd::Run { input: snap });
+                            in_flight = true;
+                        }
                         power_on_burst(plat, cab);
                         powered = true;
                         powered_since = Some(Instant::now());
