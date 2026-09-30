@@ -104,15 +104,8 @@ const LED_OFF: (u8, u8, u8) = (56, 26, 26);
 /// controle e o LED de power.
 const PSX_SHELL: (u8, u8, u8) = (176, 172, 162);
 const PSX_SHELL_EDGE: (u8, u8, u8) = (126, 122, 112);
-const PSX_LID: (u8, u8, u8) = (163, 159, 149);
-const PSX_LID_EDGE: (u8, u8, u8) = (118, 114, 105);
-const PSX_LID_SEAM: (u8, u8, u8) = (104, 100, 92);
 const PSX_HUB: (u8, u8, u8) = (146, 142, 132);
 const PSX_HUB_RING: (u8, u8, u8) = (120, 116, 107);
-const PSX_MOUTH: (u8, u8, u8) = (16, 16, 18);
-const PSX_MC_SLOT: (u8, u8, u8) = (44, 44, 48);
-const PSX_MC_RIM: (u8, u8, u8) = (126, 122, 112);
-const PSX_PORT: (u8, u8, u8) = (36, 36, 40);
 const PSX_LED_ON: (u8, u8, u8) = (110, 224, 130);
 const PSX_LED_OFF: (u8, u8, u8) = (56, 58, 54);
 
@@ -412,10 +405,11 @@ pub enum PanelButton {
     Power,
     Eject,
     Reset,
-    /// Os slots de memory card no corpo do console (plano §3): clicar abre a
-    /// biblioteca de cards — a troca em si só acontece desligado (a trava é
-    /// do runner, igual à do ejetar).
-    Cards,
+    /// Os botões de memory card do painel (plano §3): clicar abre a
+    /// biblioteca de cards do slot — a troca em si só acontece desligado (a
+    /// trava é do runner, igual à do ejetar).
+    Cards1,
+    Cards2,
     /// Abre o seletor de discos (jogos m3u, plano §6) — troca o disco no
     /// drive com a sessão viva, estado serializado por baixo.
     Discos,
@@ -1692,7 +1686,7 @@ impl Cabinet {
             .as_ref()
             .is_some_and(|p| p.has_cartridge && p.powered)
         {
-            self.spin = (self.spin + 2.4) % 360.0;
+            self.spin = (self.spin + 7.0) % 360.0; // ~1 volta por segundo
         }
         self.ensure_src(frame.width, frame.height, frame.format);
         self.upload(frame);
@@ -3767,41 +3761,6 @@ fn draw_image_absolute(
     );
 }
 
-/// The panel's cartridge slot, in panel-local pixels: the in-game panel's
-/// cartridge block drawn as the console seen from the front — the loading
-/// base as a solid slab across the block's bottom (`panel_slot_base`) with
-/// the dark slot mouth across its top edge (`panel_slot_mouth`) — so the
-/// game's cartridge art stands visibly *plugged into* the console at rest,
-/// and `runner`'s insert/eject animation plays right there (plan revision:
-/// the reference photo — a cartridge standing upright, seated in the
-/// console's base). Pure geometry, so the motion math in
-/// `panel_cartridge_rects` stays unit-testable without a canvas.
-///
-/// The cartridge enters the frame from above and sinks into the mouth,
-/// which occludes everything past its top edge — the clip trick that keeps
-/// the seated cartridge's base hidden inside the console.
-fn panel_slot_base(block: Rect) -> Rect {
-    let bh = (block.height() as f32 * 0.40).round() as u32;
-    Rect::new(
-        block.x(),
-        block.bottom() - bh.max(1) as i32,
-        block.width(),
-        bh.max(1),
-    )
-}
-
-/// The slot opening: a dark band across the base's top edge, near the base's
-/// full width — where the cartridge enters and below which it is never
-/// drawn. Its top edge is the clip line the cartridge art is drawn against.
-fn panel_slot_mouth(block: Rect, base: Rect) -> Rect {
-    Rect::new(
-        block.x() + 4,
-        base.y() + 2,
-        block.width().saturating_sub(8).max(1),
-        8.min(base.height().saturating_sub(2)).max(1),
-    )
-}
-
 /// Where the cartridge sprite is at progress `t` (0.0..=1.0) of the insert
 /// — or, with `ejecting`, the mirrored eject — inside the panel's cartridge
 /// block. `iw, ih` is the art texture's own size and `content` its opaque
@@ -3864,11 +3823,18 @@ struct FaceHits {
     power: Rect,
     eject: Rect,
     reset: Rect,
-    cards: Rect,
+    cards1: Rect,
+    cards2: Rect,
 }
 
+/// O bloco do console no painel, sem o corpo: fundo limpo, apenas os três
+/// botões redondos do PS1 FAT (Power com LED, Reset menor acima dele, e o
+/// Open/Eject do outro lado), o espaço central livre para o disco girar e
+/// os dois botões de memory card no padrão das opções do painel. Retorna a
+/// área central onde o disco se assenta.
 fn draw_slot_furniture(
     canvas: &mut WindowCanvas,
+    font: &mut Texture,
     images: &HashMap<u64, ImgTex>,
     block: Rect,
     led_on: bool,
@@ -3878,87 +3844,24 @@ fn draw_slot_furniture(
         canvas.set_draw_color(Color::RGB(color.0, color.1, color.2));
         let _ = canvas.fill_rect(r);
     };
-    let body = panel_slot_base(block);
-    let mouth = panel_slot_mouth(block, body);
 
-    // Corpo: a laje cinza com a aresta de sombra na base.
-    fill(canvas, PSX_SHELL, body);
-    fill(
-        canvas,
-        PSX_SHELL_EDGE,
-        Rect::new(
-            body.x(),
-            body.bottom() - 3,
-            body.width(),
-            3.min(body.height()).max(1),
-        ),
-    );
+    // Botões de memory card: dois, lado a lado, no padrão das opções do
+    // painel (draw_button), ocupando a base do bloco.
+    let btn_h = (GLYPH_H + 12) as i32;
+    let half_w = (block.width() as i32 / 2 - 6).max(1);
+    let mc_y = block.bottom() - btn_h - 2;
+    let mc1 = Rect::new(block.x(), mc_y, half_w as u32, btn_h as u32);
+    let mc2 = Rect::new(block.x() + half_w + 12, mc_y, half_w as u32, btn_h as u32);
+    draw_button(canvas, font, mc1, "MC slot 1", true);
+    draw_button(canvas, font, mc2, "MC slot 2", true);
 
-    // Tampa: a faixa apoiada sobre o corpo, com a aresta inferior marcando
-    // a fenda (o `mouth`) por onde o disco desaparece. O hub fica ao centro
-    // da tampa — o círculo rasterizado por linhas, como um disco de verdade.
-    let lid_h = ((body.height() as f32) * 0.42).round() as i32;
-    let lid = Rect::new(
-        body.x() + 5,
-        mouth.y() - lid_h - 2,
-        body.width().saturating_sub(10).max(1),
-        lid_h.max(1) as u32,
-    );
-    fill(canvas, PSX_LID, lid);
-    fill(
-        canvas,
-        PSX_LID_EDGE,
-        Rect::new(lid.x(), lid.y(), lid.width(), 2.min(lid.height()).max(1)),
-    );
-    fill(
-        canvas,
-        PSX_MOUTH,
-        Rect::new(mouth.x(), mouth.y(), mouth.width(), mouth.height()),
-    );
-    fill(
-        canvas,
-        PSX_LID_SEAM,
-        Rect::new(
-            lid.x(),
-            lid.bottom() - 2,
-            lid.width(),
-            2.min(lid.height()).max(1),
-        ),
-    );
-    // O hub: círculo concêntrico da tampa, barra a barra.
-    let hub_r = (lid_h as f32 * 0.38).round().max(4.0);
-    let hub_cx = lid.x() + lid.width() as i32 / 2;
-    let hub_cy = lid.y() + lid.height() as i32 / 2;
-    for dy in -(hub_r as i32)..=(hub_r as i32) {
-        let half = ((hub_r * hub_r - (dy * dy) as f32).sqrt()).round() as i32;
-        if half <= 0 {
-            continue;
-        }
-        let y = hub_cy + dy;
-        if y < lid.y() + 2 || y >= lid.bottom() - 2 {
-            continue;
-        }
-        fill(
-            canvas,
-            PSX_HUB,
-            Rect::new(hub_cx - half, y, (half * 2).max(1) as u32, 1),
-        );
-    }
-    fill(
-        canvas,
-        PSX_HUB_RING,
-        Rect::new(hub_cx - 4, hub_cy - 2, 8, 4),
-    );
-
-    // Face do corpo: à esquerda o Power redondo (LED em cima, como na foto)
-    // com o Reset redondo menor acima dele; à direita o Open/Eject redondo
-    // do mesmo tamanho do Power. Símbolos dentro dos botões, sem rótulos.
-    let face_top = mouth.bottom() + 6;
-    let face_bottom = body.bottom() - 6;
+    // Os três botões redondos, centrados na altura útil acima dos MCs.
+    let face_top = block.y() + 6;
+    let face_bottom = mc_y - 10;
     let face_h = (face_bottom - face_top).max(1);
-    let btn_r = (face_h as f32 * 0.30).round() as i32;
-    let col_l = body.x() + 8 + btn_r;
-    let col_r = body.right() - 8 - btn_r;
+    let btn_r = (face_h as f32 * 0.26).round() as i32;
+    let col_l = block.x() + 10 + btn_r;
+    let col_r = block.right() - 10 - btn_r;
     let btn_cy = face_top + face_h / 2;
 
     // Reset: redondo menor, diretamente acima do Power.
@@ -4040,68 +3943,48 @@ fn draw_slot_furniture(
         (btn_r * 2) as u32,
     );
 
-    // O LED clássico do corpo (o ponto ao lado do wordmark) continua.
-    let led = Rect::new(body.x() + 10, face_top + face_h / 2 - 2, 6, 4);
-    fill(canvas, if led_on { PSX_LED_ON } else { PSX_LED_OFF }, led);
+    // A marca do console entre os botões (quando há a arte do wordmark).
     if let Some(tag) = images.get(&SLOT_TAG_IMG) {
         let (tcx, tcy, tcw, tch) = tag.content;
         let (tcw, tch) = (tcw.max(1), tch.max(1));
-        let max_h = (face_h as f32).min((body.width() as f32 * 0.16).min(40.0));
-        let scale = (max_h / tch as f32).min(((body.width() as f32 * 0.5).max(1.0)) / tcw as f32);
+        let gap_w = (col_r - btn_r - (col_l + btn_r)).max(1) as f32;
+        let max_h = 22.0f32;
+        let scale = (max_h / tch as f32).min(gap_w / tcw as f32);
         let tw = (tcw as f32 * scale).round().max(1.0) as u32;
         let th = (tch as f32 * scale).round().max(1.0) as u32;
         let src = Rect::new(tcx as i32, tcy as i32, tcw.min(tag.w), tch.min(tag.h));
         let dst = Rect::new(
-            body.x() + 24,
-            face_top + ((face_h - th as i32) / 2).max(0),
+            block.x() + ((block.width() as i32 - tw as i32) / 2).max(0),
+            face_top + 4,
             tw,
             th,
         );
         let _ = canvas.copy(&tag.tex, src, dst);
-    } else {
-        fill(
-            canvas,
-            PSX_LID_SEAM,
-            Rect::new(
-                body.x() + 24,
-                face_top + face_h / 2 - 1,
-                40.min(body.width() / 3),
-                3,
-            ),
-        );
     }
-    let mc_w = 16u32.min(body.width() / 8).max(6);
-    let mc_h = 5u32.min(face_h.unsigned_abs() / 2).max(3);
-    let mut mc_hit = Rect::new(0, 0, 0, 0);
-    for i in 0..2u32 {
-        let mc_x = body.right() - 12 - ((mc_w + 8) * (2 - i)) as i32;
-        let mc = Rect::new(mc_x, face_top + face_h / 2 - mc_h as i32 / 2, mc_w, mc_h);
-        fill(
-            canvas,
-            PSX_MC_RIM,
-            Rect::new(mc.x() - 1, mc.y() - 1, mc.width() + 2, mc.height() + 2),
-        );
-        fill(canvas, PSX_MC_SLOT, mc);
-        // As portas de controle, logo abaixo dos slots.
-        fill(canvas, PSX_PORT, Rect::new(mc_x, face_bottom - 6, mc_w, 3));
-        mc_hit = if mc_hit.width() == 0 {
-            mc
-        } else {
-            Rect::new(
-                mc_hit.x(),
-                mc_hit.y(),
-                (mc.right() - mc_hit.x()) as u32,
-                (mc.bottom() - mc_hit.y()) as u32,
-            )
-        };
-    }
+
+    // O espaço central livre, entre as duas colunas de botões: é onde o
+    // disco se assenta e gira.
+    let disc_l = col_l + btn_r + 8;
+    let disc_r = col_r - btn_r - 8;
+    let disc_t = face_top;
+    let disc_b = face_bottom;
+    let disc_w = (disc_r - disc_l).max(1);
+    let disc_h = (disc_b - disc_t).max(1);
+    let side = disc_w.min(disc_h);
+    let disc = Rect::new(
+        block.x() + (block.width() as i32 - side) / 2,
+        face_top + (face_h - side) / 2,
+        side as u32,
+        side as u32,
+    );
     let hits = FaceHits {
         power: power_hit,
         eject: eject_hit,
         reset: reset_hit,
-        cards: mc_hit,
+        cards1: mc1,
+        cards2: mc2,
     };
-    (mouth, hits)
+    (disc, hits)
 }
 
 /// Draw the panel's console block: o PSX com o disco do jogo entrando pela
@@ -4112,6 +3995,7 @@ fn draw_slot_furniture(
 /// `draw_panel` only calls this under `has_cartridge`.
 fn draw_panel_slot(
     canvas: &mut WindowCanvas,
+    font: &mut Texture,
     images: &HashMap<u64, ImgTex>,
     block: Rect,
     t: f32,
@@ -4121,11 +4005,11 @@ fn draw_panel_slot(
     spin_deg: f32,
     spinning: bool,
 ) -> FaceHits {
-    let (mouth, hits) = draw_slot_furniture(canvas, images, block, led_on, reset_pressed);
+    let (disc, hits) = draw_slot_furniture(canvas, font, images, block, led_on, reset_pressed);
 
-    // O disco: desce de cima, ENCAIXA no eixo (o centro da tampa) e, com o
-    // console ligado, GIRA (a arte rotaciona em torno do eixo). Sem disco,
-    // o leitor (o poço + o eixo) fica à mostra na tampa.
+    // O disco: desce de cima, ENCAIXA no centro da área livre (entre os
+    // botões) e, com o console ligado, GIRA (a arte rotaciona em torno do
+    // eixo). Menor que o bloco: cabe no espaço entre Power/Reset e Eject.
     if let Some(art) = images.get(&PANEL_CARTRIDGE_IMG) {
         let t = t.clamp(0.0, 1.0);
         let e = if ejecting {
@@ -4134,10 +4018,10 @@ fn draw_panel_slot(
             t * t * (3.0 - 2.0 * t)
         };
         let p = if ejecting { 1.0 - e } else { e };
-        // Assentado: centrado no eixo, do tamanho da tampa útil.
-        let side = (mouth.width() as f32 * 0.72) as f32;
-        let hub_cx = mouth.x() as f32 + mouth.width() as f32 / 2.0;
-        let hub_cy = mouth.y() as f32 + mouth.height() as f32 / 2.0;
+        // Assentado: centrado no espaço livre entre os botões.
+        let side = (disc.width().min(disc.height()) as f32) * 0.94;
+        let hub_cx = disc.x() as f32 + disc.width() as f32 / 2.0;
+        let hub_cy = disc.y() as f32 + disc.height() as f32 / 2.0;
         let hw = side / 2.0;
         let enter_cy = block.y() as f32 - side / 2.0;
         // O centro do disco desce do topo até o eixo e ENCAIXA nele.
@@ -4182,12 +4066,12 @@ fn draw_idle_slot(
     label: &str,
     reset_pressed: bool,
 ) -> Rect {
-    let (mouth, _hits) = draw_slot_furniture(canvas, images, block, false, reset_pressed);
+    let (_disc, _hits) = draw_slot_furniture(canvas, font, images, block, false, reset_pressed);
     let btn_w = (block.width() as f32 * 0.7).round() as u32;
     let btn_h = (GLYPH_H as i32 * 2 + 16) as u32;
     let btn = Rect::new(
         block.x() + (block.width() as i32 - btn_w as i32) / 2,
-        block.y() + 6 + ((mouth.y() - block.y() - 12 - btn_h as i32) / 2).max(0),
+        block.y() + 6 + (((block.height() as i32) - 12 - btn_h as i32) / 2).max(0),
         btn_w,
         btn_h,
     );
@@ -4505,6 +4389,7 @@ fn draw_panel(
         let (t, ejecting) = panel.cartridge_motion.unwrap_or((1.0, false));
         let face_hits = draw_panel_slot(
             canvas,
+            font,
             images,
             Rect::new(x, cy, inner_w, CARTRIDGE_H),
             t,
@@ -4534,7 +4419,8 @@ fn draw_panel(
         buttons.push((PanelButton::Power, hits.power));
         buttons.push((PanelButton::Eject, hits.eject));
         buttons.push((PanelButton::Reset, hits.reset));
-        buttons.push((PanelButton::Cards, hits.cards));
+        buttons.push((PanelButton::Cards1, hits.cards1));
+        buttons.push((PanelButton::Cards2, hits.cards2));
     }
 
     // 3. Commands — the console's own buttons, not the emulator's extras

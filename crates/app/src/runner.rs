@@ -8,7 +8,9 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, Context, Result};
-use xperience_emulation::{AnalogStick, Button, Core, Frame as EmuFrame, PixelFormat as EmuFormat};
+use xperience_emulation::{
+    AnalogStick, Button, Core, Frame as EmuFrame, PixelFormat as EmuFormat, MEMORY_SAVE_RAM,
+};
 use xperience_platform::{
     Cabinet, FrameRef, PanelButton, PixelFormat as PlatFormat, Platform, UiEvent, MAX_PORTS,
 };
@@ -78,6 +80,9 @@ pub struct GameSpec {
     /// volta para o card — nunca para uma pasta do jogo. `None` conserva o
     /// comportamento herdado do SNES (um sram por jogo).
     pub card1: Option<PathBuf>,
+    /// O mesmo para o slot 2 (`mem_id` 1 no libretro). `None` = slot vazio
+    /// até o jogador escolher um card no botão "MC slot 2".
+    pub card2: Option<PathBuf>,
     /// Local cartridge art (`assets/cartridge/<rom>.*`), shown in the panel
     /// alongside the logo when present (plan revision) — `None` just skips
     /// that block, no fallback needed.
@@ -312,23 +317,30 @@ fn next_card_name(dir: &Path) -> String {
     format!("Cartão {n}")
 }
 
-/// Encaixa `path` no slot 1: o conteúdo vira o `SAVE_RAM` da sessão e o
-/// flush passa a apontar para o arquivo. Card sem arquivo ainda nasce do
-/// core na próxima materialização.
+/// Encaixa `path` num slot de memory card (`mem_id` 0 = slot 1, 1 = slot 2
+/// no libretro): o conteúdo vira a memória da sessão e o flush passa a
+/// apontar para o arquivo. Card sem arquivo ainda nasce do core na próxima
+/// materialização.
 fn seat_card(
     core: &mut Core,
     sram_path: &mut PathBuf,
     current: &mut Option<PathBuf>,
+    mem_id: u32,
     path: PathBuf,
 ) {
     match fs::read(&path) {
         Ok(bytes) => {
-            let n = core.load_sram(&bytes);
-            log::info!("card 1: {} no SAVE_RAM ({n} bytes)", path.display());
+            let n = core.write_memory(MEMORY_SAVE_RAM + mem_id, &bytes);
+            log::info!(
+                "card {}: {} no SAVE_RAM ({n} bytes)",
+                mem_id + 1,
+                path.display()
+            );
         }
         Err(e) => {
             log::info!(
-                "card 1: {} ainda não existe ({e}) — o core formata",
+                "card {}: {} ainda não existe ({e}) — o core formata",
+                mem_id + 1,
                 path.display()
             );
         }
@@ -876,6 +888,8 @@ enum Modal {
     /// escolher um encaixa no slot 1 (só desligado; a trava é no
     /// `OpenCards`), e a primeira linha cria um cartão novo.
     Cards,
+    /// A mesma biblioteca, encaixando no slot 2 (os botões "MC slot 1/2").
+    Cards2,
     /// O seletor de discos de um jogo m3u (plano §6): troca o disco no
     /// drive com a sessão viva, estado serializado por baixo.
     Discos,
@@ -1220,6 +1234,23 @@ pub fn run_game(
         .card1
         .clone()
         .unwrap_or_else(|| sram_file(&spec.save_dir, &title));
+    // Slot 2: vazio até o jogador escolher um card no botão "MC slot 2" —
+    // sem card, nada é lido nem gravado (o core formata o dele em memória).
+    let mut current_card2 = spec.card2.clone();
+    let mut sram2_path = spec.card2.clone().unwrap_or_default();
+    let mut last_sram2: Option<Vec<u8>> = None;
+    if let Some(card2) = spec.card2.clone() {
+        match fs::read(&card2) {
+            Ok(bytes) => {
+                let n = core.write_memory(MEMORY_SAVE_RAM + 1, &bytes);
+                log::info!(
+                    "card 2: conteúdo do {} no SAVE_RAM ({n} bytes)",
+                    card2.display()
+                );
+            }
+            Err(e) => log::info!("card 2: {e} — o core formata"),
+        }
+    }
     // Note slot (fixed 1..=15, not save-state's 0..=9) — which of the 15
     // the notebook's right page shows; Prev/Next move it while paused
     // there, and picking a print's destination in the Printscreen modal
@@ -1816,7 +1847,8 @@ pub fn run_game(
                             PanelButton::Notebook => Some(UiEvent::TogglePause),
                             PanelButton::Cheats => Some(UiEvent::OpenCheatsModal),
                             PanelButton::Achievements => Some(UiEvent::OpenAchievementsModal),
-                            PanelButton::Cards => Some(UiEvent::OpenCards),
+                            PanelButton::Cards1 => Some(UiEvent::OpenCards),
+                            PanelButton::Cards2 => Some(UiEvent::OpenCards2),
                             PanelButton::Discos => Some(UiEvent::OpenDiscos),
                             // The shelf's own list button is shelf-side.
                             PanelButton::ShelfAchievements => None,
@@ -1866,6 +1898,13 @@ pub fn run_game(
                         // signal-off ritual. A second click while already off
                         // does nothing on purpose — it's Ligar (below) now.
                         flush_sram(&sram_path, &mut last_sram, core.sram());
+                        if current_card2.is_some() {
+                            flush_sram(
+                                &sram2_path,
+                                &mut last_sram2,
+                                core.memory(MEMORY_SAVE_RAM + 1),
+                            );
+                        }
                         if let Some(t) = powered_since.take() {
                             powered_elapsed += t.elapsed();
                         }
@@ -2097,6 +2136,20 @@ pub fn run_game(
                         cab.set_modal("Memory Cards", &rows);
                     }
                 }
+                UiEvent::OpenCards2 => {
+                    if powered {
+                        cab.push_osd(
+                            &["CARD NO SLOT", "desligue o console para trocar"],
+                            None,
+                            Duration::from_secs(4),
+                        );
+                    } else {
+                        let (rows, _) =
+                            card_library(&crate::dirs::memcards_dir(), current_card2.as_deref());
+                        modal = Modal::Cards2;
+                        cab.set_modal("Memory Cards — slot 2", &rows);
+                    }
+                }
                 UiEvent::OpenDiscos => {
                     let Some(list) = &discs else {
                         continue;
@@ -2255,9 +2308,45 @@ pub fn run_game(
                                     Err(e) => log::warn!("card 1: criando {}: {e}", path.display()),
                                 }
                             }
-                            seat_card(&mut core, &mut sram_path, &mut current_card, path);
+                            seat_card(&mut core, &mut sram_path, &mut current_card, 0, path);
                         } else if let Some(path) = cards.get(i as usize - 1) {
-                            seat_card(&mut core, &mut sram_path, &mut current_card, path.clone());
+                            seat_card(
+                                &mut core,
+                                &mut sram_path,
+                                &mut current_card,
+                                0,
+                                path.clone(),
+                            );
+                        }
+                    }
+                    Modal::Cards2 => {
+                        modal = Modal::None;
+                        cab.clear_modal();
+                        let dir = crate::dirs::memcards_dir();
+                        let (_, cards) = card_library(&dir, current_card2.as_deref());
+                        if i == 0 {
+                            let name = next_card_name(&dir);
+                            let path = dir.join(format!("{name}.mcr"));
+                            if let Some(bytes) = core.memory(MEMORY_SAVE_RAM + 1) {
+                                let _ = fs::create_dir_all(&dir);
+                                match fs::write(&path, &bytes) {
+                                    Ok(_) => log::info!(
+                                        "card 2: {} criado e encaixado ({} bytes)",
+                                        path.display(),
+                                        bytes.len()
+                                    ),
+                                    Err(e) => log::warn!("card 2: criando {}: {e}", path.display()),
+                                }
+                            }
+                            seat_card(&mut core, &mut sram2_path, &mut current_card2, 1, path);
+                        } else if let Some(path) = cards.get(i as usize - 1) {
+                            seat_card(
+                                &mut core,
+                                &mut sram2_path,
+                                &mut current_card2,
+                                1,
+                                path.clone(),
+                            );
                         }
                     }
                     Modal::Discos => {
@@ -2587,6 +2676,13 @@ pub fn run_game(
             // Periodically flush battery SRAM if it changed.
             if frames.is_multiple_of(SRAM_FLUSH_FRAMES) {
                 flush_sram(&sram_path, &mut last_sram, core.sram());
+                if current_card2.is_some() {
+                    flush_sram(
+                        &sram2_path,
+                        &mut last_sram2,
+                        core.memory(MEMORY_SAVE_RAM + 1),
+                    );
+                }
             }
         } else if paused {
             // Paused, not stepping: the book, not a frozen game frame.
@@ -2602,6 +2698,13 @@ pub fn run_game(
 
     // Final SRAM flush on the way out (either exit path).
     flush_sram(&sram_path, &mut last_sram, core.sram());
+    if current_card2.is_some() {
+        flush_sram(
+            &sram2_path,
+            &mut last_sram2,
+            core.memory(MEMORY_SAVE_RAM + 1),
+        );
+    }
 
     // Bank whatever powered-on stretch was still running (exiting while on,
     // e.g. window closed mid-session) and add it to the all-time total.

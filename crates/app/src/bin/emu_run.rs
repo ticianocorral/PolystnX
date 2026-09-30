@@ -27,6 +27,7 @@ struct Args {
     /// O memory card físico do slot 1 (biblioteca `memcards/`, plano §3):
     /// o conteúdo vira o `SAVE_RAM` da sessão e o flush volta para o arquivo.
     card1: Option<PathBuf>,
+    card2: Option<PathBuf>,
     /// Speculative frames past the shown one; `None` = take the config value.
     runahead: Option<u32>,
     /// Headless self-check: run N frames, save the composited window, exit.
@@ -56,6 +57,7 @@ fn parse_args() -> Result<Args> {
     let mut notes_dir = None;
     let mut config = None;
     let mut card1 = None;
+    let mut card2 = None;
     let mut runahead = None;
     let mut shot = None;
     let mut shot_frame = 180u32;
@@ -109,6 +111,13 @@ fn parse_args() -> Result<Args> {
                 card1 = Some(
                     it.next()
                         .ok_or_else(|| anyhow!("--card1 needs a path (.mcr)"))?
+                        .into(),
+                )
+            }
+            "--card2" => {
+                card2 = Some(
+                    it.next()
+                        .ok_or_else(|| anyhow!("--card2 needs a path (.mcr)"))?
                         .into(),
                 )
             }
@@ -193,6 +202,7 @@ fn parse_args() -> Result<Args> {
         notes_dir,
         config,
         card1,
+        card2,
         runahead,
         shot,
         shot_frame,
@@ -265,6 +275,7 @@ fn main() -> Result<()> {
         shot: args.shot.map(|p| (p, args.shot_frame)),
         logo: args.logo,
         card1: args.card1,
+        card2: args.card2,
         cartridge: args.cartridge,
         shot_off: args.shot_off,
         debug_note_capture: args.debug_note_capture,

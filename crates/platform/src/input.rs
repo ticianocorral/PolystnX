@@ -137,9 +137,11 @@ pub enum UiEvent {
     /// long enough that this stopped being hypothetical).
     ModalScrollUp,
     ModalScrollDown,
-    /// Abrir a biblioteca de memory cards (plano §3) — clicar no slot do
-    /// console; a trava de troca só-desligado é aplicada no runner.
+    /// Abrir a biblioteca de memory cards (plano §3) — clicar no botão
+    /// "MC slot 1" do painel; a trava de troca só-desligado é do runner.
     OpenCards,
+    /// O mesmo para o "MC slot 2".
+    OpenCards2,
     /// Abrir o seletor de discos do jogo (m3u, plano §6) — o bloco
     /// "Discos" da pausa.
     OpenDiscos,
