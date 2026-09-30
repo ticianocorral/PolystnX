@@ -13,6 +13,9 @@ use crate::dirs;
 const DEFAULT_CONSOLE_LOGO: &[u8] = include_bytes!("../assets/console_logo.png");
 /// The slot base wordmark (the app's `assets/console-tag.png` on disk).
 const DEFAULT_CONSOLE_TAG: &[u8] = include_bytes!("../assets/console_tag.png");
+/// O leitor de CD real (foto recortada, mascarada em círculo) — placeholder
+/// sob o disco girando.
+const DEFAULT_CD_READER: &[u8] = include_bytes!("../assets/cd_reader.png");
 
 /// Load both brand images into the cabinet: the idle logo and the slot tag.
 /// Called once per idle visit (and the slot tag again per game launch, so a
@@ -21,6 +24,23 @@ const DEFAULT_CONSOLE_TAG: &[u8] = include_bytes!("../assets/console_tag.png");
 pub(crate) fn load_brand_images(cab: &mut Cabinet) {
     load_console_logo(cab);
     load_slot_tag(cab);
+    load_cd_reader(cab);
+}
+
+/// O placeholder do leitor: sempre a imagem embutida (não tem override —
+/// é o "hardware" do console, não arte de marca).
+pub(crate) fn load_cd_reader(cab: &mut Cabinet) {
+    match image::load_from_memory(DEFAULT_CD_READER) {
+        Ok(img) => {
+            let img = img.thumbnail(512, 512).to_rgba8();
+            let (w, h) = img.dimensions();
+            cab.set_cd_reader(Some((w, h, img.as_raw().as_slice())));
+        }
+        Err(e) => {
+            log::warn!("console art: leitor de CD embutido: {e}");
+            cab.set_cd_reader(None);
+        }
+    }
 }
 
 /// The idle screen's brand logo: an optional `assets/console.png` override,

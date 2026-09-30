@@ -54,6 +54,8 @@ const PANEL_CONSOLE_LOGO_IMG: u64 = u64::MAX - 5;
 /// slot's loading base (plan revision — `assets/console-tag.png`, set once
 /// via `Cabinet::set_slot_tag`, not per-game).
 const SLOT_TAG_IMG: u64 = u64::MAX - 6;
+/// O leitor de CD real (foto recortada) — o placeholder sob o disco.
+pub const CD_READER_IMG: u64 = u64::MAX - 8;
 
 /// The pause book: two pages, not warped by the tube — a dedicated screen
 /// (plan §3.2/§3.4), not cabinet furniture, so it replaces the whole window
@@ -1282,6 +1284,17 @@ impl Cabinet {
     /// drawn by `draw_slot_furniture` on every screen that shows the slot.
     /// `None` removes a previously loaded tag (file gone), leaving the bare
     /// groove line.
+    /// A imagem do leitor de CD (foto real, mascarada em círculo) — o
+    /// placeholder que fica sob o disco girando. Sempre presente.
+    pub fn set_cd_reader(&mut self, img: Option<(u32, u32, &[u8])>) {
+        match img {
+            Some((w, h, rgba)) => self.set_image(CD_READER_IMG, w, h, rgba),
+            None => {
+                self.images.remove(&CD_READER_IMG);
+            }
+        }
+    }
+
     pub fn set_slot_tag(&mut self, tag: Option<(u32, u32, &[u8])>) {
         match tag {
             Some((w, h, rgba)) => self.set_image(SLOT_TAG_IMG, w, h, rgba),
@@ -3848,7 +3861,7 @@ struct FaceHits {
 fn draw_slot_furniture(
     canvas: &mut WindowCanvas,
     font: &mut Texture,
-    _images: &HashMap<u64, ImgTex>,
+    images: &HashMap<u64, ImgTex>,
     block: Rect,
     led_on: bool,
     reset_pressed: bool,
@@ -3961,12 +3974,25 @@ fn draw_slot_furniture(
     let disc_w = (disc_r - disc_l).max(1);
     let disc_h = (disc_b - disc_t).max(1);
     let side = disc_w.min(disc_h);
-    let disc = Rect::new(
+    let mut disc = Rect::new(
         block.x() + (block.width() as i32 - side) / 2,
         face_top + (face_h - side) / 2,
         side as u32,
         side as u32,
     );
+    // O placeholder: o leitor real (foto recortada) ocupa exatamente o vão
+    // onde o disco se assenta e gira — o disco entra POR CIMA dele.
+    if let Some(reader) = images.get(&CD_READER_IMG) {
+        let side_reader = (side as f32 * 1.06).round() as i32;
+        let rr = Rect::new(
+            disc.x() + disc.width() as i32 / 2 - side_reader / 2,
+            disc.y() + disc.height() as i32 / 2 - side_reader / 2,
+            side_reader as u32,
+            side_reader as u32,
+        );
+        disc = rr;
+        let _ = canvas.copy(&reader.tex, None, rr);
+    }
     let hits = FaceHits {
         power: power_hit,
         eject: eject_hit,

@@ -1637,6 +1637,7 @@ pub fn run_game(
     // game launch so a direct `emu-run` shows it too; the baked-in image is
     // the fallback (see `console_art`).
     crate::console_art::load_slot_tag(cab);
+    crate::console_art::load_cd_reader(cab);
     let cartridge_img = decode_panel_art(&spec.cartridge, "disco");
     let has_cartridge_art = cartridge_img.is_some();
     cab.set_panel(
