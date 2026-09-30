@@ -20,6 +20,7 @@ name = "selector"
 path = "src/bin/selector.rs"
 
 [dependencies]
+libc = "0.2"
 xperience-emulation = { path = "../emulation" }
 xperience-platform = { path = "../platform" }
 xperience-domain = { path = "../domain" }

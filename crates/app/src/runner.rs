@@ -133,14 +133,6 @@ const PAD: [(Button, xperience_platform::PadButton); 14] = {
     ]
 };
 
-fn map_format(f: EmuFormat) -> PlatFormat {
-    match f {
-        EmuFormat::Rgb1555 => PlatFormat::Rgb1555,
-        EmuFormat::Xrgb8888 => PlatFormat::Xrgb8888,
-        EmuFormat::Rgb565 => PlatFormat::Rgb565,
-    }
-}
-
 /// A path-hostile character in a game title, replaced with `_` so it can't
 /// escape its parent directory or fail to create — shared by every per-game
 /// folder (`saves/<title>/`, `notes/<title>/`), and by `rom_rename` (plan
@@ -321,12 +313,188 @@ fn next_card_name(dir: &Path) -> String {
     format!("Cartão {n}")
 }
 
+// --- core em thread própria (plano revision: "faca tudo") ------------------
+//
+// O SwanStation bloqueia: boot, troca BIOS→jogo e FMV pesada seguram
+// `core.run()` por centenas de ms — e com o loop sequencial, nada era
+// redesenhado (quadro congelado, disco parado). O worker dono do core
+// responde a comandos; a interface continua desenhando a 60 fps o último
+// quadro recebido, com o disco girando por relógio.
+
+/// Snapshot de entrada de um tick — o `Input` da plataforma não é Send.
+#[derive(Default)]
+struct PadSnapshot {
+    buttons: Vec<(usize, Button, bool)>,
+    analog: Vec<(usize, i16, i16, i16, i16)>,
+}
+
+enum CoreCmd {
+    Run {
+        input: PadSnapshot,
+    },
+    Reset,
+    CheatReset,
+    CheatSet {
+        i: u32,
+        on: bool,
+        code: String,
+    },
+    SaveState {
+        tx: std::sync::mpsc::Sender<Vec<u8>>,
+    },
+    LoadState {
+        bytes: Vec<u8>,
+    },
+    Sram {
+        tx: std::sync::mpsc::Sender<Option<Vec<u8>>>,
+    },
+    SramAt {
+        id: u32,
+        tx: std::sync::mpsc::Sender<Option<Vec<u8>>>,
+    },
+    WriteMem {
+        id: u32,
+        bytes: Vec<u8>,
+    },
+    SwitchDisc {
+        path: PathBuf,
+        tx: std::sync::mpsc::Sender<bool>,
+    },
+    Quit,
+}
+
+/// O que um `Run` produz: frame, aspecto, áudio do quadro e — quando há
+/// sessão de RA ativa — cópia da RAM do quadro real (o tick do RA roda no
+/// main, contra a mesma memória que o original via `with_memory`).
+struct CoreOut {
+    frame: Option<EmuFrame>,
+    aspect: f32,
+    audio: Vec<i16>,
+    ram: Option<std::sync::Arc<Vec<u8>>>,
+}
+
+/// Core bruto (handles de dlopen) atravessando uma fronteira de thread.
+struct CoreRunning(Core);
+unsafe impl Send for CoreRunning {}
+
+fn spawn_core_worker(
+    core: Core,
+    runahead: usize,
+    want_ram: bool,
+    current_disc: PathBuf,
+) -> (
+    std::sync::mpsc::Sender<CoreCmd>,
+    std::sync::mpsc::Receiver<CoreOut>,
+) {
+    let (tx, rx) = std::sync::mpsc::channel::<CoreCmd>();
+    let (otx, orx) = std::sync::mpsc::channel::<CoreOut>();
+    std::thread::Builder::new()
+        .name("swanstation".into())
+        .spawn(move || {
+            // Prioridade baixa para a thread do core (macOS: nice afeta só a
+            // thread): nas FMVs o software renderer satura as CPUs e a thread
+            // de UI (bomba de eventos do SDL) era preterida — a "travada".
+            #[cfg(target_os = "macos")]
+            unsafe {
+                libc::setpriority(libc::PRIO_DARWIN_THREAD, 0, 12);
+            }
+            let mut running = CoreRunning(core);
+            let mut spec_state = Vec::new();
+            let mut disc = current_disc;
+            while let Ok(cmd) = rx.recv() {
+                let core = &mut running.0;
+                match cmd {
+                    CoreCmd::Quit => break,
+                    CoreCmd::Run { input } => {
+                        if std::env::var_os("PSX_DEBUG_CORE").is_some() {
+                            eprintln!("dbg: worker rodou frame");
+                        }
+                        for (port, btn, held) in &input.buttons {
+                            core.set_button(*port, *btn, *held);
+                        }
+                        for (port, lx, ly, rx_, ry_) in &input.analog {
+                            core.set_analog(*port, AnalogStick::Left, *lx, *ly);
+                            core.set_analog(*port, AnalogStick::Right, *rx_, *ry_);
+                        }
+                        core.run();
+                        let audio = core.audio().to_vec();
+                        let ram = want_ram.then(|| {
+                            std::sync::Arc::new(
+                                core.memory(xperience_emulation::MEMORY_SYSTEM_RAM)
+                                    .unwrap_or_default(),
+                            )
+                        });
+                        let aspect = core.av_info().aspect_ratio;
+                        // Frames especulativos de run-ahead: áudio e RAM
+                        // capturados do quadro real acima; o frame exibido é
+                        // o que o core reporta depois deles, e o estado volta
+                        // ao real em seguida — exatamente o fluxo antigo.
+                        let speculated = runahead > 0 && core.save_state_into(&mut spec_state);
+                        if speculated {
+                            for _ in 0..runahead {
+                                core.run();
+                            }
+                        }
+                        let frame = core.take_frame();
+                        if speculated {
+                            core.load_state(&spec_state);
+                        }
+                        let _ = otx.send(CoreOut {
+                            frame,
+                            aspect,
+                            audio,
+                            ram,
+                        });
+                    }
+                    CoreCmd::Reset => core.reset(),
+                    CoreCmd::CheatReset => core.cheat_reset(),
+                    CoreCmd::CheatSet { i, on, code } => {
+                        core.cheat_set(i, on, &code);
+                    }
+                    CoreCmd::SaveState { tx } => {
+                        let _ = tx.send(core.save_state().unwrap_or_default());
+                    }
+                    CoreCmd::LoadState { bytes } => {
+                        core.load_state(&bytes);
+                    }
+                    CoreCmd::Sram { tx } => {
+                        let _ = tx.send(core.sram());
+                    }
+                    CoreCmd::SramAt { id, tx } => {
+                        let _ = tx.send(core.memory(id));
+                    }
+                    CoreCmd::WriteMem { id, bytes } => {
+                        core.write_memory(id, &bytes);
+                    }
+                    CoreCmd::SwitchDisc { path, tx } => {
+                        // Mesma coreografia do fluxo antigo: estado volta por
+                        // cima da recarga; falha, volta ao disco atual.
+                        let state = core.save_state();
+                        core.reset();
+                        if core.load_disc(&path).is_ok() {
+                            if let Some(state) = state {
+                                core.load_state(&state);
+                            }
+                            disc = path;
+                            let _ = tx.send(true);
+                        } else {
+                            let _ = core.load_disc(&disc);
+                            let _ = tx.send(false);
+                        }
+                    }
+                }
+            }
+        })
+        .expect("thread do core");
+    (tx, orx)
+}
+
 /// Encaixa `path` num slot de memory card (`mem_id` 0 = slot 1, 1 = slot 2
 /// no libretro): o conteúdo vira a memória da sessão e o flush passa a
 /// apontar para o arquivo. Card sem arquivo ainda nasce do core na próxima
 /// materialização.
 fn seat_card(
-    core: &mut Core,
+    tx: &std::sync::mpsc::Sender<CoreCmd>,
     sram_path: &mut PathBuf,
     current: &mut Option<PathBuf>,
     mem_id: u32,
@@ -334,7 +502,11 @@ fn seat_card(
 ) {
     match fs::read(&path) {
         Ok(bytes) => {
-            let n = core.write_memory(MEMORY_SAVE_RAM + mem_id, &bytes);
+            let n = bytes.len();
+            let _ = tx.send(CoreCmd::WriteMem {
+                id: MEMORY_SAVE_RAM + mem_id,
+                bytes,
+            });
             log::info!(
                 "card {}: {} no SAVE_RAM ({n} bytes)",
                 mem_id + 1,
@@ -536,7 +708,7 @@ fn power_off_burst(plat: &Platform, cab: &mut Cabinet) -> f32 {
 /// exactly where it was paused.
 fn power_on_burst(plat: &Platform, cab: &mut Cabinet) {
     const RATE: u32 = 22_050;
-    const SPAN: Duration = Duration::from_millis(450);
+    const SPAN: Duration = Duration::from_millis(180);
     let has_sfx = crate::sfx::play(cab, crate::sfx::Sfx::PowerOn);
     let audio = (!has_sfx).then(|| plat.open_audio(RATE).ok()).flatten();
     let frame = Duration::from_millis(16);
@@ -1616,7 +1788,7 @@ pub fn run_game(
     let frame_time = Duration::from_secs_f64(1.0 / av.fps.max(1.0));
     let mut next = Instant::now();
     let mut frames: u32 = 0;
-    let mut last_dims = (0u32, 0u32);
+    let mut last_dims: Option<(u32, u32)> = None;
     // Don't let the audio queue run more than ~0.15 s ahead (latency creep).
     let audio_cap = (av.sample_rate / 6.0) as usize;
 
@@ -1631,7 +1803,6 @@ pub fn run_game(
         log::warn!("core has no save state — run-ahead disabled");
         runahead = 0;
     }
-    let mut spec_state: Vec<u8> = Vec::new();
     let mut last_sram = core.sram();
     // Which note slot to save into once the next frame is ready — set at
     // click time, consumed after `core.run()` produces a real frame.
@@ -1673,6 +1844,80 @@ pub fn run_game(
     let mut print_pending = false;
     let mut print_capture: Option<EmuFrame> = None;
     log::info!("running: rf ntsc + crt tube, run-ahead {runahead}");
+    // O core mora na thread dele; a interface continua a 60 fps com o
+    // último quadro enquanto o SwanStation bloqueia (boot, FMV).
+    let (core_tx, core_rx) = spawn_core_worker(
+        core,
+        runahead as usize,
+        ra_session.is_some(),
+        spec.rom.clone(),
+    );
+    let mut in_flight = false;
+    /// Último quadro apresentável (já convertido para XRGB8888).
+    struct LastFrame {
+        w: u32,
+        h: u32,
+        rgba: Vec<u8>,
+        aspect: f32,
+    }
+    impl LastFrame {
+        fn fref(&self) -> FrameRef<'_> {
+            FrameRef {
+                width: self.w,
+                height: self.h,
+                pitch: self.w as usize * 4,
+                format: PlatFormat::Xrgb8888,
+                pixels: &self.rgba,
+            }
+        }
+        fn from_frame(frame: &EmuFrame) -> Self {
+            let mut rgba = Vec::with_capacity(frame.width as usize * frame.height as usize * 4);
+            if frame.format == EmuFormat::Rgb565 {
+                for chunk in frame.pixels.as_chunks::<2>().0 {
+                    let v = u16::from_le_bytes([chunk[0], chunk[1]]);
+                    let r = (((v >> 11) & 0x1f) * 255 / 31) as u8;
+                    let g = (((v >> 5) & 0x3f) * 255 / 63) as u8;
+                    let b = ((v & 0x1f) * 255 / 31) as u8;
+                    rgba.extend_from_slice(&[b, g, r, 255]);
+                }
+            } else {
+                rgba = frame.pixels.clone();
+            }
+            Self {
+                w: frame.width,
+                h: frame.height,
+                rgba,
+                aspect: 0.0,
+            }
+        }
+    }
+    let mut last_render: Option<(LastFrame, f32)> = None;
+    // Drena o quadro em voo antes de uma operação de estado (reset, estado,
+    // cheat, card, disco, desligar): o worker termina o quadro corrente.
+    macro_rules! drain_core {
+        () => {{
+            while in_flight {
+                match core_rx.recv() {
+                    Ok(out) => {
+                        in_flight = false;
+                        frames += 1;
+                        if audio.queued_frames() < audio_cap {
+                            audio.queue(&out.audio);
+                        }
+                        if let Some(frame) = &out.frame {
+                            let mut lf = LastFrame::from_frame(frame);
+                            lf.aspect = out.aspect;
+                            last_render = Some((lf, out.aspect));
+                        }
+                    }
+                    Err(_) => {
+                        in_flight = false;
+                        break;
+                    }
+                }
+            }
+        }};
+    }
 
     let exit = 'run: loop {
         // Editing (text or a caption) is the one deliberate keyboard-typing
@@ -1923,13 +2168,19 @@ pub fn run_game(
                         // Desligar (plan §3.3): flush the cart, then the
                         // signal-off ritual. A second click while already off
                         // does nothing on purpose — it's Ligar (below) now.
-                        flush_sram(&sram_path, &mut last_sram, core.sram());
+                        drain_core!();
+                        let (sram_tx, sram_rx) = std::sync::mpsc::channel();
+                        let _ = core_tx.send(CoreCmd::Sram { tx: sram_tx });
+                        let sram = sram_rx.recv().ok().flatten();
+                        flush_sram(&sram_path, &mut last_sram, sram);
                         if current_card2.is_some() {
-                            flush_sram(
-                                &sram2_path,
-                                &mut last_sram2,
-                                core.memory(MEMORY_SAVE_RAM + 1),
-                            );
+                            let (t2, r2) = std::sync::mpsc::channel();
+                            let _ = core_tx.send(CoreCmd::SramAt {
+                                id: MEMORY_SAVE_RAM + 1,
+                                tx: t2,
+                            });
+                            let s2 = r2.recv().ok().flatten();
+                            flush_sram(&sram2_path, &mut last_sram2, s2);
                         }
                         if let Some(t) = powered_since.take() {
                             powered_elapsed += t.elapsed();
@@ -1975,7 +2226,8 @@ pub fn run_game(
                 UiEvent::CloseRequested => break 'run GameExit::Quit,
                 UiEvent::Reset => {
                     if powered {
-                        core.reset();
+                        drain_core!();
+                        let _ = core_tx.send(CoreCmd::Reset);
                         crate::sfx::play(cab, crate::sfx::Sfx::Reset);
                         // Momentary rocker (plan revision) — springs back on
                         // its own next frame via `reset_pressed`/`RESET_SPRING`,
@@ -2215,7 +2467,11 @@ pub fn run_game(
                     // because the Cheats modal, below, can run past 255).
                     Modal::SaveSlot => {
                         let path = state_file(&spec.save_dir, &title, i as u8);
-                        match core.save_state() {
+                        drain_core!();
+                        let (st_tx, st_rx) = std::sync::mpsc::channel();
+                        let _ = core_tx.send(CoreCmd::SaveState { tx: st_tx });
+                        let saved = st_rx.recv().ok();
+                        match saved.filter(|s| !s.is_empty()) {
                             Some(s) => match fs::write(&path, &s) {
                                 Ok(_) => {
                                     log::info!("slot {i}: saved ({} KiB)", s.len() / 1024);
@@ -2256,7 +2512,9 @@ pub fn run_game(
                             }
                         }
                         match fs::read(&path) {
-                            Ok(s) if core.load_state(&s) => {
+                            Ok(s) if !s.is_empty() => {
+                                drain_core!();
+                                let _ = core_tx.send(CoreCmd::LoadState { bytes: s });
                                 log::info!("slot {i}: loaded");
                                 flash.insert(PanelButton::LoadState, Instant::now());
                                 modal = Modal::None;
@@ -2298,9 +2556,14 @@ pub fn run_game(
                             // reapply every cheat's current state, the same
                             // belt-and-suspenders sequence the boot-time
                             // load above already uses.
-                            core.cheat_reset();
+                            drain_core!();
+                            let _ = core_tx.send(CoreCmd::CheatReset);
                             for (j, (def, &on)) in cheat_defs.iter().zip(&cheat_state).enumerate() {
-                                core.cheat_set(j as u32, on, def.code);
+                                let _ = core_tx.send(CoreCmd::CheatSet {
+                                    i: j as u32,
+                                    on,
+                                    code: def.code.to_string(),
+                                });
                             }
                             save_cheat_state(&cheat_path, &cheat_state);
                             let rows = cheat_rows(&cheat_defs, &cheat_state);
@@ -2323,7 +2586,10 @@ pub fn run_game(
                             // do slot (ou formatado pelo core) e já encaixa.
                             let name = next_card_name(&dir);
                             let path = dir.join(format!("{name}.mcr"));
-                            if let Some(bytes) = core.sram() {
+                            drain_core!();
+                            let (sc_tx, sc_rx) = std::sync::mpsc::channel();
+                            let _ = core_tx.send(CoreCmd::Sram { tx: sc_tx });
+                            if let Some(bytes) = sc_rx.recv().ok().flatten() {
                                 let _ = fs::create_dir_all(&dir);
                                 match fs::write(&path, &bytes) {
                                     Ok(_) => log::info!(
@@ -2334,15 +2600,9 @@ pub fn run_game(
                                     Err(e) => log::warn!("card 1: criando {}: {e}", path.display()),
                                 }
                             }
-                            seat_card(&mut core, &mut sram_path, &mut current_card, 0, path);
+                            seat_card(&core_tx, &mut sram_path, &mut current_card, 0, path);
                         } else if let Some(path) = cards.get(i as usize - 1) {
-                            seat_card(
-                                &mut core,
-                                &mut sram_path,
-                                &mut current_card,
-                                0,
-                                path.clone(),
-                            );
+                            seat_card(&core_tx, &mut sram_path, &mut current_card, 0, path.clone());
                         }
                     }
                     Modal::Cards2 => {
@@ -2353,7 +2613,13 @@ pub fn run_game(
                         if i == 0 {
                             let name = next_card_name(&dir);
                             let path = dir.join(format!("{name}.mcr"));
-                            if let Some(bytes) = core.memory(MEMORY_SAVE_RAM + 1) {
+                            drain_core!();
+                            let (sc_tx, sc_rx) = std::sync::mpsc::channel();
+                            let _ = core_tx.send(CoreCmd::SramAt {
+                                id: MEMORY_SAVE_RAM + 1,
+                                tx: sc_tx,
+                            });
+                            if let Some(bytes) = sc_rx.recv().ok().flatten() {
                                 let _ = fs::create_dir_all(&dir);
                                 match fs::write(&path, &bytes) {
                                     Ok(_) => log::info!(
@@ -2364,10 +2630,10 @@ pub fn run_game(
                                     Err(e) => log::warn!("card 2: criando {}: {e}", path.display()),
                                 }
                             }
-                            seat_card(&mut core, &mut sram2_path, &mut current_card2, 1, path);
+                            seat_card(&core_tx, &mut sram2_path, &mut current_card2, 1, path);
                         } else if let Some(path) = cards.get(i as usize - 1) {
                             seat_card(
-                                &mut core,
+                                &core_tx,
                                 &mut sram2_path,
                                 &mut current_card2,
                                 1,
@@ -2385,29 +2651,17 @@ pub fn run_game(
                         if *path == current_disc {
                             continue;
                         }
-                        // Troca com a sessão viva (plano §6): o estado atual
-                        // volta por cima da recarga — o jogo pede o disco
-                        // seguinte com a memória onde estava. Os states
-                        // seguem carimbados com o disco de origem (§3.1).
-                        if let Some(state) = core.save_state() {
-                            core.reset();
-                            match core.load_disc(path) {
-                                Ok(()) => {
-                                    core.load_state(&state);
-                                    current_disc = path.clone();
-                                    log::info!("disco {}: no drive", path.display());
-                                }
-                                Err(e) => {
-                                    log::warn!("disco {}: {e}", path.display());
-                                    let _ = core.load_disc(&current_disc);
-                                }
-                            }
+                        drain_core!();
+                        let (d_tx, d_rx) = std::sync::mpsc::channel();
+                        let _ = core_tx.send(CoreCmd::SwitchDisc {
+                            path: path.clone(),
+                            tx: d_tx,
+                        });
+                        if d_rx.recv().unwrap_or(false) {
+                            current_disc = path.clone();
+                            log::info!("disco {}: no drive", path.display());
                         } else {
-                            log::warn!("core não serializa estado; troca de disco fria");
-                            match core.load_disc(path) {
-                                Ok(()) => current_disc = path.clone(),
-                                Err(e) => log::warn!("disco {}: {e}", path.display()),
-                            }
+                            log::warn!("disco {}: falha na troca", path.display());
                         }
                     }
                     Modal::None => {}
@@ -2491,224 +2745,185 @@ pub fn run_game(
         }
 
         if !paused && modal == Modal::None {
-            for port in 0..MAX_PORTS {
-                for (rb, pb) in PAD {
-                    core.set_button(port, rb, input.held(port, pb));
-                }
-                // Os sticks do DualShock: eixos crus já com deadzone da
-                // plataforma, na faixa ±i16 que o core espera.
-                core.set_analog(
-                    port,
-                    AnalogStick::Left,
-                    input.analog(port, 0).0,
-                    input.analog(port, 0).1,
-                );
-                core.set_analog(
-                    port,
-                    AnalogStick::Right,
-                    input.analog(port, 1).0,
-                    input.analog(port, 1).1,
-                );
-            }
-            core.run();
-            frames += 1;
-            if spec.debug_note_capture && frames == debug_note_frame {
-                note_request = Some(note_slot);
-            }
-            if audio.queued_frames() < audio_cap {
-                audio.queue(core.audio());
-            }
-
-            // Earned do servidor chegando: une no set da sessão (memória e
-            // disco) — a modal de conquistas passa a marcar o que foi
-            // ganho fora deste app, e nunca re-submete.
-            if let Some(rx) = &ra_earned_worker {
-                match rx.try_recv() {
-                    Ok((_, Some(ids))) => {
-                        if let Some(ra) = &mut ra_session {
-                            ra.absorb_earned(&ids);
-                        }
-                        ra_earned_worker = None;
+            // Mantém o worker alimentado: um Run em voo por vez.
+            if !in_flight {
+                let mut snap = PadSnapshot::default();
+                for port in 0..MAX_PORTS {
+                    for (rb, pb) in PAD {
+                        snap.buttons.push((port, rb, input.held(port, pb)));
                     }
-                    Ok((_, None)) => ra_earned_worker = None,
-                    Err(std::sync::mpsc::TryRecvError::Disconnected) => ra_earned_worker = None,
-                    Err(std::sync::mpsc::TryRecvError::Empty) => {}
+                    snap.analog.push((
+                        port,
+                        input.analog(port, 0).0,
+                        input.analog(port, 0).1,
+                        input.analog(port, 1).0,
+                        input.analog(port, 1).1,
+                    ));
                 }
+                let _ = core_tx.send(CoreCmd::Run { input: snap });
+                in_flight = true;
             }
+            if in_flight {
+                if let Ok(out) = core_rx.try_recv() {
+                    in_flight = false;
+                    frames += 1;
+                    if spec.debug_note_capture && frames == debug_note_frame {
+                        note_request = Some(note_slot);
+                    }
+                    if audio.queued_frames() < audio_cap {
+                        audio.queue(&out.audio);
+                    }
 
-            // RA evaluation (plan fase 3) — the real frame's RAM, before any
-            // speculative run-ahead frames mutate the state further.
-            if let (true, Some(ra)) = (powered, &mut ra_session) {
-                let mut unlocks = Vec::new();
-                core.with_memory(xperience_emulation::MEMORY_SYSTEM_RAM, |ram| {
-                    unlocks = ra.tick(ram);
-                });
-                for unlock in unlocks {
-                    log::info!(
-                        "ra: CONQUISTA DESBLOQUEADA — {} (+{} pts)",
-                        unlock.title,
-                        unlock.points
-                    );
-                    // O "plim" da conquista (plan revision: "coloque uma
-                    // notificação sonora ao ganhar uma conquista") — sobre o
-                    // áudio do jogo, pelo stream de foley.
-                    crate::sfx::play(cab, crate::sfx::Sfx::Achievement);
-                    ra_session
-                        .as_ref()
-                        .expect("checked above")
-                        .submit_unlock(&unlock);
-                    // Badge: fetched/decoded once, cached to disk with the
-                    // other RA caches. One blocking fetch per unlock is
-                    // acceptable (a few hundred ms, once ever per game).
-                    let badge_img = unlock.badge.clone();
-                    if !badge_img.is_empty() {
-                        match crate::ra::badge_path(&badge_img) {
-                            Some(path) => {
-                                if let Ok((w, h, rgba)) = decode_art(&path, 512) {
-                                    cab.set_image(osd_badge_id(&unlock.badge), w, h, &rgba);
+                    // Earned do servidor chegando: une no set da sessão.
+                    if let Some(rx) = &ra_earned_worker {
+                        match rx.try_recv() {
+                            Ok((_, Some(ids))) => {
+                                if let Some(ra) = &mut ra_session {
+                                    ra.absorb_earned(&ids);
                                 }
+                                ra_earned_worker = None;
                             }
-                            None => {
-                                if let Some(path) = crate::ra::download_badge(&badge_img) {
-                                    if let Ok((w, h, rgba)) = decode_art(&path, 512) {
-                                        cab.set_image(osd_badge_id(&unlock.badge), w, h, &rgba);
+                            Ok((_, None)) => ra_earned_worker = None,
+                            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                                ra_earned_worker = None
+                            }
+                            Err(std::sync::mpsc::TryRecvError::Empty) => {}
+                        }
+                    }
+
+                    // RA evaluation contra a RAM do quadro real (cópia que o
+                    // worker fez antes do run-ahead).
+                    if let (true, Some(ra), Some(ram)) = (powered, &mut ra_session, &out.ram) {
+                        let unlocks = ra.tick(ram);
+                        for unlock in unlocks {
+                            log::info!(
+                                "ra: CONQUISTA DESBLOQUEADA — {} (+{} pts)",
+                                unlock.title,
+                                unlock.points
+                            );
+                            crate::sfx::play(cab, crate::sfx::Sfx::Achievement);
+                            ra_session
+                                .as_ref()
+                                .expect("checked above")
+                                .submit_unlock(&unlock);
+                            let badge_img = unlock.badge.clone();
+                            if !badge_img.is_empty() {
+                                match crate::ra::badge_path(&badge_img) {
+                                    Some(path) => {
+                                        if let Ok((w, h, rgba)) = decode_art(&path, 512) {
+                                            cab.set_image(osd_badge_id(&unlock.badge), w, h, &rgba);
+                                        }
+                                    }
+                                    None => {
+                                        if let Some(path) = crate::ra::download_badge(&badge_img) {
+                                            if let Ok((w, h, rgba)) = decode_art(&path, 512) {
+                                                cab.set_image(
+                                                    osd_badge_id(&unlock.badge),
+                                                    w,
+                                                    h,
+                                                    &rgba,
+                                                );
+                                            }
+                                        }
                                     }
                                 }
                             }
-                        }
-                    }
-                    cab.push_osd(
-                        &[
-                            "CONQUISTA DESBLOQUEADA",
-                            &unlock.title,
-                            &format!("+{} pontos", unlock.points),
-                            if unlock.hardcore {
-                                "modo hardcore"
-                            } else {
-                                "modo softcore"
-                            },
-                        ],
-                        Some(osd_badge_id(&unlock.badge)),
-                        OSD_UNLOCK_TTL,
-                    );
-                }
-            }
-
-            // Speculative frames past the shown one; their audio is discarded.
-            let speculated = runahead > 0 && core.save_state_into(&mut spec_state);
-            if speculated {
-                for _ in 0..runahead {
-                    core.run();
-                }
-            }
-
-            if let Some(frame) = core.take_frame() {
-                let dims = (frame.width, frame.height);
-                if dims != last_dims {
-                    log::info!(
-                        "core framebuffer: {}x{} ({:?})",
-                        dims.0,
-                        dims.1,
-                        frame.format
-                    );
-                    last_dims = dims;
-                }
-                // O filtro composto do blargg (snes_ntsc) é do irmão de SNES
-                // e fica FORA do caminho do PSX (plano §2: "começa sem filtro
-                // composto" — e ele esticava o frame para 1498 de largura).
-                //
-                // RGB565 vira XRGB8888 no CPU antes de apresentar: 565 é
-                // segunda classe na Metal (não existe MTLPixelFormat 565 — a
-                // SDL emula, e o caminho emulado falha com render_geometry no
-                // app), e a conversão de ~1 MB por frame é trivial perto do
-                // budget do software renderer.
-                let mut rgba8888: Vec<u8> =
-                    Vec::with_capacity(frame.width as usize * frame.height as usize * 4);
-                let fref = if frame.format == EmuFormat::Rgb565 {
-                    for chunk in frame.pixels.as_chunks::<2>().0 {
-                        let v = u16::from_le_bytes([chunk[0], chunk[1]]);
-                        let r = (((v >> 11) & 0x1f) * 255 / 31) as u8;
-                        let g = (((v >> 5) & 0x3f) * 255 / 63) as u8;
-                        let b = ((v & 0x1f) * 255 / 31) as u8;
-                        // XRGB8888 em memória little-endian = [B, G, R, X].
-                        rgba8888.extend_from_slice(&[b, g, r, 255]);
-                    }
-                    FrameRef {
-                        width: frame.width,
-                        height: frame.height,
-                        pitch: frame.width as usize * 4,
-                        format: PlatFormat::Xrgb8888,
-                        pixels: &rgba8888,
-                    }
-                } else {
-                    FrameRef {
-                        width: frame.width,
-                        height: frame.height,
-                        pitch: frame.pitch,
-                        format: map_format(frame.format),
-                        pixels: &frame.pixels,
-                    }
-                };
-                let aspect = core.av_info().aspect_ratio;
-                cab.set_session_time(live_session_time(powered_elapsed, powered_since));
-                cab.present_frame(&fref, aspect);
-
-                if let Some(slot) = note_request.take() {
-                    match save_note_image(&spec.notes_dir, &title, slot, &frame) {
-                        Ok(_) => {
-                            refresh_notes(
-                                cab,
-                                &spec.notes_dir,
-                                &title,
-                                note_slot,
-                                text_slot,
-                                &notes_meta,
+                            cab.push_osd(
+                                &[&unlock.title, &format!("+{} pts", unlock.points)],
+                                Some(osd_badge_id(&unlock.badge)),
+                                OSD_UNLOCK_TTL,
                             );
-                            log::info!("note: captured into slot {slot}");
                         }
-                        Err(e) => log::warn!("note capture failed: {e}"),
                     }
-                }
 
-                if print_pending {
-                    // Grabbed now, held until the player finishes picking a
-                    // slot and naming it (or cancels) — see `NoteEdit::
-                    // PrintName`. Not written to disk yet: nothing's final
-                    // until they confirm the name.
-                    print_pending = false;
-                    print_capture = Some(frame.clone());
-                    modal = Modal::PrintSlot;
-                    cab.set_modal(
-                        "Onde salvar o print?",
-                        &print_slot_rows(&spec.notes_dir, &title, &notes_meta),
-                    );
-                }
+                    if let Some(frame) = &out.frame {
+                        // O clique do "Printscreen" que estava pendente segura
+                        // ESTE quadro (o primeiro depois do clique) e abre a
+                        // modal de slots — a captura original do fluxo antigo.
+                        if print_pending {
+                            print_capture = Some(frame.clone());
+                            print_pending = false;
+                            modal = Modal::PrintSlot;
+                            cab.set_modal(
+                                "Onde salvar o print?",
+                                &print_slot_rows(&spec.notes_dir, &title, &notes_meta),
+                            );
+                        }
+                        let dims = (frame.width, frame.height);
+                        if Some(dims) != last_dims {
+                            log::info!(
+                                "core framebuffer: {}x{} ({:?})",
+                                dims.0,
+                                dims.1,
+                                frame.format
+                            );
+                            last_dims = Some(dims);
+                        }
+                        let mut lf = LastFrame::from_frame(frame);
+                        lf.aspect = out.aspect;
+                        let fref = lf.fref();
+                        cab.set_session_time(live_session_time(powered_elapsed, powered_since));
+                        cab.present_frame(&fref, lf.aspect);
+                        last_render = Some((lf, out.aspect));
 
-                if let Some((path, at)) = &spec.shot {
-                    if frames >= *at {
-                        cab.capture_bmp(&fref, aspect, path)
-                            .map_err(|e| anyhow!(e.to_string()))?;
-                        log::info!("wrote {} after {} frames", path.display(), frames);
-                        break 'run GameExit::Quit;
+                        if let Some(slot) = note_request.take() {
+                            match save_note_image(&spec.notes_dir, &title, slot, frame) {
+                                Ok(_) => {
+                                    refresh_notes(
+                                        cab,
+                                        &spec.notes_dir,
+                                        &title,
+                                        note_slot,
+                                        text_slot,
+                                        &notes_meta,
+                                    );
+                                    log::info!("note: captured into slot {slot}");
+                                }
+                                Err(e) => log::warn!("note capture failed: {e}"),
+                            }
+                        }
+
+                        // A captura do --shot acontece num quadro REAL (um
+                        // dupe não regenera a imagem; contamos runs e
+                        // capturamos no primeiro Some depois do alvo).
+                        if frames >= spec.shot.as_ref().map_or(u32::MAX, |(_, at)| *at) {
+                            if let Some((path, _)) = &spec.shot {
+                                if let Some((lf, _)) = &last_render {
+                                    cab.capture_bmp(&lf.fref(), lf.aspect, path)
+                                        .map_err(|e| anyhow!(e.to_string()))?;
+                                    log::info!("wrote {} after {} frames", path.display(), frames);
+                                }
+                                break 'run GameExit::Quit;
+                            }
+                        }
+                    }
+
+                    // Flush periódico do SRAM quando mudou (via comando, o
+                    // core vive na thread do worker).
+                    if frames.is_multiple_of(SRAM_FLUSH_FRAMES) {
+                        let (tx, rx) = std::sync::mpsc::channel();
+                        let _ = core_tx.send(CoreCmd::Sram { tx });
+                        if let Ok(s) = rx.recv() {
+                            flush_sram(&sram_path, &mut last_sram, s);
+                        }
+                        if current_card2.is_some() {
+                            let (tx, rx) = std::sync::mpsc::channel();
+                            let _ = core_tx.send(CoreCmd::SramAt {
+                                id: MEMORY_SAVE_RAM + 1,
+                                tx,
+                            });
+                            if let Ok(s) = rx.recv() {
+                                flush_sram(&sram2_path, &mut last_sram2, s);
+                            }
+                        }
                     }
                 }
             }
-
-            // Rewind past the speculative frames to the real state.
-            if speculated {
-                core.load_state(&spec_state);
-            }
-
-            // Periodically flush battery SRAM if it changed.
-            if frames.is_multiple_of(SRAM_FLUSH_FRAMES) {
-                flush_sram(&sram_path, &mut last_sram, core.sram());
-                if current_card2.is_some() {
-                    flush_sram(
-                        &sram2_path,
-                        &mut last_sram2,
-                        core.memory(MEMORY_SAVE_RAM + 1),
-                    );
-                }
+            // Sem quadro novo (worker ocupado no boot/FMV), reapresenta o
+            // último: o gabinete segue vivo e o disco continua girando.
+            if let Some((lf, aspect)) = &last_render {
+                cab.set_session_time(live_session_time(powered_elapsed, powered_since));
+                cab.present_frame(&lf.fref(), *aspect);
             }
         } else if paused {
             // Paused, not stepping: the book, not a frozen game frame.
@@ -2722,15 +2937,20 @@ pub fn run_game(
         pace_frame(&mut next, frame_time);
     };
 
-    // Final SRAM flush on the way out (either exit path).
-    flush_sram(&sram_path, &mut last_sram, core.sram());
+    // Final SRAM flush on the way out (either exit path) — o worker é
+    // desligado depois dos flushes (Quit derruba a thread).
+    let (f_tx, f_rx) = std::sync::mpsc::channel();
+    let _ = core_tx.send(CoreCmd::Sram { tx: f_tx });
+    flush_sram(&sram_path, &mut last_sram, f_rx.recv().ok().flatten());
     if current_card2.is_some() {
-        flush_sram(
-            &sram2_path,
-            &mut last_sram2,
-            core.memory(MEMORY_SAVE_RAM + 1),
-        );
+        let (f2_tx, f2_rx) = std::sync::mpsc::channel();
+        let _ = core_tx.send(CoreCmd::SramAt {
+            id: MEMORY_SAVE_RAM + 1,
+            tx: f2_tx,
+        });
+        flush_sram(&sram2_path, &mut last_sram2, f2_rx.recv().ok().flatten());
     }
+    let _ = core_tx.send(CoreCmd::Quit);
 
     // Bank whatever powered-on stretch was still running (exiting while on,
     // e.g. window closed mid-session) and add it to the all-time total.

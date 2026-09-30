@@ -1995,6 +1995,7 @@ dependencies = [
  "anyhow",
  "env_logger",
  "image",
+ "libc",
  "log",
  "lopdf",
  "md-5",
