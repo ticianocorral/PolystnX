@@ -367,6 +367,11 @@ enum CoreCmd {
     },
     /// Sem disco + Reset: reseta e boota a BIOS (o console fica ligado).
     BootBios,
+    /// Abre (`true`)/fecha (`false`) a BANDEJA pela disk control interface —
+    /// o jogo emulado VÊ a tampa abrir (telas de erro reais dele).
+    TrayEject {
+        ejected: bool,
+    },
     Quit,
 }
 
@@ -450,6 +455,11 @@ fn spawn_core_worker(
                         });
                     }
                     CoreCmd::Reset => core.reset(),
+                    CoreCmd::TrayEject { ejected } => {
+                        if core.set_eject_state(ejected).is_none() {
+                            log::warn!("worker: core sem disk control interface");
+                        }
+                    }
                     CoreCmd::BootBios => {
                         core.reset();
                         if core.load_bios().is_err() {
@@ -1632,7 +1642,6 @@ pub fn run_game(
     // de leitura — a imagem rasga por ~2,8 s (overlay) e congela. Reset
     // boota a BIOS; inserir outro disco destrava.
     let mut disc_glitch: Option<Instant> = None;
-    let mut bios_pending = false;
     let mut glitch_rng: u32 = 0xC0FF_EEDD;
     let commands = command_rows(
         &flash,
@@ -2254,10 +2263,13 @@ pub fn run_game(
                     } else if disc_in {
                         disc_in = false;
                         cab.set_drive(lid_open, disc_in);
-                        crate::sfx::play(cab, crate::sfx::Sfx::Eject);
-                        // Erro de leitura (plano revision: "e se simular erro
-                        // de leitura como se o disco estivesse arranhado?"):
-                        // o core para, a imagem rasga e congela.
+                        eject_clunk(plat);
+                        // Autêntico: ejeta a BANDEJA pela disk control do
+                        // core — o JOGO vê a tampa abrir e dispara o próprio
+                        // código (telas de erro de leitura reais dele). O
+                        // rasgo visual cobre só o instante mecânico.
+                        drain_core!();
+                        let _ = core_tx.send(CoreCmd::TrayEject { ejected: true });
                         disc_glitch = Some(Instant::now());
                     }
                 }
@@ -2379,8 +2391,6 @@ pub fn run_game(
                             let _ = core_tx.send(CoreCmd::Reset);
                         } else {
                             // Sem disco + Reset: o console boota a BIOS.
-                            bios_pending = true;
-                            disc_glitch = None;
                             let _ = core_tx.send(CoreCmd::BootBios);
                             cab.push_osd(
                                 &["SEM DISCO — BOOT PELA BIOS"],
@@ -2808,14 +2818,22 @@ pub fn run_game(
                             continue;
                         };
                         drain_core!();
+                        if path == &current_disc {
+                            // O MESMO disco de volta: só fecha a bandeja.
+                            let _ = core_tx.send(CoreCmd::TrayEject { ejected: false });
+                            disc_in = true;
+                            cab.set_drive(lid_open, disc_in);
+                            cab.push_osd(&["DISCO INSERIDO"], None, Duration::from_secs(2));
+                            continue;
+                        }
                         let (d_tx, d_rx) = std::sync::mpsc::channel();
                         let _ = core_tx.send(CoreCmd::SwitchDisc {
                             path: path.clone(),
                             tx: d_tx,
                         });
                         if d_rx.recv().unwrap_or(false) {
+                            let _ = core_tx.send(CoreCmd::TrayEject { ejected: false });
                             disc_in = true;
-                            bios_pending = false;
                             disc_glitch = None;
                             current_disc = path.clone();
                             cab.set_drive(lid_open, disc_in);
@@ -2933,7 +2951,7 @@ pub fn run_game(
 
         if !paused && modal == Modal::None {
             // Mantém o worker alimentado: um Run em voo por vez.
-            if !in_flight && (disc_in || bios_pending) {
+            if !in_flight {
                 let mut snap = PadSnapshot::default();
                 for port in 0..MAX_PORTS {
                     for (rb, pb) in PAD {
@@ -3115,7 +3133,7 @@ pub fn run_game(
             }
             // O rasgo do "disco arranhado" durante a janela de erro.
             if let Some(t0) = disc_glitch {
-                if t0.elapsed() < Duration::from_millis(2800) {
+                if t0.elapsed() < Duration::from_millis(1200) {
                     cab.draw_glitch_overlay(&mut glitch_rng);
                 } else {
                     disc_glitch = None; // pendurou: quadro congelado

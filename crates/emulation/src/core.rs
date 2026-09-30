@@ -144,6 +144,10 @@ struct CallbackState {
     frame_duped: bool,
     /// Interleaved S16 stereo, accumulated across the run, drained by frontend.
     audio: Vec<i16>,
+    /// A bandeja do drive (`SET_DISK_CONTROL_EXT_INTERFACE`, 56): ejetar por
+    /// aqui é o que faz os JOGOS verem a tampa abrir — as telas de erro de
+    /// leitura deles disparam de verdade.
+    disk: Option<sys::retro_disk_control_ext_callback>,
     /// Legacy core-option variables: name -> chosen value (first listed option).
     variables: Vec<(CString, CString)>,
     variables_dirty: bool,
@@ -259,6 +263,7 @@ impl Core {
             frame: None,
             frame_duped: false,
             audio: Vec::with_capacity(4096),
+            disk: None,
             variables: Vec::new(),
             variables_dirty: false,
             av_info: AvInfo {
@@ -496,6 +501,20 @@ impl Core {
 
     pub fn reset(&mut self) {
         self.enter(|api| unsafe { (api.retro_reset)() });
+    }
+
+    /// Abre (`true`) ou fecha (`false`) a BANDEJA do drive pela interface de
+    /// disk control que o core registrou — o jogo EMULADO enxerga a tampa
+    /// abrir e reage com o próprio código (telas de erro reais). `None`
+    /// quando o core não anunciou a interface.
+    pub fn set_eject_state(&mut self, ejected: bool) -> Option<bool> {
+        match self.state.disk {
+            Some(cb) => {
+                let out = unsafe { (cb.set_eject_state)(ejected) };
+                Some(out)
+            }
+            None => None,
+        }
     }
 
     /// Troca o disco no drive com a sessão viva (`SET_DISK_CONTROL_EXT`,
@@ -765,6 +784,16 @@ unsafe extern "C" fn environment_cb(cmd: c_uint, data: *mut c_void) -> bool {
             }
             let opts = data as *const sys::retro_core_options_v2;
             with_cb(|s| unsafe { take_options_v2(s, (*opts).definitions) });
+            true
+        }
+        sys::RETRO_ENVIRONMENT_SET_DISK_CONTROL_EXT_INTERFACE => {
+            if data.is_null() {
+                return false;
+            }
+            let cb = data as *const sys::retro_disk_control_ext_callback;
+            with_cb(|st| unsafe {
+                st.disk = Some(std::ptr::read(cb));
+            });
             true
         }
         RETRO_ENVIRONMENT_SET_SYSTEM_AV_INFO | RETRO_ENVIRONMENT_SET_GEOMETRY => {

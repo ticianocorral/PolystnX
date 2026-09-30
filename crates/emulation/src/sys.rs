@@ -35,6 +35,7 @@ pub const RETRO_ENVIRONMENT_GET_INPUT_BITMASKS: c_uint = 51 | 0x10000;
 pub const RETRO_ENVIRONMENT_GET_CORE_OPTIONS_VERSION: c_uint = 52;
 pub const RETRO_ENVIRONMENT_SET_CORE_OPTIONS: c_uint = 53;
 pub const RETRO_ENVIRONMENT_SET_CORE_OPTIONS_INTL: c_uint = 54;
+pub const RETRO_ENVIRONMENT_SET_DISK_CONTROL_EXT_INTERFACE: c_uint = 56;
 pub const RETRO_ENVIRONMENT_SET_CORE_OPTIONS_V2: c_uint = 67;
 pub const RETRO_ENVIRONMENT_SET_CORE_OPTIONS_V2_INTL: c_uint = 68;
 
@@ -235,4 +236,37 @@ pub struct CoreApi {
     pub retro_get_memory_size: FnGetMemorySize,
     pub retro_cheat_reset: FnCheatReset,
     pub retro_cheat_set: FnCheatSet,
+}
+
+// --- disk control ext (a bandeja do drive) ----------------------------------
+
+pub type retro_set_eject_state_t = unsafe extern "C" fn(ejected: bool) -> bool;
+pub type retro_get_eject_state_t = unsafe extern "C" fn() -> bool;
+pub type retro_set_image_index_t = unsafe extern "C" fn(index: c_uint) -> bool;
+pub type retro_get_image_index_t = unsafe extern "C" fn() -> c_uint;
+pub type retro_get_num_images_t = unsafe extern "C" fn() -> c_uint;
+pub type retro_replace_image_index_t =
+    unsafe extern "C" fn(index: c_uint, info: *const retro_game_info) -> bool;
+pub type retro_add_image_index_t = unsafe extern "C" fn() -> bool;
+pub type retro_set_initial_image_t =
+    unsafe extern "C" fn(index: c_uint, path: *const c_char) -> bool;
+pub type retro_get_image_path_t = unsafe extern "C" fn(index: c_uint) -> *const c_char;
+pub type retro_get_image_label_t = unsafe extern "C" fn(index: c_uint) -> *const c_char;
+
+/// `RETRO_ENVIRONMENT_SET_DISK_CONTROL_EXT_INTERFACE` (56): a bandeja que o
+/// SwanStation registra — ejetar/insertar por aqui é o que faz os jogos
+/// VEREM a bandeja abrir (as telas de erro de leitura deles são reais).
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct retro_disk_control_ext_callback {
+    pub set_eject_state: retro_set_eject_state_t,
+    pub get_eject_state: retro_get_eject_state_t,
+    pub set_image_index: retro_set_image_index_t,
+    pub get_image_index: retro_get_image_index_t,
+    pub get_num_images: retro_get_num_images_t,
+    pub replace_image_index: retro_replace_image_index_t,
+    pub add_image_index: retro_add_image_index_t,
+    pub set_initial_image: Option<retro_set_initial_image_t>,
+    pub get_image_path: Option<retro_get_image_path_t>,
+    pub get_image_label: Option<retro_get_image_label_t>,
 }
