@@ -4789,7 +4789,7 @@ fn draw_shelf_panel(
         .unwrap_or_default();
     let (blocks, empty_label): (Vec<PanelBlock>, &str) = match panel.section {
         PanelSection::CapaTraseira => (capa_blocks, "sem capa traseira"),
-        PanelSection::Cartucho => (cart_blocks, "sem cartucho"),
+        PanelSection::Cartucho => (cart_blocks, "sem disco"),
         PanelSection::Informacoes => (info_blocks, "sem informações"),
         PanelSection::Manual => (manual_blocks, "sem manual"),
     };
@@ -4824,8 +4824,8 @@ fn draw_shelf_panel(
     let half = (inner_w as i32 - gap) / 2;
     let active = panel.section;
     // Quatro abas em duas fileiras: informações | capa traseira, depois
-    // manual | cartucho (plan revision: "mudar ordem dos botoes: informações,
-    // capa traseira, manual e cartucho").
+    // manual | disco (a aba "cartucho" do SNES virou "disco" — o PSX não
+    // tem cartucho).
     let tabs = [
         (
             ShelfButton::PanelJump(PanelSection::Informacoes),
@@ -4844,7 +4844,7 @@ fn draw_shelf_panel(
         ),
         (
             ShelfButton::PanelJump(PanelSection::Cartucho),
-            "cartucho",
+            "disco",
             active == PanelSection::Cartucho || has(PanelSection::Cartucho),
         ),
     ];
