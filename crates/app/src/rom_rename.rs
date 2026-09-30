@@ -1,10 +1,12 @@
 //! Rename disc files to their canonical name (plan revision, herdada de
 //! SNES: "renomear automaticamente no padrao no-intro"), a settings-screen
-//! action. Para PSX o nome canônico vem da **tabela embutida por serial**
-//! (`xperience_domain::psx`) — a mesma que dá título à estante; um jogo que
-//! a tabela não conhece fica com o nome que o usuário deu. Best-effort
-//! throughout: a single file that can't be renamed (permissions, a
-//! same-named file already there) is skipped and logged, not fatal.
+//! action. Para PSX o nome canônico vem do **DAT por serial**
+//! (`nointro.dat` — Redump "Sony - PlayStation", o mesmo casamento do
+//! catálogo: `SLUS-00402` → "Tekken 3 (USA)"); sem DAT, da tabela embutida
+//! (`xperience_domain::psx`). Um jogo que nenhuma das duas fontes conhece
+//! fica com o nome que o usuário deu. Best-effort throughout: a single file
+//! that can't be renamed (permissions, a same-named file already there) is
+//! skipped and logged, not fatal.
 //!
 //! Every per-game folder (`saves/<title>/`, `notes/<title>/`) and local art
 //! (`assets/{cover,logo,disc}/<title>.*`) is keyed by the file stem — so
@@ -15,7 +17,7 @@
 use std::fs;
 use std::path::Path;
 
-use xperience_domain::{library, psx};
+use xperience_domain::{library, nointro::NoIntroDat, psx};
 
 use crate::runner::sanitize_dir_name;
 
@@ -28,20 +30,25 @@ pub struct Renamed {
 
 pub enum RenameOutcome {
     Renamed(Vec<Renamed>),
-    /// O DAT que este fluxo usava no irmão de SNES não participa mais; o
-    /// variante fica para a tela de configurações não mudar de forma.
-    NoDat,
-    /// Nada em `roms/` precisou de nome novo (ou a tabela ainda não conhece
-    /// nada — ela nasce vazia até `scripts/gen_psx_data.py` rodar).
+    /// Nada em `roms/` precisou de nome novo — ou nenhuma fonte (DAT,
+    /// tabela embutida) conhece os seriais encontrados.
     NothingToDo,
 }
 
-/// Scan `roms_dir`, rename every disc whose serial matches a table entry
-/// under a different name, moving its save/notes folders and local art to
-/// match.
+/// O nome canônico de um serial: primeiro o DAT (No-Intro, com a tag de
+/// região), depois a tabela embutida. `None` = nenhuma fonte conhece.
+fn canonical_name(dat: Option<&NoIntroDat>, serial: &str) -> Option<String> {
+    dat.and_then(|d| d.lookup_serial(serial))
+        .map(|i| i.name.clone())
+        .or_else(|| psx::lookup(serial).map(|i| i.title.clone()))
+}
+
+/// Scan `roms_dir`, rename every disc whose serial resolves to a canonical
+/// name under a different one, moving its save/notes folders and local art
+/// to match.
 pub fn rename_to_nointro(
     roms_dir: &Path,
-    _dat_path: &Path,
+    dat_path: &Path,
     saves_dir: &Path,
     notes_dir: &Path,
     assets_dir: &Path,
@@ -49,16 +56,21 @@ pub fn rename_to_nointro(
     let Ok(scanned) = library::scan(roms_dir) else {
         return RenameOutcome::NothingToDo;
     };
+    // O DAT é opcional no fluxo inteiro: sem ele, a tabela embutida ainda
+    // resolve o que souber (e um DAT corrompido não trava o rename).
+    let dat = NoIntroDat::load(dat_path)
+        .map_err(|e| log::warn!("rom rename: DAT: {e}"))
+        .ok();
 
     let mut renamed = Vec::new();
     for disc in scanned {
-        let Some(info) = psx::lookup(&disc.id.serial) else {
+        let Some(canonical) = canonical_name(dat.as_ref(), &disc.id.serial) else {
             continue;
         };
         let Some(old_stem) = disc.path.file_stem().and_then(|s| s.to_str()) else {
             continue;
         };
-        let new_stem = sanitize_dir_name(&info.title);
+        let new_stem = sanitize_dir_name(&canonical);
         if old_stem == new_stem {
             continue; // already named canonically
         }
@@ -171,6 +183,29 @@ mod tests {
         assert!(roms_dir.join("Game (USA).chd").is_file());
 
         fs::remove_dir_all(&root).ok();
+    }
+
+    // Sem fontes (DAT ausente, tabela vazia), nenhum serial resolve nome.
+    #[test]
+    fn canonical_name_prefers_dat_then_table() {
+        let path = std::env::temp_dir().join(format!(
+            "psx-rename-dat-{}-{:?}.dat",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        std::fs::write(
+            &path,
+            "clrmamepro (\n)\n\ngame (\n\tname \"Tekken 3 (USA)\"\n\tserial \"SLUS-00402\"\n\trom ( name \"Tekken 3 (USA) (Track 1).bin\" size 1 crc 00000000 )\n)\n",
+        )
+        .unwrap();
+        let dat = NoIntroDat::load(&path).ok();
+        assert_eq!(
+            canonical_name(dat.as_ref(), "slus_004.02").as_deref(),
+            Some("Tekken 3 (USA)")
+        );
+        // Sem DAT, a tabela embutida (aqui vazia) não resolve.
+        assert_eq!(canonical_name(None, "SLUS-00402"), None);
+        let _ = std::fs::remove_file(&path);
     }
 
     /// Pasta vazia, nada a fazer — e o `NoDat` herdado nunca dispara mais

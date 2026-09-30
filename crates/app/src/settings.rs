@@ -608,7 +608,6 @@ fn run_rom_rename() -> String {
             }
         }
         RenameOutcome::NothingToDo => "Renomear ROMs: nenhuma precisava de nome novo".to_string(),
-        RenameOutcome::NoDat => "Renomear ROMs: nointro.dat não encontrado".to_string(),
     }
 }
 
