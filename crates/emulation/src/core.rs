@@ -336,6 +336,16 @@ impl Core {
             .and_then(|(_, v)| v.to_str().ok())
     }
 
+    /// Every core option the core declared or the frontend set, as
+    /// `(key, value)` pairs — diagnosis and the settings screen.
+    pub fn variables(&self) -> Vec<(String, String)> {
+        self.state
+            .variables
+            .iter()
+            .map(|(k, v)| (k.to_string_lossy().into_owned(), v.to_string_lossy().into_owned()))
+            .collect()
+    }
+
     /// Register callbacks and call `retro_init`. Idempotent-unsafe: call once.
     pub fn init(&mut self) {
         self.enter(|api| unsafe {
@@ -508,13 +518,22 @@ impl Core {
     /// abrir e reage com o próprio código (telas de erro reais). `None`
     /// quando o core não anunciou a interface.
     pub fn set_eject_state(&mut self, ejected: bool) -> Option<bool> {
-        match self.state.disk {
-            Some(cb) => {
-                let out = unsafe { (cb.set_eject_state)(ejected) };
-                Some(out)
-            }
-            None => None,
-        }
+        let cb = self.state.disk?;
+        Some(self.enter(|_| unsafe { (cb.set_eject_state)(ejected) }))
+    }
+
+    /// Estado atual da bandeja segundo o core (`get_eject_state`). `None`
+    /// sem disk control interface.
+    pub fn get_eject_state(&mut self) -> Option<bool> {
+        let cb = self.state.disk?;
+        Some(self.enter(|_| unsafe { (cb.get_eject_state)() }))
+    }
+
+    /// Quantos discos o core tem na lista (`get_num_images`). `None` sem
+    /// disk control interface.
+    pub fn num_images(&mut self) -> Option<u32> {
+        let cb = self.state.disk?;
+        Some(self.enter(|_| unsafe { (cb.get_num_images)() }))
     }
 
     /// Troca o disco no drive com a sessão viva (`SET_DISK_CONTROL_EXT`,
@@ -786,6 +805,20 @@ unsafe extern "C" fn environment_cb(cmd: c_uint, data: *mut c_void) -> bool {
             with_cb(|s| unsafe { take_options_v2(s, (*opts).definitions) });
             true
         }
+        RETRO_ENVIRONMENT_GET_PREFERRED_HW_RENDER => {
+            // Software-only: sem preferência de HW, o core fica no padrão
+            // (e o app fixa `swanstation_GPU_Renderer = Software` por cima).
+            false
+        }
+        RETRO_ENVIRONMENT_GET_DISK_CONTROL_INTERFACE_VERSION => {
+            if data.is_null() {
+                return false;
+            }
+            // Falamos a interface EXT (v1) — sem isto o core registra só a
+            // legada (cmd 13) e a bandeja não existe.
+            unsafe { *(data as *mut c_uint) = 1 };
+            true
+        }
         sys::RETRO_ENVIRONMENT_SET_DISK_CONTROL_EXT_INTERFACE => {
             if data.is_null() {
                 return false;
@@ -793,6 +826,25 @@ unsafe extern "C" fn environment_cb(cmd: c_uint, data: *mut c_void) -> bool {
             let cb = data as *const sys::retro_disk_control_ext_callback;
             with_cb(|st| unsafe {
                 st.disk = Some(std::ptr::read(cb));
+            });
+            true
+        }
+        sys::RETRO_ENVIRONMENT_SET_CORE_OPTIONS_V2_INTL => {
+            if data.is_null() {
+                return true;
+            }
+            let intl = data as *const sys::retro_core_options_v2_intl;
+            with_cb(|s| unsafe {
+                // A tabela canônica `us` é sempre preenchida; usamos a
+                // localizada só quando a canônica não vier.
+                let opts = if !(*intl).us.is_null() {
+                    (*intl).us
+                } else {
+                    (*intl).local
+                };
+                if !opts.is_null() {
+                    take_options_v2(s, (*opts).definitions);
+                }
             });
             true
         }

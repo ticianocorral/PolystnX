@@ -35,7 +35,14 @@ pub const RETRO_ENVIRONMENT_GET_INPUT_BITMASKS: c_uint = 51 | 0x10000;
 pub const RETRO_ENVIRONMENT_GET_CORE_OPTIONS_VERSION: c_uint = 52;
 pub const RETRO_ENVIRONMENT_SET_CORE_OPTIONS: c_uint = 53;
 pub const RETRO_ENVIRONMENT_SET_CORE_OPTIONS_INTL: c_uint = 54;
-pub const RETRO_ENVIRONMENT_SET_DISK_CONTROL_EXT_INTERFACE: c_uint = 56;
+/// O core pergunta o renderizador de HW preferido (`unsigned*` para
+/// preencher). Respondemos `false` — o pipeline do app é 2D/software.
+pub const RETRO_ENVIRONMENT_GET_PREFERRED_HW_RENDER: c_uint = 56;
+/// Versão da interface de disk control que o frontend suporta (`unsigned*`):
+/// 0 = só a legada (cmd 13), ≥ 1 = o core deve registrar a EXT (cmd 58).
+pub const RETRO_ENVIRONMENT_GET_DISK_CONTROL_INTERFACE_VERSION: c_uint = 57;
+/// A bandeja do drive: `retro_disk_control_ext_callback`.
+pub const RETRO_ENVIRONMENT_SET_DISK_CONTROL_EXT_INTERFACE: c_uint = 58;
 pub const RETRO_ENVIRONMENT_SET_CORE_OPTIONS_V2: c_uint = 67;
 pub const RETRO_ENVIRONMENT_SET_CORE_OPTIONS_V2_INTL: c_uint = 68;
 
@@ -176,6 +183,14 @@ pub struct retro_core_option_v2_definition {
 pub struct retro_core_options_v2 {
     pub categories: *mut retro_core_option_v2_category,
     pub definitions: *mut retro_core_option_v2_definition,
+}
+
+/// `SET_CORE_OPTIONS_V2_INTL` (68): o mesmo par de tabelas em duas línguas —
+/// `us` é a canônica (sempre preenchida), `local` a traduzida.
+#[repr(C)]
+pub struct retro_core_options_v2_intl {
+    pub us: *mut retro_core_options_v2,
+    pub local: *mut retro_core_options_v2,
 }
 
 pub type retro_environment_t = unsafe extern "C" fn(cmd: c_uint, data: *mut c_void) -> bool;

@@ -1416,6 +1416,10 @@ pub fn run_game(
     // Renderer de software, SEMPRE: o pipeline do app é 2D (framebuffer →
     // tubo), e sem esta opção o SwanStation pede contexto de GPU que o
     // frontend não dá — e cospe frames de lixo (o "quadrado colorido").
+    // A opção já se chamou `swanstation_Renderer`; cores novos usam
+    // `swanstation_GPU_Renderer` — setamos as duas, a desconhecida é só
+    // ignorada pelo core.
+    core.set_variable("swanstation_GPU_Renderer", "Software");
     core.set_variable("swanstation_Renderer", "Software");
 
     // Identidade do disco para o log — o serial lido de dentro do CHD
