@@ -4159,7 +4159,12 @@ fn draw_panel_slot(
             corner(1.0, 1.0),
             corner(-1.0, 1.0),
         ];
-        let _ = canvas.render_geometry(&verts, Some(&art.tex), &[0, 1, 2, 0, 2, 3]);
+        // Totalmente fora (p=0, remoção animada): o quad ficaria com o
+        // centro acima do topo do bloco, invadindo o que tem ali — não
+        // desenha. A remoção deixa o estado em (1.0, ejecting) de propósito.
+        if p > 0.0 {
+            let _ = canvas.render_geometry(&verts, Some(&art.tex), &[0, 1, 2, 0, 2, 3]);
+        }
 
         // A tampa translúcida (a "tampa de acrílico" por cima do disco
         // inserido, como no console): só quando assentado e com a tampa

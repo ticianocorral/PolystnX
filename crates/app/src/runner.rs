@@ -1646,6 +1646,10 @@ pub fn run_game(
     // de leitura — a imagem rasga por ~2,8 s (overlay) e congela. Reset
     // boota a BIOS; inserir outro disco destrava.
     let mut disc_glitch: Option<Instant> = None;
+    // O disco deslizando para fora (remoção, `true`) ou de volta ao eixo
+    // (inserção, `false`): (início, direção), animado no passe do jogo —
+    // o drive desenhado segue `cartridge_motion`, não o estado lógico.
+    let mut disc_motion: Option<(Instant, bool)> = None;
     let mut glitch_rng: u32 = 0xC0FF_EEDD;
     let commands = command_rows(
         &flash,
@@ -2268,6 +2272,10 @@ pub fn run_game(
                         disc_in = false;
                         cab.set_drive(lid_open, disc_in);
                         eject_clunk(plat);
+                        // O disco desliza para fora enquanto o jogo segue —
+                        // sem isto o desenho fica sentado no drive (o visual
+                        // é o `cartridge_motion`, não o estado lógico).
+                        disc_motion = Some((Instant::now(), true));
                         // Autêntico: ejeta a BANDEJA pela disk control do
                         // core — o JOGO vê a tampa abrir e dispara o próprio
                         // código (telas de erro de leitura reais dele). O
@@ -2827,6 +2835,7 @@ pub fn run_game(
                             let _ = core_tx.send(CoreCmd::TrayEject { ejected: false });
                             disc_in = true;
                             cab.set_drive(lid_open, disc_in);
+                            disc_motion = Some((Instant::now(), false));
                             cab.push_osd(&["DISCO INSERIDO"], None, Duration::from_secs(2));
                             continue;
                         }
@@ -2841,6 +2850,7 @@ pub fn run_game(
                             disc_glitch = None;
                             current_disc = path.clone();
                             cab.set_drive(lid_open, disc_in);
+                            disc_motion = Some((Instant::now(), false));
                             crate::sfx::play(cab, crate::sfx::Sfx::Insert);
                             cab.push_osd(&["DISCO INSERIDO"], None, Duration::from_secs(2));
                         } else {
@@ -3135,6 +3145,20 @@ pub fn run_game(
                 }
                 let _ = core_tx.send(CoreCmd::Run { input: snap });
                 in_flight = true;
+            }
+            // O disco deslizando para fora/para dentro (remoção e inserção
+            // quentes): anima no mesmo passe do jogo — quem congela a imagem
+            // com estática é o cold-eject (saída da tela), não este.
+            if let Some((t0, ejecting)) = disc_motion {
+                let span = if ejecting { 430.0 } else { 520.0 };
+                let t = (t0.elapsed().as_secs_f32() * 1000.0 / span).min(1.0);
+                cab.set_cartridge_motion(Some((t, ejecting)));
+                if t >= 1.0 {
+                    if !ejecting {
+                        cab.set_cartridge_motion(None); // assentado de volta
+                    } // totalmente fora fica em (1.0, true): p=0, não desenha
+                    disc_motion = None;
+                }
             }
             // Sem quadro novo (worker ocupado no boot/FMV), reapresenta o
             // último: o gabinete segue vivo e o disco continua girando.
