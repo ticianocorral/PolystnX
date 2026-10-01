@@ -3468,7 +3468,7 @@ fn draw_ch3_osd(canvas: &mut WindowCanvas, font: &mut Texture, screen: Rect) {
         font,
         x + 2,
         y + 2,
-        TextStyle::new(SCALE, (12, 14, 12)),
+        TextStyle::new(SCALE as f32, (12, 14, 12)),
         LABEL,
         usize::MAX,
     );
@@ -3477,7 +3477,7 @@ fn draw_ch3_osd(canvas: &mut WindowCanvas, font: &mut Texture, screen: Rect) {
         font,
         x,
         y,
-        TextStyle::new(SCALE, OSD_GREEN),
+        TextStyle::new(SCALE as f32, OSD_GREEN),
         LABEL,
         usize::MAX,
     );
@@ -3690,7 +3690,7 @@ fn draw_chin_ra(
             font,
             x + 2,
             y + 2,
-            TextStyle::new(1, (12, 14, 12)),
+            TextStyle::new(1.0, (12, 14, 12)),
             line,
             usize::MAX,
         );
@@ -3699,7 +3699,7 @@ fn draw_chin_ra(
             font,
             x,
             y,
-            TextStyle::new(1, *color),
+            TextStyle::new(1.0, *color),
             line,
             usize::MAX,
         );
@@ -3786,7 +3786,7 @@ fn draw_chin_osd(
             font,
             x + 2,
             y + 2,
-            TextStyle::new(1, (12, 14, 12)),
+            TextStyle::new(1.0, (12, 14, 12)),
             line,
             usize::MAX,
         );
@@ -3795,7 +3795,7 @@ fn draw_chin_osd(
             font,
             x,
             y,
-            TextStyle::new(1, color),
+            TextStyle::new(1.0, color),
             line,
             usize::MAX,
         );
@@ -3848,7 +3848,7 @@ fn draw_brand(
             font,
             screen.left(),
             y,
-            TextStyle::new(1, BRAND_TEXT),
+            TextStyle::new(1.0, BRAND_TEXT),
             line,
             usize::MAX,
         );
@@ -3938,6 +3938,70 @@ fn fill_circle(canvas: &mut WindowCanvas, color: (u8, u8, u8), cx: i32, cy: i32,
     }
 }
 
+/// Círculo com ALFA (os brilhos do plástico usam) — requer blend ativo no
+/// canvas; liga e desliga sozinho.
+fn fill_circle_rgba(canvas: &mut WindowCanvas, color: (u8, u8, u8, u8), cx: i32, cy: i32, r: i32) {
+    let prev = canvas.blend_mode();
+    canvas.set_blend_mode(sdl3::render::BlendMode::Blend);
+    canvas.set_draw_color(sdl3::pixels::Color::RGBA(
+        color.0, color.1, color.2, color.3,
+    ));
+    for dy in -r..=r {
+        let half = ((r * r - dy * dy) as f32).sqrt().round() as i32;
+        let _ = canvas.fill_rect(Rect::new(cx - half, cy + dy, (half * 2).max(1) as u32, 1));
+    }
+    canvas.set_blend_mode(prev);
+}
+
+/// Retângulo com ALFA (os biséis das portas de memory card usam).
+fn fill_rect_rgba(canvas: &mut WindowCanvas, color: (u8, u8, u8, u8), r: Rect) {
+    let prev = canvas.blend_mode();
+    canvas.set_blend_mode(sdl3::render::BlendMode::Blend);
+    canvas.set_draw_color(sdl3::pixels::Color::RGBA(
+        color.0, color.1, color.2, color.3,
+    ));
+    let _ = canvas.fill_rect(r);
+    canvas.set_blend_mode(prev);
+}
+
+/// Um botão redondo de plástico, como os do PS1: aro escuro, corpo convexo
+/// com a borda de baixo em sombra (o corpo "sai" da carcaça) e o brilho da
+/// luz no alto. `pressed` afunda o botão: corpo escurecido e o brilho
+/// migrando para baixo.
+fn draw_round_plastic(
+    canvas: &mut WindowCanvas,
+    cx: i32,
+    cy: i32,
+    r: i32,
+    pressed: bool,
+) {
+    fill_circle(canvas, PSX_SHELL_EDGE, cx, cy, r);
+    if pressed {
+        fill_circle(canvas, PSX_HUB_RING, cx, cy, r - 1);
+        fill_circle(
+            canvas,
+            PSX_SHELL,
+            cx,
+            cy + 1,
+            r - 2,
+        );
+        fill_circle_rgba(canvas, (255, 255, 255, 22), cx, cy + r / 2, (r as f32 * 0.6) as i32);
+    } else {
+        // A sombra da borda de baixo: um círculo escuro deslocado para baixo
+        // espiando por trás do corpo; o corpo sobe 1 px e cobre o resto.
+        fill_circle(canvas, PSX_SHELL_EDGE, cx, cy + 2, r - 1);
+        fill_circle(canvas, PSX_SHELL, cx, cy - 1, r - 2);
+        // O brilho da luz no alto-esquerda do plástico.
+        fill_circle_rgba(
+            canvas,
+            (255, 255, 255, 30),
+            cx - r / 5,
+            cy - r / 2,
+            (r as f32 * 0.6) as i32,
+        );
+    }
+}
+
 /// Os retângulos clicáveis que a face do console devolve ao painel.
 #[derive(Clone, Copy)]
 struct FaceHits {
@@ -3985,6 +4049,23 @@ fn draw_slot_furniture(
             PSX_SHELL,
             Rect::new(door.x() + 1, door.y() + 1, door.width() - 2, door.height() - 2),
         );
+        // Bisel de plástico: a luz pega a borda de cima, a de baixo fica em
+        // sombra.
+        fill_rect_rgba(
+            canvas,
+            (255, 255, 255, 30),
+            Rect::new(door.x() + 1, door.y() + 1, door.width() - 2, 2),
+        );
+        fill_rect_rgba(
+            canvas,
+            (0, 0, 0, 40),
+            Rect::new(
+                door.x() + 1,
+                door.bottom() - 3,
+                door.width() - 2,
+                2,
+            ),
+        );
         // A muesca de abrir da tampa, no topo (como na foto do console).
         fill(
             canvas,
@@ -3997,12 +4078,12 @@ fn draw_slot_furniture(
             ),
         );
         let lw = label.chars().count() as i32 * GLYPH_W as i32;
-        draw_text_absolute(
+        draw_text_bold(
             canvas,
             font,
             door.x() + door.width() as i32 / 2 - lw / 2,
             door.bottom() - GLYPH_H as i32 - 6,
-            TextStyle::new(1, (92, 90, 82)),
+            TextStyle::new(1.0, (84, 82, 74)),
             label,
             usize::MAX,
         );
@@ -4027,38 +4108,32 @@ fn draw_slot_furniture(
     // dele (sem o raio do Reset na conta, os círculos se sobrepõem).
     let power_cy = pair_top + reset_r * 2 + 5 + btn_r;
 
-    fill_circle(canvas, PSX_SHELL_EDGE, col_l, reset_cy, reset_r);
-    fill_circle(canvas, PSX_SHELL, col_l, reset_cy, reset_r - 1);
+    draw_round_plastic(canvas, col_l, reset_cy, reset_r, reset_pressed);
     let reset_hit = Rect::new(
         col_l - reset_r,
         reset_cy - reset_r,
         (reset_r * 2) as u32,
         (reset_r * 2) as u32,
     );
-    if reset_pressed {
-        fill_circle(canvas, PSX_HUB_RING, col_l, reset_cy, reset_r - 2);
-    }
-    // O rótulo "RESET" gravado no botão, em preto — o mesmo tratamento dos
-    // rótulos POWER (verde) e OPEN (azul). Em blocos baixos demais para o
-    // botão caber o texto, o rótulo fica de fora (melhor vazio que vazando).
+    // O rótulo "RESET" gravado no botão, em preto e fonte menor (o botão é
+    // pequeno no console real) — o mesmo tratamento dos rótulos POWER
+    // (verde) e OPEN (azul), em negrito.
     let label = "RESET";
-    let lw = label.chars().count() as i32 * GLYPH_W as i32;
-    if lw + 8 <= reset_r * 2 {
-        draw_text_absolute(
-            canvas,
-            font,
-            col_l - lw / 2,
-            reset_cy - GLYPH_H as i32 / 2 - 2,
-            TextStyle::new(1, (38, 38, 36)),
-            label,
-            usize::MAX,
-        );
-    }
+    let scale = 0.7_f32;
+    let lw = (label.chars().count() as f32 * GLYPH_W as f32 * scale).round() as i32;
+    draw_text_bold(
+        canvas,
+        font,
+        col_l - lw / 2,
+        reset_cy - (GLYPH_H as f32 * scale / 2.0).round() as i32,
+        TextStyle::new(scale, (38, 38, 36)),
+        label,
+        usize::MAX,
+    );
 
     // Power: redondo, com o símbolo I/O (anel + traço vertical) e o LED
     // verde no topo da borda, como na foto.
-    fill_circle(canvas, PSX_SHELL_EDGE, col_l, power_cy, btn_r);
-    fill_circle(canvas, PSX_SHELL, col_l, power_cy, btn_r - 1);
+    draw_round_plastic(canvas, col_l, power_cy, btn_r, false);
     // O LED verde do PS1 original (foto de referência): uma fenda VERTICAL
     // FORA do botão, na carcaça logo abaixo dele; e o rótulo "POWER"
     // gravado dentro do botão em verde escuro.
@@ -4075,12 +4150,12 @@ fn draw_slot_furniture(
     );
     let label = "POWER";
     let lw = label.chars().count() as i32 * GLYPH_W as i32;
-    draw_text_absolute(
+    draw_text_bold(
         canvas,
         font,
         col_l - lw / 2,
         power_cy - GLYPH_H as i32 / 2 - 2,
-        TextStyle::new(1, PSX_BTN_TEXT),
+        TextStyle::new(1.0, PSX_BTN_TEXT),
         label,
         usize::MAX,
     );
@@ -4093,16 +4168,15 @@ fn draw_slot_furniture(
 
     // Open/Eject: redondo do mesmo tamanho, o rótulo "OPEN" gravado dentro
     // em azul escuro — o mesmo tratamento do rótulo "POWER" do outro lado.
-    fill_circle(canvas, PSX_SHELL_EDGE, col_r, power_cy, btn_r);
-    fill_circle(canvas, PSX_SHELL, col_r, power_cy, btn_r - 1);
+    draw_round_plastic(canvas, col_r, power_cy, btn_r, false);
     let label = "OPEN";
     let lw = label.chars().count() as i32 * GLYPH_W as i32;
-    draw_text_absolute(
+    draw_text_bold(
         canvas,
         font,
         col_r - lw / 2,
         power_cy - GLYPH_H as i32 / 2 - 2,
-        TextStyle::new(1, PSX_BTN_OPEN),
+        TextStyle::new(1.0, PSX_BTN_OPEN),
         label,
         usize::MAX,
     );
@@ -4274,14 +4348,15 @@ fn draw_idle_slot(
 
 /// Scale + colour for one of the absolute-coordinate text helpers below —
 /// bundled so those functions stay under clippy's argument-count limit.
+/// `scale` é fractional (0.7 para rótulos pequenos, 2.0 para títulos).
 #[derive(Clone, Copy)]
 struct TextStyle {
-    scale: u32,
+    scale: f32,
     color: (u8, u8, u8),
 }
 
 impl TextStyle {
-    fn new(scale: u32, color: (u8, u8, u8)) -> Self {
+    fn new(scale: f32, color: (u8, u8, u8)) -> Self {
         Self { scale, color }
     }
 }
@@ -4300,17 +4375,35 @@ fn draw_text_absolute(
 ) {
     let (r, g, b) = style.color;
     font.set_color_mod(r, g, b);
-    let cell = (GLYPH_W * style.scale) as i32;
-    let mut pen = x;
+    let cell = GLYPH_W as f32 * style.scale;
+    let dw = (GLYPH_W as f32 * style.scale).round() as u32;
+    let dh = (GLYPH_H as f32 * style.scale).round() as u32;
+    let mut pen = x as f32;
     for ch in s.chars().take(max_chars) {
         let idx = glyph_index(ch);
         if ch != ' ' {
             let src = Rect::new(idx as i32 * GLYPH_W as i32, 0, GLYPH_W, GLYPH_H);
-            let dst = Rect::new(pen, y, GLYPH_W * style.scale, GLYPH_H * style.scale);
+            let dst = Rect::new(pen.round() as i32, y, dw, dh);
             let _ = canvas.copy(font, src, dst);
         }
         pen += cell;
     }
+}
+
+/// Texto em negrito: o traço da fonte é fino (1 px), então o bold é o
+/// desenho duas vezes com 1 px de deslocamento — engorda o traço sem
+/// borrar (o mesmo truque dos créditos de fliperama).
+fn draw_text_bold(
+    canvas: &mut WindowCanvas,
+    font: &mut Texture,
+    x: i32,
+    y: i32,
+    style: TextStyle,
+    s: &str,
+    max_chars: usize,
+) {
+    draw_text_absolute(canvas, font, x, y, style, s, max_chars);
+    draw_text_absolute(canvas, font, x + 1, y, style, s, max_chars);
 }
 
 /// Word-wrapped text at absolute window coordinates, mirroring
@@ -4324,8 +4417,8 @@ fn draw_text_wrapped_absolute(
     style: TextStyle,
     s: &str,
 ) -> i32 {
-    let cols = (max_w / (GLYPH_W * style.scale)).max(1) as usize;
-    let row = (GLYPH_H * style.scale) as i32;
+    let cols = ((max_w as f32) / (GLYPH_W as f32 * style.scale)).max(1.0) as usize;
+    let row = (GLYPH_H as f32 * style.scale) as i32;
     let mut line = String::new();
     let mut line_len = 0usize;
     let mut cy = y;
@@ -4424,7 +4517,7 @@ fn draw_panel(
                 x,
                 y,
                 inner_w,
-                TextStyle::new(2, PANEL_TEXT),
+                TextStyle::new(2.0, PANEL_TEXT),
                 BRAND,
             )
         };
@@ -4505,7 +4598,7 @@ fn draw_panel(
                     x,
                     warn_y,
                     inner_w,
-                    TextStyle::new(1, PANEL_WARN),
+                    TextStyle::new(1.0, PANEL_WARN),
                     WARN,
                 );
                 buttons.push((
@@ -4527,7 +4620,7 @@ fn draw_panel(
                     x,
                     warn_y,
                     inner_w,
-                    TextStyle::new(1, PANEL_WARN),
+                    TextStyle::new(1.0, PANEL_WARN),
                     status,
                 );
             }
@@ -4546,7 +4639,7 @@ fn draw_panel(
             x,
             y,
             inner_w,
-            TextStyle::new(2, PANEL_TEXT),
+            TextStyle::new(2.0, PANEL_TEXT),
             &panel.title,
         )
     };
@@ -4623,7 +4716,7 @@ fn draw_panel(
             font,
             x,
             cy,
-            TextStyle::new(1, PANEL_DIM),
+            TextStyle::new(1.0, PANEL_DIM),
             "comandos",
             usize::MAX,
         );
@@ -4667,7 +4760,7 @@ fn draw_panel(
             x,
             cy,
             inner_w,
-            TextStyle::new(1, PANEL_TEXT),
+            TextStyle::new(1.0, PANEL_TEXT),
             &label,
         );
     }
@@ -4701,7 +4794,7 @@ fn draw_panel(
             font,
             x,
             cy,
-            TextStyle::new(1, PANEL_DIM),
+            TextStyle::new(1.0, PANEL_DIM),
             "notas",
             usize::MAX,
         );
@@ -4721,7 +4814,7 @@ fn draw_panel(
                 font,
                 x,
                 cy,
-                TextStyle::new(1, PANEL_TEXT),
+                TextStyle::new(1.0, PANEL_TEXT),
                 &label,
                 usize::MAX,
             );
@@ -4734,7 +4827,7 @@ fn draw_panel(
                 x,
                 cy,
                 inner_w,
-                TextStyle::new(1, PANEL_TEXT),
+                TextStyle::new(1.0, PANEL_TEXT),
                 text,
             );
         }
@@ -4753,7 +4846,7 @@ fn draw_panel(
         font,
         x,
         ty,
-        TextStyle::new(1, PANEL_DIM),
+        TextStyle::new(1.0, PANEL_DIM),
         "sessão",
         usize::MAX,
     );
@@ -4763,7 +4856,7 @@ fn draw_panel(
         font,
         x + label_w,
         ty,
-        TextStyle::new(1, PANEL_TEXT),
+        TextStyle::new(1.0, PANEL_TEXT),
         &stamp,
         usize::MAX,
     );
@@ -4810,7 +4903,7 @@ fn draw_settings_panel(
         x,
         y,
         inner_w,
-        TextStyle::new(2, PANEL_TEXT),
+        TextStyle::new(2.0, PANEL_TEXT),
         &panel.title,
     );
     y += 2 * GLYPH_H as i32 + 16;
@@ -4955,7 +5048,7 @@ fn draw_shelf_panel(
             x,
             y,
             inner_w,
-            TextStyle::new(2, PANEL_TEXT),
+            TextStyle::new(2.0, PANEL_TEXT),
             &panel.title,
         )
     };
@@ -5077,7 +5170,7 @@ fn draw_shelf_panel(
             x,
             cy,
             inner_w,
-            TextStyle::new(1, PANEL_DIM),
+            TextStyle::new(1.0, PANEL_DIM),
             empty_label,
         );
     }
@@ -5182,7 +5275,7 @@ fn draw_panel_block(
                 font,
                 x,
                 cy,
-                TextStyle::new(1, PANEL_DIM),
+                TextStyle::new(1.0, PANEL_DIM),
                 "lançamento",
                 usize::MAX,
             );
@@ -5191,7 +5284,7 @@ fn draw_panel_block(
                 font,
                 x + (GLYPH_W * 11) as i32,
                 cy,
-                TextStyle::new(1, PANEL_TEXT),
+                TextStyle::new(1.0, PANEL_TEXT),
                 value,
                 usize::MAX,
             );
@@ -5205,7 +5298,7 @@ fn draw_panel_block(
                 x,
                 cy,
                 inner_w,
-                TextStyle::new(1, PANEL_DIM),
+                TextStyle::new(1.0, PANEL_DIM),
                 label,
             );
             // Número primeiro, medalha logo depois — a fonte é monoespaçada
@@ -5217,7 +5310,7 @@ fn draw_panel_block(
                 x,
                 cy,
                 inner_w,
-                TextStyle::new(1, PANEL_TEXT),
+                TextStyle::new(1.0, PANEL_TEXT),
                 value,
             );
             let text_w = value.chars().count() as i32 * GLYPH_W as i32;
@@ -5240,7 +5333,7 @@ fn draw_panel_block(
                 x,
                 cy,
                 inner_w,
-                TextStyle::new(1, PANEL_DIM),
+                TextStyle::new(1.0, PANEL_DIM),
                 label,
             );
             draw_text_wrapped_absolute(
@@ -5249,7 +5342,7 @@ fn draw_panel_block(
                 x,
                 cy,
                 inner_w,
-                TextStyle::new(1, PANEL_TEXT),
+                TextStyle::new(1.0, PANEL_TEXT),
                 value,
             )
         }
@@ -5298,7 +5391,7 @@ fn draw_button(
         font,
         tx,
         ty,
-        TextStyle::new(1, fg),
+        TextStyle::new(1.0, fg),
         &shown,
         usize::MAX,
     );
@@ -5377,7 +5470,7 @@ fn draw_pause_book(
         lx,
         ly,
         lw,
-        TextStyle::new(2, PANEL_TEXT),
+        TextStyle::new(2.0, PANEL_TEXT),
         &pause.title,
     );
     cy += 16;
@@ -5394,7 +5487,7 @@ fn draw_pause_book(
             font,
             lx,
             cy,
-            TextStyle::new(1, PANEL_DIM),
+            TextStyle::new(1.0, PANEL_DIM),
             &pause.draft_heading,
             usize::MAX,
         );
@@ -5405,7 +5498,7 @@ fn draw_pause_book(
             lx,
             cy,
             lw,
-            TextStyle::new(1, PANEL_TEXT),
+            TextStyle::new(1.0, PANEL_TEXT),
             &format!("{draft}_"),
         );
         cy += 8;
@@ -5414,7 +5507,7 @@ fn draw_pause_book(
             font,
             lx,
             cy,
-            TextStyle::new(1, PANEL_DIM),
+            TextStyle::new(1.0, PANEL_DIM),
             &format!("{}/{}", draft.chars().count(), pause.draft_limit),
             usize::MAX,
         );
@@ -5441,7 +5534,7 @@ fn draw_pause_book(
             font,
             lx,
             cy,
-            TextStyle::new(1, PANEL_DIM),
+            TextStyle::new(1.0, PANEL_DIM),
             "anotações",
             usize::MAX,
         );
@@ -5460,7 +5553,7 @@ fn draw_pause_book(
                     lx,
                     cy,
                     lw,
-                    TextStyle::new(1, PANEL_TEXT),
+                    TextStyle::new(1.0, PANEL_TEXT),
                     text,
                 );
             }
@@ -5470,7 +5563,7 @@ fn draw_pause_book(
                     font,
                     lx,
                     cy,
-                    TextStyle::new(1, PANEL_DIM),
+                    TextStyle::new(1.0, PANEL_DIM),
                     "slot vazio",
                     usize::MAX,
                 );
@@ -5488,7 +5581,7 @@ fn draw_pause_book(
             font,
             lx,
             info_y,
-            TextStyle::new(1, PANEL_DIM),
+            TextStyle::new(1.0, PANEL_DIM),
             &info,
             usize::MAX,
         );
@@ -5574,7 +5667,7 @@ fn draw_pause_book(
             font,
             rx,
             ry,
-            TextStyle::new(1, PANEL_DIM),
+            TextStyle::new(1.0, PANEL_DIM),
             "slot vazio",
             usize::MAX,
         );
@@ -5591,7 +5684,7 @@ fn draw_pause_book(
         font,
         rx,
         info_y,
-        TextStyle::new(1, PANEL_DIM),
+        TextStyle::new(1.0, PANEL_DIM),
         &info,
         usize::MAX,
     );
@@ -5601,7 +5694,7 @@ fn draw_pause_book(
             font,
             rx,
             label_y,
-            TextStyle::new(1, PANEL_TEXT),
+            TextStyle::new(1.0, PANEL_TEXT),
             &pause.slot_label,
             usize::MAX,
         );
@@ -5722,7 +5815,7 @@ fn draw_modal(
             x,
             cy,
             inner_w,
-            TextStyle::new(1, PANEL_DIM),
+            TextStyle::new(1.0, PANEL_DIM),
             &modal.draft_heading,
         );
         cy += 8;
@@ -5731,7 +5824,7 @@ fn draw_modal(
             font,
             x,
             cy,
-            TextStyle::new(2, PANEL_TEXT),
+            TextStyle::new(2.0, PANEL_TEXT),
             draft,
             usize::MAX,
         );
@@ -5742,7 +5835,7 @@ fn draw_modal(
             font,
             card.right() - pad - counter_w,
             cy,
-            TextStyle::new(1, PANEL_DIM),
+            TextStyle::new(1.0, PANEL_DIM),
             &counter,
             usize::MAX,
         );
@@ -5857,7 +5950,7 @@ fn draw_modal(
         font,
         x,
         cy,
-        TextStyle::new(2, PANEL_TEXT),
+        TextStyle::new(2.0, PANEL_TEXT),
         &modal.title,
         usize::MAX,
     );
@@ -5885,7 +5978,7 @@ fn draw_modal(
             font,
             card.right() - pad - counter_w,
             cy,
-            TextStyle::new(1, PANEL_DIM),
+            TextStyle::new(1.0, PANEL_DIM),
             &counter,
             usize::MAX,
         );
@@ -5952,7 +6045,7 @@ fn draw_modal(
             font,
             x,
             cy,
-            TextStyle::new(1, PANEL_DIM),
+            TextStyle::new(1.0, PANEL_DIM),
             "nenhum cheat encontrado",
             usize::MAX,
         );
