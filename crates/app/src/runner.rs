@@ -2954,24 +2954,11 @@ pub fn run_game(
         }
 
         if !paused && modal == Modal::None {
-            // Mantém o worker alimentado: um Run em voo por vez.
-            if !in_flight {
-                let mut snap = PadSnapshot::default();
-                for port in 0..MAX_PORTS {
-                    for (rb, pb) in PAD {
-                        snap.buttons.push((port, rb, input.held(port, pb)));
-                    }
-                    snap.analog.push((
-                        port,
-                        input.analog(port, 0).0,
-                        input.analog(port, 0).1,
-                        input.analog(port, 1).0,
-                        input.analog(port, 1).1,
-                    ));
-                }
-                let _ = core_tx.send(CoreCmd::Run { input: snap });
-                in_flight = true;
-            }
+            // Consome o quadro pronto ANTES de alimentar o worker de novo:
+            // enviando antes de consumir no mesmo passe, o try_recv nunca
+            // apanha o worker (que leva uns ms por frame) e o consumo caía
+            // sempre no passe seguinte — cada frame levava DOIS budgets de
+            // pacing, 30 fps cravados.
             if in_flight {
                 if let Ok(out) = core_rx.try_recv() {
                     in_flight = false;
@@ -3128,6 +3115,26 @@ pub fn run_game(
                         }
                     }
                 }
+            }
+            // Mantém o worker alimentado: um Run em voo por vez. No FIM do
+            // passe — o quadro em voo é consumido no próximo, a tempo do
+            // pacing, sem desperdiçar uma iteração por frame.
+            if !in_flight {
+                let mut snap = PadSnapshot::default();
+                for port in 0..MAX_PORTS {
+                    for (rb, pb) in PAD {
+                        snap.buttons.push((port, rb, input.held(port, pb)));
+                    }
+                    snap.analog.push((
+                        port,
+                        input.analog(port, 0).0,
+                        input.analog(port, 0).1,
+                        input.analog(port, 1).0,
+                        input.analog(port, 1).1,
+                    ));
+                }
+                let _ = core_tx.send(CoreCmd::Run { input: snap });
+                in_flight = true;
             }
             // Sem quadro novo (worker ocupado no boot/FMV), reapresenta o
             // último: o gabinete segue vivo e o disco continua girando.
