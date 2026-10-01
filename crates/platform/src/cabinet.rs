@@ -3966,28 +3966,67 @@ fn draw_slot_furniture(
         let _ = canvas.fill_rect(r);
     };
 
-    // Botões de memory card: dois, lado a lado, no padrão das opções do
-    // painel (draw_button), ocupando a base do bloco.
-    let btn_h = (GLYPH_H + 12) as i32;
-    let half_w = (block.width() as i32 / 2 - 6).max(1);
-    let mc_y = block.bottom() - btn_h - 2;
-    let mc1 = Rect::new(block.x(), mc_y, half_w as u32, btn_h as u32);
-    let mc2 = Rect::new(block.x() + half_w + 12, mc_y, half_w as u32, btn_h as u32);
-    draw_button(canvas, font, mc1, "MC slot 1", true);
-    draw_button(canvas, font, mc2, "MC slot 2", true);
+    // Memory cards: duas PORTAS cinzas (as tampas do console real), cada
+    // uma com o rótulo gravado — "Slot 1"/"Slot 2" onde a foto tem o SONY.
+    let door_h = 52;
+    let door_w = (block.width() as i32 / 2 - 14).max(1);
+    let doors_y = block.bottom() - door_h - 4;
+    let mc1 = Rect::new(block.x() + 4, doors_y, door_w as u32, door_h as u32);
+    let mc2 = Rect::new(
+        block.right() - 4 - door_w,
+        doors_y,
+        door_w as u32,
+        door_h as u32,
+    );
+    for (door, label) in [(mc1, "Slot 1"), (mc2, "Slot 2")] {
+        fill(canvas, PSX_SHELL_EDGE, door);
+        fill(
+            canvas,
+            PSX_SHELL,
+            Rect::new(door.x() + 1, door.y() + 1, door.width() - 2, door.height() - 2),
+        );
+        // A muesca de abrir da tampa, no topo (como na foto do console).
+        fill(
+            canvas,
+            PSX_SHELL_EDGE,
+            Rect::new(
+                door.x() + door.width() as i32 / 2 - 14,
+                door.y() + 6,
+                28,
+                3,
+            ),
+        );
+        let lw = label.chars().count() as i32 * GLYPH_W as i32;
+        draw_text_absolute(
+            canvas,
+            font,
+            door.x() + door.width() as i32 / 2 - lw / 2,
+            door.bottom() - GLYPH_H as i32 - 6,
+            TextStyle::new(1, (92, 90, 82)),
+            label,
+            usize::MAX,
+        );
+    }
 
-    // Os três botões redondos, centrados na altura útil acima dos MCs.
+    // Os três botões redondos, centrados na altura útil acima das portas.
     let face_top = block.y() + 6;
-    let face_bottom = mc_y - 10;
+    let face_bottom = doors_y - 10;
     let face_h = (face_bottom - face_top).max(1);
     let btn_r = (face_h as f32 * 0.26).round() as i32;
     let col_l = block.x() + 10 + btn_r;
     let col_r = block.right() - 10 - btn_r;
-    let btn_cy = face_top + face_h / 2;
 
-    // Reset: redondo menor, diretamente acima do Power.
-    let reset_r = (btn_r as f32 * 0.55).round() as i32;
-    let reset_cy = btn_cy - btn_r - reset_r - 6;
+    // O par Reset+Power no mesmo eixo (Reset EXATAMENTE em cima do Power),
+    // centrado na face junto com o LED abaixo do Power.
+    let reset_r = (btn_r as f32 * 0.70).round() as i32;
+    let led_h = 13;
+    let pair_h = reset_r * 2 + 5 + btn_r * 2 + led_h + 3;
+    let pair_top = face_top + (face_h - pair_h).max(0) / 2;
+    let reset_cy = pair_top + reset_r;
+    // O centro do Power: a borda de baixo do Reset + folga de 5 px + o raio
+    // dele (sem o raio do Reset na conta, os círculos se sobrepõem).
+    let power_cy = pair_top + reset_r * 2 + 5 + btn_r;
+
     fill_circle(canvas, PSX_SHELL_EDGE, col_l, reset_cy, reset_r);
     fill_circle(canvas, PSX_SHELL, col_l, reset_cy, reset_r - 1);
     let reset_hit = Rect::new(
@@ -3999,17 +4038,31 @@ fn draw_slot_furniture(
     if reset_pressed {
         fill_circle(canvas, PSX_HUB_RING, col_l, reset_cy, reset_r - 2);
     }
+    // O rótulo "RESET" gravado no botão, em preto — o mesmo tratamento dos
+    // rótulos POWER (verde) e OPEN (azul). Em blocos baixos demais para o
+    // botão caber o texto, o rótulo fica de fora (melhor vazio que vazando).
+    let label = "RESET";
+    let lw = label.chars().count() as i32 * GLYPH_W as i32;
+    if lw + 8 <= reset_r * 2 {
+        draw_text_absolute(
+            canvas,
+            font,
+            col_l - lw / 2,
+            reset_cy - GLYPH_H as i32 / 2 - 2,
+            TextStyle::new(1, (38, 38, 36)),
+            label,
+            usize::MAX,
+        );
+    }
 
     // Power: redondo, com o símbolo I/O (anel + traço vertical) e o LED
     // verde no topo da borda, como na foto.
-    let power_cy = btn_cy + reset_r + 10;
     fill_circle(canvas, PSX_SHELL_EDGE, col_l, power_cy, btn_r);
     fill_circle(canvas, PSX_SHELL, col_l, power_cy, btn_r - 1);
     // O LED verde do PS1 original (foto de referência): uma fenda VERTICAL
     // FORA do botão, na carcaça logo abaixo dele; e o rótulo "POWER"
     // gravado dentro do botão em verde escuro.
     let led_w = 4;
-    let led_h = 10;
     fill(
         canvas,
         if led_on { PSX_LED_ON } else { PSX_LED_OFF },
