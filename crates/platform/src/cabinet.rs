@@ -56,6 +56,8 @@ const PANEL_CONSOLE_LOGO_IMG: u64 = u64::MAX - 5;
 const SLOT_TAG_IMG: u64 = u64::MAX - 6;
 /// O leitor de CD real (foto recortada) — o placeholder sob o disco.
 pub const CD_READER_IMG: u64 = u64::MAX - 8;
+/// O vidro da tampa de acrílico (reflexos pré-renderizados com gradiente).
+pub const LID_GLASS_IMG: u64 = u64::MAX - 9;
 
 /// The pause book: two pages, not warped by the tube — a dedicated screen
 /// (plan §3.2/§3.4), not cabinet furniture, so it replaces the whole window
@@ -1311,6 +1313,17 @@ impl Cabinet {
             Some((w, h, rgba)) => self.set_image(CD_READER_IMG, w, h, rgba),
             None => {
                 self.images.remove(&CD_READER_IMG);
+            }
+        }
+    }
+
+    /// O vidro da tampa de acrílico: reflexos com gradiente pré-renderizados
+    /// (RGBA, blend por alpha no `copy`). `None` remove.
+    pub fn set_lid_glass(&mut self, img: Option<(u32, u32, &[u8])>) {
+        match img {
+            Some((w, h, rgba)) => self.set_image(LID_GLASS_IMG, w, h, rgba),
+            None => {
+                self.images.remove(&LID_GLASS_IMG);
             }
         }
     }
@@ -4168,94 +4181,16 @@ fn draw_panel_slot(
 
         // A tampa translúcida (a "tampa de acrílico" por cima do disco
         // inserido, como no console): só quando assentado e com a tampa
-        // FECHADA — abrir o OPEN remove o vidro.
+        // FECHADA — abrir o OPEN remove o vidro. Reflexos pré-renderizados
+        // com gradiente (textura RGBA com blend) — os círculos chapados
+        // antigos ficavam estranhos sobre a arte.
         if p >= 1.0 && !ejecting && !lid_open {
-            let prev = canvas.blend_mode();
-            canvas.set_blend_mode(sdl3::render::BlendMode::Blend);
-            let r = side / 2.0 + 2.0;
-            // vidro: véu frio levemente escurecido na borda inferior
-            fill_circle_rgba(
-                canvas,
-                (188, 196, 206, 36),
-                ccx as i32,
-                ccy as i32,
-                r as i32,
-            );
-            fill_circle_rgba(
-                canvas,
-                (150, 158, 170, 30),
-                ccx as i32,
-                (ccy + r * 0.35) as i32,
-                (r * 0.92) as i32,
-            );
-            // reflexo especular: arco no alto à esquerda
-            fill_circle_rgba(
-                canvas,
-                (255, 255, 255, 34),
-                (ccx - r * 0.34) as i32,
-                (ccy - r * 0.38) as i32,
-                (r * 0.42) as i32,
-            );
-            fill_circle_rgba(
-                canvas,
-                (255, 255, 255, 26),
-                (ccx - r * 0.42) as i32,
-                (ccy - r * 0.30) as i32,
-                (r * 0.22) as i32,
-            );
-            // aro da tampa: borda levemente mais clara em volta
-            fill_ring_rgba(
-                canvas,
-                ccx as i32,
-                ccy as i32,
-                (r + 2.0) as i32,
-                (r - 1.0) as i32,
-                (222, 228, 236, 40),
-            );
-            canvas.set_blend_mode(prev);
+            if let Some(glass) = images.get(&LID_GLASS_IMG) {
+                let _ = canvas.copy(&glass.tex, None, disc);
+            }
         }
     }
     hits
-}
-
-/// Círculo com ALFA (o vidro da tampa usa) — requer blend ativo no canvas.
-fn fill_circle_rgba(canvas: &mut WindowCanvas, color: (u8, u8, u8, u8), cx: i32, cy: i32, r: i32) {
-    canvas.set_draw_color(sdl3::pixels::Color::RGBA(
-        color.0, color.1, color.2, color.3,
-    ));
-    for dy in -r..=r {
-        let half = ((r * r - dy * dy) as f32).sqrt().round() as i32;
-        let _ = canvas.fill_rect(Rect::new(cx - half, cy + dy, (half * 2).max(1) as u32, 1));
-    }
-}
-
-/// Anel com ALFA (a tampa translúcida usa). Mesma rasterização do
-/// `fill_circle`, mas em cor RGBA desenhada com blend ativo.
-fn fill_ring_rgba(
-    canvas: &mut WindowCanvas,
-    cx: i32,
-    cy: i32,
-    r_out: i32,
-    r_in: i32,
-    color: (u8, u8, u8, u8),
-) {
-    canvas.set_draw_color(sdl3::pixels::Color::RGBA(
-        color.0, color.1, color.2, color.3,
-    ));
-    for dy in -r_out..=r_out {
-        let ho = ((r_out * r_out - dy * dy) as f32).sqrt().round() as i32;
-        let hi = if dy.abs() <= r_in {
-            ((r_in * r_in - dy * dy) as f32).sqrt().round() as i32
-        } else {
-            0
-        };
-        if ho <= hi {
-            continue;
-        }
-        let y = cy + dy;
-        let _ = canvas.fill_rect(Rect::new(cx - ho, y, (ho - hi).max(1) as u32, 1));
-        let _ = canvas.fill_rect(Rect::new(cx + hi, y, (ho - hi).max(1) as u32, 1));
-    }
 }
 
 /// The idle screen's console block: o mesmo gabinete PSX, com a fenda

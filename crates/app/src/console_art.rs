@@ -16,6 +16,9 @@ const DEFAULT_CONSOLE_TAG: &[u8] = include_bytes!("../assets/console_tag.png");
 /// O leitor de CD real (foto recortada, mascarada em círculo) — placeholder
 /// sob o disco girando.
 const DEFAULT_CD_READER: &[u8] = include_bytes!("../assets/cd_reader.png");
+/// O vidro da tampa de acrílico (gradientes de reflexo pré-renderizados —
+/// círculos chapados ficavam estranhos por cima da arte do disco).
+const DEFAULT_LID_GLASS: &[u8] = include_bytes!("../assets/lid_glass.png");
 
 /// Load both brand images into the cabinet: the idle logo and the slot tag.
 /// Called once per idle visit (and the slot tag again per game launch, so a
@@ -39,6 +42,17 @@ pub(crate) fn load_cd_reader(cab: &mut Cabinet) {
         Err(e) => {
             log::warn!("console art: leitor de CD embutido: {e}");
             cab.set_cd_reader(None);
+        }
+    }
+    match image::load_from_memory(DEFAULT_LID_GLASS) {
+        Ok(img) => {
+            let img = img.thumbnail(512, 512).to_rgba8();
+            let (w, h) = img.dimensions();
+            cab.set_lid_glass(Some((w, h, img.as_raw().as_slice())));
+        }
+        Err(e) => {
+            log::warn!("console art: vidro da tampa embutido: {e}");
+            cab.set_lid_glass(None);
         }
     }
 }
