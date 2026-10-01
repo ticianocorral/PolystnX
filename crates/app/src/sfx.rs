@@ -15,12 +15,9 @@ use xperience_platform::Cabinet;
 pub const RATE: u32 = 22_050;
 
 pub enum Sfx {
-    /// Cartridge sliding into the slot (the insert animation's own length).
-    Insert,
-    /// Cartridge leaving the slot (the eject animation's).
-    Eject,
-    /// Power switch flipping on — plays over `power_on_burst` and keeps
-    /// ringing briefly into the resumed game.
+    /// Power switch flipping on — the PS1's own boot beep (plan revision:
+    /// "quando ligar no botão power, o ps1 fazia um beep"), over
+    /// `power_on_burst` and ringing into the resumed game.
     PowerOn,
     /// Power switch flipping off — replaces the synthesized buzz cut.
     PowerOff,
@@ -41,8 +38,6 @@ struct Embedded(&'static [u8]);
 
 fn embedded(name: Sfx) -> Embedded {
     match name {
-        Sfx::Insert => Embedded(include_bytes!("sfx/insert.wav")),
-        Sfx::Eject => Embedded(include_bytes!("sfx/eject.wav")),
         Sfx::PowerOn => Embedded(include_bytes!("sfx/power_on.wav")),
         Sfx::PowerOff => Embedded(include_bytes!("sfx/power_off.wav")),
         Sfx::Reset => Embedded(include_bytes!("sfx/reset.wav")),
@@ -51,13 +46,11 @@ fn embedded(name: Sfx) -> Embedded {
     }
 }
 
-/// All five effects, decoded once on first use (copied out of the embedded
+/// All effects, decoded once on first use (copied out of the embedded
 /// bytes) and kept for the process lifetime — power toggles repeat. One bank
 /// instead of a per-call cache: a single `OnceLock<Option<..>>` used to
 /// serve whichever sound decoded first for *every* action.
 struct Bank {
-    insert: Option<Vec<i16>>,
-    eject: Option<Vec<i16>>,
     power_on: Option<Vec<i16>>,
     power_off: Option<Vec<i16>>,
     reset: Option<Vec<i16>>,
@@ -69,8 +62,6 @@ static BANK: OnceLock<Bank> = OnceLock::new();
 
 fn bank() -> &'static Bank {
     BANK.get_or_init(|| Bank {
-        insert: decode(embedded(Sfx::Insert).0),
-        eject: decode(embedded(Sfx::Eject).0),
         power_on: decode(embedded(Sfx::PowerOn).0),
         power_off: decode(embedded(Sfx::PowerOff).0),
         reset: decode(embedded(Sfx::Reset).0),
@@ -86,8 +77,6 @@ fn bank() -> &'static Bank {
 pub fn play(cab: &mut Cabinet, name: Sfx) -> bool {
     let b = bank();
     let bank_match = match name {
-        Sfx::Insert => &b.insert,
-        Sfx::Eject => &b.eject,
         Sfx::PowerOn => &b.power_on,
         Sfx::PowerOff => &b.power_off,
         Sfx::Reset => &b.reset,
@@ -151,9 +140,9 @@ mod tests {
     #[test]
     fn embedded_effects_parse_with_expected_length_and_content() {
         for (name, min_ms, max_ms) in [
-            (Sfx::Insert, 1100, 1300),
-            (Sfx::Eject, 1200, 1400),
-            (Sfx::PowerOn, 1100, 1300),
+            // O beep de ligar do PS1: 4,0 s com fade no corte (ver o commit
+            // que trocou o foley SNES por ele).
+            (Sfx::PowerOn, 3800, 4200),
             (Sfx::PowerOff, 650, 850),
             (Sfx::Reset, 800, 1000),
             (Sfx::Achievement, 800, 1000),

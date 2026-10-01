@@ -834,11 +834,10 @@ fn tone_click(plat: &Platform, freq: f32) {
 fn cartridge_insert_animation(plat: &Platform, cab: &mut Cabinet) {
     const RATE: u32 = 22_050;
     const SPAN: Duration = Duration::from_millis(520);
-    // Real foley (plan revision: pixabay sounds for insert/eject/power/reset)
-    // — when it plays, the synthesized sliding hiss and seat click stay out
-    // of the way; the foley already carries the whole motion.
-    let has_sfx = crate::sfx::play(cab, crate::sfx::Sfx::Insert);
-    let audio = (!has_sfx).then(|| plat.open_audio(RATE).ok()).flatten();
+    // Sem foley aqui de propósito: o som embutido era o de cartucho do SNES
+    // (plan revision: "remover o som do cartucho... é o som do snes") — o
+    // deslize sintetizado + o clique do assento são o próprio movimento.
+    let audio = plat.open_audio(RATE).ok();
     let frame = Duration::from_millis(16);
     let mut rng: u32 = 0x2468_ace0;
     let start = Instant::now();
@@ -872,9 +871,7 @@ fn cartridge_insert_animation(plat: &Platform, cab: &mut Cabinet) {
     }
     cab.set_cartridge_motion(None);
     cab.present_static(OFF_STATIC_LEVEL);
-    if !has_sfx {
-        tone_click(plat, 180.0);
-    }
+    tone_click(plat, 180.0);
 }
 
 /// The mirror of `cartridge_insert_animation`, played right as an
@@ -886,15 +883,13 @@ fn cartridge_insert_animation(plat: &Platform, cab: &mut Cabinet) {
 /// screen right after drops the panel entirely, so there's no stuck
 /// mid-motion state left over to reset here.
 fn cartridge_eject_animation(plat: &Platform, cab: &mut Cabinet) {
-    // Real foley for the whole leave-the-slot motion when it's available;
-    // the synthesized unseat click + hiss are the fallback.
-    let has_sfx = crate::sfx::play(cab, crate::sfx::Sfx::Eject);
-    if !has_sfx {
-        tone_click(plat, 130.0);
-    }
+    // Sem foley aqui de propósito: o som embutido era o de cartucho do SNES
+    // (plan revision: "remover o som do cartucho... é o som do snes") — o
+    // clique de destravar + o deslize sintetizado carregam o movimento.
+    tone_click(plat, 130.0);
     const RATE: u32 = 22_050;
     const SPAN: Duration = Duration::from_millis(430);
-    let audio = (!has_sfx).then(|| plat.open_audio(RATE).ok()).flatten();
+    let audio = plat.open_audio(RATE).ok();
     let frame = Duration::from_millis(16);
     let mut rng: u32 = 0x0ff1_ce00;
     let start = Instant::now();
@@ -2246,14 +2241,14 @@ pub fn run_game(
                 UiEvent::BootBios => {}
                 UiEvent::ToggleLid => {
                     lid_open = !lid_open;
-                    crate::sfx::play(
-                        cab,
-                        if lid_open {
-                            crate::sfx::Sfx::Eject
-                        } else {
-                            crate::sfx::Sfx::Insert
-                        },
-                    );
+                    // Clique mecânico da tampa: o foley antigo aqui era o
+                    // som de cartucho do SNES (plano revision: "remover o
+                    // som do cartucho... é o som do snes").
+                    if lid_open {
+                        eject_clunk(plat);
+                    } else {
+                        tone_click(plat, 180.0);
+                    }
                     cab.set_drive(lid_open, disc_in);
                     cab.push_osd(
                         &[if lid_open {
@@ -2374,16 +2369,12 @@ pub fn run_game(
                     if powered {
                         // OPEN com o console ligado: só a tampa (a troca de
                         // disco é fria; o estado segue no core).
-                        eject_clunk(plat);
                         lid_open = !lid_open;
-                        crate::sfx::play(
-                            cab,
-                            if lid_open {
-                                crate::sfx::Sfx::Eject
-                            } else {
-                                crate::sfx::Sfx::Insert
-                            },
-                        );
+                        if lid_open {
+                            eject_clunk(plat);
+                        } else {
+                            tone_click(plat, 180.0);
+                        }
                         cab.set_drive(lid_open, disc_in);
                     } else {
                         if let Some(ra) = &mut ra_session {
@@ -2851,7 +2842,7 @@ pub fn run_game(
                             current_disc = path.clone();
                             cab.set_drive(lid_open, disc_in);
                             disc_motion = Some((Instant::now(), false));
-                            crate::sfx::play(cab, crate::sfx::Sfx::Insert);
+                            tone_click(plat, 180.0); // o clique do assento
                             cab.push_osd(&["DISCO INSERIDO"], None, Duration::from_secs(2));
                         } else {
                             cab.push_osd(&["FALHA AO INSERIR"], None, Duration::from_secs(2));

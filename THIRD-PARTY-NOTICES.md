@@ -104,21 +104,31 @@ algum membro da família, só aplicado a mais hashes.
 
 ## Efeitos sonoros do console (Pixabay)
 
-Os sons de inserir/ejetar cartucho e ligar/desligar/resetar (`crates/app/src/
-sfx/*.wav`, embutidos no binário) são recortes de efeitos do usuário
+Os sons de ligar/desligar/resetar (`crates/app/src/sfx/*.wav`, embutidos no
+binário) são recortes de efeitos do usuário
 [u_fom5qo8e5o](https://pixabay.com/users/u_fom5qo8e5o-48608561/) no Pixabay,
 usados sob a [Pixabay Content License](https://pixabay.com/service/license-summary/)
 (grátis para uso comercial, sem atribuição exigida — os créditos aqui são por
 cortesia):
 
-- "SNES cartridge insert" — pixabay.com/sound-effects/film-special-effects-snes-cartridge-insert-296151/
-- "SNES Eject" — pixabay.com/sound-effects/film-special-effects-snes-eject-296153/
 - "SNES power on" — pixabay.com/sound-effects/film-special-effects-snes-power-on-296158/
 - "SNES POwer off" — pixabay.com/sound-effects/film-special-effects-snes-power-off-296155/
 - "SNES reset" — pixabay.com/sound-effects/snes-reset-296152/
 
 Os arquivos foram aparados (silêncio inicial removido, fade de ~120 ms no
 corte) e convertidos para WAV mono 22 050 Hz; nenhum outro ajuste.
+
+## Beep de ligar (Pixabay)
+
+O `power_on.wav` — o beep de boot do PlayStation, plan revision: "quando
+ligar no botão power, o ps1 fazia um beep" — é o efeito
+["Playstation turning on"](https://pixabay.com/sound-effects/technology-playstation-turning-on-102458/)
+de [freesound_community](https://pixabay.com/users/freesound_community-46691455/)
+(áudio original de Caitlin_100 no Freesound), sob a Pixabay Content License.
+Aparado para 4,0 s com fade de 150 ms no corte, WAV mono 22 050 Hz.
+Os sons de inserir/ejetar cartucho do SNES saíram do app (plan revision:
+"remover o som do cartucho... é o som do snes") — as ações de disco tocam
+cliques mecânicos sintetizados.
 
 
 
@@ -150,11 +160,12 @@ Parser de PDF usado pelo leitor de manuais (`crates/app/src/manual.rs`):
 apenas extrai as imagens de páginas embutidas dos PDFs que o próprio
 usuário coloca em `assets/manual/`; nada de PDF é distribuído com o app.
 
-## Sons de foley (insert/eject/power/reset — Pixabay; cd_seek — YouTube)
+## Sons de foley (power/reset — Pixabay; cd_seek — YouTube; beep de boot — Pixabay/Freesound)
 
-Os efeitos `insert.wav`, `eject.wav`, `power_on.wav`, `power_off.wav` e
-`reset.wav` vêm do Pixabay (licença de conteúdo do Pixabay, sem atribuição
-obrigatória — mantida aqui por cortesia). `cd_seek.wav` é um recorte de
+Os efeitos `power_off.wav` e `reset.wav` vêm do Pixabay (licença de
+conteúdo do Pixabay, sem atribuição obrigatória — mantida aqui por
+cortesia). O `power_on.wav` é o beep de boot do PlayStation (ver a seção
+acima). `cd_seek.wav` é um recorte de
 3 s (com crossfade de loop) do som de leitura do drive de CD-ROM do
 PlayStation publicado em
 [youtube.com/watch?v=5avty_d1rTI](https://www.youtube.com/watch?v=5avty_d1rTI),
