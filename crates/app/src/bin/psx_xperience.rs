@@ -295,9 +295,8 @@ fn main() -> Result<()> {
         }
         return Ok(());
     }
-    // The ambient static hiss (opt-in, settings "vídeo") — gate applied once
-    // here and live on every settings toggle after.
-    cab.set_static_hiss(cfg.hiss_on_static);
+    // Sem chiado de RF: o PSX é AV — a tela sem sinal é muda (o hiss
+    // embutido da plataforma fica desligado para sempre).
     // RetroAchievements, uma vez para todas as telas (início, estante, jogo):
     // a logo oficial (favicon embutido) do badge e o badge em si — conta
     // configurada = "RA ATIVADO" no queixo do que for que a tela esteja na TV.

@@ -7,9 +7,9 @@ mod input;
 
 pub use audio::AudioOut;
 pub use cabinet::{
-    Cabinet, FrameRef, PanelButton, PanelSection, PixelFormat, RaStatus, Screen, SettingsButton,
-    SettingsPanelInfo, ShelfButton, ShelfPanelInfo, UpdateArrow, BRAND, DEMO_BADGE_IMG,
-    RA_LOGO_IMG,
+    Cabinet, FrameRef, ModalBackdrop, PanelButton, PanelSection, PixelFormat, RaStatus, Screen,
+    SettingsButton, SettingsPanelInfo, ShelfButton, ShelfPanelInfo, UpdateArrow, BRAND,
+    DEMO_BADGE_IMG, RA_LOGO_IMG,
 };
 pub use input::{Input, KeyMap, PadButton, PadMap, UiEvent, MAX_PORTS};
 // The SDL gamepad button enum, for callers that hold a captured press
@@ -68,6 +68,20 @@ impl Drop for TraceSpan {
 /// Left-button-down position, in window coordinates, or `None` for anything
 /// else. Shared between `poll` and `poll_menu` so the SDL event match isn't
 /// duplicated.
+/// Left button UP position, in window coordinates — completes the pad drag
+/// between the console's controller entries (`UiEvent::MouseUp`).
+fn mouse_up_at(event: &Event) -> Option<(i32, i32)> {
+    match event {
+        Event::MouseButtonUp {
+            mouse_btn: MouseButton::Left,
+            x,
+            y,
+            ..
+        } => Some((*x as i32, *y as i32)),
+        _ => None,
+    }
+}
+
 fn left_click_at(event: &Event) -> Option<(i32, i32)> {
     match event {
         Event::MouseButtonDown {
@@ -712,6 +726,12 @@ impl Platform {
         Input::new()
     }
 
+    /// Quantos gamepads físicos estão conectados agora (o primeiro alimenta
+    /// a entrada 1 do console, o segundo a 2 — ver `Input`).
+    pub fn gamepad_count(&self) -> usize {
+        self.gamepads.len()
+    }
+
     /// Drain the event queue, update `input` via `keymap` (gameplay D-pad/
     /// buttons only — every console/UI command is mouse-only now, reported
     /// as [`UiEvent::Click`] for the caller to resolve via
@@ -723,6 +743,14 @@ impl Platform {
         for event in self.event_pump.poll_iter() {
             if let Some((x, y)) = left_click_at(&event) {
                 out.push(UiEvent::Click(x, y));
+                continue;
+            }
+            if let Some((x, y)) = mouse_up_at(&event) {
+                out.push(UiEvent::MouseUp(x, y));
+                continue;
+            }
+            if let Event::MouseMotion { x, y, .. } = &event {
+                out.push(UiEvent::MouseMove(*x as i32, *y as i32));
                 continue;
             }
             match event {

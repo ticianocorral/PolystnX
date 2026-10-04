@@ -25,12 +25,15 @@ pub struct Config {
     /// a one-time notice on the idle screen; a network failure just means no
     /// notice, never an error.
     pub check_updates_on_start: bool,
-    /// Ambient white-noise hiss while the TV shows static (idle, power-off)
-    /// — plan revision: "som de chiado de tv fora do ar ... colocar na
-    /// configuração para tocar ou não. por padrão vem desligado".
+    /// Sobra do tempo do RF — o PSX é AV, a tela sem sinal é muda. O valor
+    /// ainda é lido de configs antigas (sem efeito) e nunca mais escrito.
+    #[allow(dead_code)]
     pub hiss_on_static: bool,
     /// Silencia o áudio do jogo (só o som de ambiente do leitor toca).
     pub mute_game: bool,
+    /// Habilita o CONTROLE 2 (a segunda entrada do console) — padrão
+    /// desligado: um controle só, como o console saía de fábrica.
+    pub pad2: bool,
     /// A BIOS padrão (nome do arquivo em `bios/`); `None` = o core varre a
     /// pasta como sempre fez.
     pub bios_default: Option<String>,
@@ -73,6 +76,7 @@ struct Raw {
     #[serde(default)]
     hiss_on_static: Option<bool>,
     mute_game: Option<bool>,
+    pad2: Option<bool>,
     bios_default: Option<String>,
     #[serde(default)]
     ra_user: Option<String>,
@@ -110,6 +114,7 @@ impl Config {
             check_updates_on_start: true,
             hiss_on_static: false,
             mute_game: false,
+            pad2: false,
             bios_default: None,
             ra_user: String::new(),
             ra_token: String::new(),
@@ -161,6 +166,9 @@ impl Config {
         }
         if let Some(m) = raw.mute_game {
             self.mute_game = m;
+        }
+        if let Some(m) = raw.pad2 {
+            self.pad2 = m;
         }
         if let Some(b) = raw.bios_default.clone() {
             self.bios_default = Some(b);
@@ -223,10 +231,10 @@ impl Config {
              # runahead: speculative frames to hide input lag (0 disables).\n\
              # fullscreen: start in fullscreen.\n\
              # check_updates_on_start: look for a newer release/SwanStation core at launch.\n\
-             # hiss_on_static: white-noise hiss while the TV shows static (off by default).\n\
              # RetroAchievements: ra_user/ra_token from retroachievements.org\n\
              # (Settings -> Web API); empty = the whole feature stays off.\n\
              # ra_hardcore: no cheats/savestates while earning achievements.\n\
+             # pad2: habilita o CONTROLE 2 (a segunda entrada do console).\n\
              # [keyboard]: action = \"SDL key name\" (e.g. \"Left Shift\", \"F2\", \"]\").\n\
              # [gamepad]: action = \"SDL gamepad button name\" (e.g. \"south\",\n\
              # \"dpup\", \"leftshoulder\") — which pad button drives each action.\n\n",
@@ -237,7 +245,10 @@ impl Config {
             "check_updates_on_start = {}\n",
             self.check_updates_on_start
         ));
-        s.push_str(&format!("hiss_on_static = {}\n\n", self.hiss_on_static));
+        s.push_str(&format!(
+            "# pad2: habilita o CONTROLE 2 (a segunda entrada do console).\npad2 = {}\n\n",
+            self.pad2
+        ));
         s.push_str(&format!(
             "# mute_game: silencia o áudio do jogo (fica só o som ambiente do leitor).\nmute_game = {}\n\n",
             self.mute_game
@@ -291,6 +302,7 @@ mod tests {
             check_updates_on_start: true,
             hiss_on_static: false,
             mute_game: false,
+            pad2: false,
             bios_default: None,
             ra_user: String::new(),
             ra_token: String::new(),

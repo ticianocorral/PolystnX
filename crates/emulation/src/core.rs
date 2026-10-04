@@ -342,7 +342,12 @@ impl Core {
         self.state
             .variables
             .iter()
-            .map(|(k, v)| (k.to_string_lossy().into_owned(), v.to_string_lossy().into_owned()))
+            .map(|(k, v)| {
+                (
+                    k.to_string_lossy().into_owned(),
+                    v.to_string_lossy().into_owned(),
+                )
+            })
             .collect()
     }
 
@@ -597,6 +602,24 @@ impl Core {
     /// Copy `bytes` back into a core memory region (e.g. restore battery SRAM
     /// after `load_game`). Extra bytes are ignored; a short slice leaves the
     /// tail untouched. Returns the number of bytes written.
+    /// O ponteiro BRUTO da memória `id` e o tamanho — SEM cópia. Válido
+    /// enquanto o jogo carregado não muda (load/BootBios realocam:
+    /// re-consulte depois deles). A leitura na main só acontece com o
+    /// worker bloqueado no recv (entre o consumir o CoreOut e enviar o
+    /// próximo Run) — sem mutação concorrente.
+    pub fn memory_ptr(&mut self, id: c_uint) -> Option<(*const u8, usize)> {
+        let (ptr, size) = self.enter(|api| unsafe {
+            (
+                (api.retro_get_memory_data)(id),
+                (api.retro_get_memory_size)(id),
+            )
+        });
+        if ptr.is_null() || size == 0 {
+            return None;
+        }
+        Some((ptr as *const u8, size))
+    }
+
     pub fn write_memory(&mut self, id: c_uint, bytes: &[u8]) -> usize {
         let (ptr, size) = self.enter(|api| unsafe {
             (

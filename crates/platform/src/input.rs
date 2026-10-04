@@ -146,6 +146,21 @@ pub enum UiEvent {
     BootBios,
     /// OPEN: abrir/fechar a tampa translúcida (sem desligar).
     ToggleLid,
+    /// Pressionou uma ENTRADA de controle na face (o drag começa): o
+    /// controle "sai" da entrada e segue o mouse até o soltar.
+    PadGrab(u8),
+    /// Clique no botão ANALOG da entrada (`u8`: 0 ou 1) — alterna o modo
+    /// analógico daquele controle (o LED vermelho do DualShock).
+    AnalogToggle(u8),
+    /// Clique no botão RUMBLE da entrada (`u8`: 0 ou 1) — alterna a
+    /// vibração daquele controle.
+    RumbleToggle(u8),
+    /// Botão esquerdo do mouse solto — completa (ou cancela) o arrasto do
+    /// controle entre as entradas.
+    MouseUp(i32, i32),
+    /// Mouse movendo — enquanto um controle está sendo arrastado, destaca
+    /// a entrada sob o cursor. Ignorado fora do arrasto.
+    MouseMove(i32, i32),
     /// Remover o disco (só com a tampa aberta).
     RemoveDisc,
     /// Inserir disco — abre o seletor de jogos.

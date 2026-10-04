@@ -22,6 +22,7 @@ pub mod devmenu;
 pub mod dirs;
 pub mod idle;
 pub mod manual;
+pub mod memcard;
 pub mod ra;
 pub mod rom_rename;
 pub mod runner;

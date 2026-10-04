@@ -63,7 +63,7 @@ const RA_ROW_SENHA: usize = 2;
 
 fn row_count(sec: usize, cfg: &Config) -> usize {
     match sec {
-        SEC_JOGO => 2,
+        SEC_JOGO => 3,
         SEC_VIDEO => 3,
         SEC_SISTEMA => 3,
         // usuário / token / senha / testar login / hardcore
@@ -465,21 +465,21 @@ fn activate_row(
                 *sec = SEC_CONTROLES;
                 *sel = 0;
             }
-            _ => {
+            1 => {
                 cfg.runahead = (cfg.runahead + 1) % (RUNAHEAD_MAX + 1);
                 let _ = cfg.save();
             }
+            2 => {
+                cfg.pad2 = !cfg.pad2;
+                let _ = cfg.save();
+            }
+            _ => {}
         },
         SEC_VIDEO => match i {
             0 => {
                 cfg.fullscreen = !cfg.fullscreen;
                 cab.toggle_fullscreen();
                 let _ = cfg.save();
-            }
-            1 => {
-                cfg.hiss_on_static = !cfg.hiss_on_static;
-                let _ = cfg.save();
-                cab.set_static_hiss(cfg.hiss_on_static);
             }
             _ => {
                 cfg.mute_game = !cfg.mute_game;
@@ -555,17 +555,16 @@ fn adjust_row(cfg: &mut Config, sec: usize, sel: usize, cab: &mut Cabinet, right
             };
             let _ = cfg.save();
         }
+        (SEC_JOGO, 2) => {
+            cfg.pad2 = !cfg.pad2;
+            let _ = cfg.save();
+        }
         (SEC_VIDEO, 0) => {
             cfg.fullscreen = !cfg.fullscreen;
             cab.toggle_fullscreen();
             let _ = cfg.save();
         }
         (SEC_VIDEO, 1) => {
-            cfg.hiss_on_static = !cfg.hiss_on_static;
-            let _ = cfg.save();
-            cab.set_static_hiss(cfg.hiss_on_static);
-        }
-        (SEC_VIDEO, 2) => {
             cfg.mute_game = !cfg.mute_game;
             let _ = cfg.save();
         }
@@ -704,6 +703,10 @@ fn draw_jogo(d: &mut Screen, cfg: &Config, sel: usize) {
     let rows = [
         "Controles".to_string(),
         format!("Run-ahead: {} quadro(s)", cfg.runahead),
+        format!(
+            "Controle 2: {}",
+            if cfg.pad2 { "ligado" } else { "desligado" }
+        ),
     ];
     for (i, row) in rows.iter().enumerate() {
         draw_row(d, x, y, row, i == sel);
@@ -719,6 +722,7 @@ fn draw_video(d: &mut Screen, cfg: &Config, sel: usize) {
     let x = MARGIN;
     d.text(x, MARGIN, 2, TEXT, "vídeo");
     let mut y = LIST_TOP;
+    // Sem "chiado da TV fora do ar": o PSX é AV — tela sem sinal é muda.
     let rows = [
         format!(
             "Tela cheia: {}",
@@ -726,14 +730,6 @@ fn draw_video(d: &mut Screen, cfg: &Config, sel: usize) {
                 "ligada"
             } else {
                 "desligada"
-            }
-        ),
-        format!(
-            "Chiado da TV fora do ar: {}",
-            if cfg.hiss_on_static {
-                "ligado"
-            } else {
-                "desligado"
             }
         ),
         format!(
@@ -745,10 +741,7 @@ fn draw_video(d: &mut Screen, cfg: &Config, sel: usize) {
         draw_row(d, x, y, row, i == sel);
         y += ROW_H;
     }
-    draw_hint(
-        d,
-        "clique numa opção pra alternar (o chiado toca na TV desligada)",
-    );
+    draw_hint(d, "clique numa opção pra alternar");
 }
 
 fn draw_sistema(

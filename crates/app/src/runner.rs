@@ -12,7 +12,8 @@ use xperience_emulation::{
     AnalogStick, Button, Core, Frame as EmuFrame, PixelFormat as EmuFormat, MEMORY_SAVE_RAM,
 };
 use xperience_platform::{
-    Cabinet, FrameRef, PanelButton, PixelFormat as PlatFormat, Platform, UiEvent, MAX_PORTS,
+    Cabinet, FrameRef, ModalBackdrop, PanelButton, PixelFormat as PlatFormat, Platform, UiEvent,
+    MAX_PORTS,
 };
 
 use crate::config::Config;
@@ -277,11 +278,13 @@ fn load_slot_rows(save_dir: &Path, title: &str) -> Vec<(String, bool)> {
         .collect()
 }
 
-/// A biblioteca de cards (plano §3): os `.mcr` de `memcards/`, em ordem de
-/// nome, com o encaixado marcado. Devolve as linhas do modal e os caminhos
-/// na mesma ordem (a linha 0 é sempre "criar cartão novo").
-fn card_library(dir: &Path, current: Option<&Path>) -> (Vec<(String, bool)>, Vec<PathBuf>) {
-    let mut cards: Vec<PathBuf> = fs::read_dir(dir)
+/// O arquivo que o SwanStation usa para o card do SLOT 2 (o core o cria
+/// no save dir com Card2Type = Shared e o escreve ao sair).
+const MC2_SHARED_FILE: &str = "duckstation_shared_card_2.mcd";
+
+/// Os `.mcr` da pasta, ordenados — a fonte das duas vistas da biblioteca.
+fn list_cards(dir: &Path) -> Vec<PathBuf> {
+    fs::read_dir(dir)
         .into_iter()
         .flatten()
         .flatten()
@@ -292,30 +295,52 @@ fn card_library(dir: &Path, current: Option<&Path>) -> (Vec<(String, bool)>, Vec
                 .map(|e| e.eq_ignore_ascii_case("mcr"))
                 .unwrap_or(false)
         })
-        .collect();
+        .collect()
+}
+
+/// A biblioteca com a informação de cada card (plano revision: "lista com
+/// todos existentes, com as infos dos blocos salvos neles, inclusive com os
+/// ícones dos jogos"): ícone do primeiro save + "N/15 blocos" no rótulo.
+/// A linha 0 é sempre "(criar cartão novo)".
+type CardModalRow = (String, bool, Option<(u32, u32, Vec<u8>)>);
+
+fn card_rows_with_icons(
+    dir: &Path,
+    current1: Option<&Path>,
+    current2: Option<&Path>,
+) -> (Vec<CardModalRow>, Vec<PathBuf>) {
+    let mut cards = list_cards(dir);
     cards.sort();
-    let mut rows = vec![("(criar cartão novo)".to_string(), true)];
+    let mut rows = vec![("(criar cartão novo)".to_string(), true, None)];
     for card in &cards {
         let name = card
             .file_stem()
             .map(|s| s.to_string_lossy().into_owned())
             .unwrap_or_default();
-        let label = if current == Some(card.as_path()) {
-            format!("{name} — no slot")
-        } else {
-            name
+        let info = crate::memcard::inspect(card);
+        let (label, icon) = match info {
+            Some(info) => {
+                // Um card só vive em um slot — o rótulo diz qual.
+                let where_ = if current1 == Some(card.as_path()) {
+                    " - no slot 1"
+                } else if current2 == Some(card.as_path()) {
+                    " - no slot 2"
+                } else {
+                    ""
+                };
+                (
+                    format!("{name} - {}/15 blocos{}", info.used, where_),
+                    info.saves
+                        .first()
+                        .and_then(|s| s.icon.clone())
+                        .map(|d| (16u32, 16u32, d)),
+                )
+            }
+            None => (format!("{name} - inválido"), None),
         };
-        rows.push((label, true));
+        rows.push((label, true, icon));
     }
     (rows, cards)
-}
-
-/// Primeiro nome livre do jeito "Cartão N" — o cartão novo da biblioteca.
-fn next_card_name(dir: &Path) -> String {
-    let n = (1..)
-        .find(|n| !dir.join(format!("Cartão {n}.mcr")).exists())
-        .unwrap_or(1);
-    format!("Cartão {n}")
 }
 
 // --- core em thread própria (plano revision: "faca tudo") ------------------
@@ -372,7 +397,6 @@ enum CoreCmd {
     TrayEject {
         ejected: bool,
     },
-    Quit,
 }
 
 /// O que um `Run` produz: frame, aspecto, áudio do quadro e — quando há
@@ -382,7 +406,10 @@ struct CoreOut {
     frame: Option<EmuFrame>,
     aspect: f32,
     audio: Vec<i16>,
-    ram: Option<std::sync::Arc<Vec<u8>>>,
+    /// A RAM do jogo como (ponteiro, tamanho) — SEM cópia (era um `to_vec`
+    /// de 2 MB por frame com sessão RA ativa). A leitura na main acontece
+    /// com o worker bloqueado no recv — ver o SAFETY no tick do RA.
+    ram: Option<(usize, usize)>,
 }
 
 /// Core bruto (handles de dlopen) atravessando uma fronteira de thread.
@@ -396,10 +423,11 @@ fn spawn_core_worker(
 ) -> (
     std::sync::mpsc::Sender<CoreCmd>,
     std::sync::mpsc::Receiver<CoreOut>,
+    std::thread::JoinHandle<()>,
 ) {
     let (tx, rx) = std::sync::mpsc::channel::<CoreCmd>();
     let (otx, orx) = std::sync::mpsc::channel::<CoreOut>();
-    std::thread::Builder::new()
+    let handle = std::thread::Builder::new()
         .name("swanstation".into())
         .spawn(move || {
             // Prioridade baixa para a thread do core (macOS: nice afeta só a
@@ -415,7 +443,6 @@ fn spawn_core_worker(
             while let Ok(cmd) = rx.recv() {
                 let core = &mut running.0;
                 match cmd {
-                    CoreCmd::Quit => break,
                     CoreCmd::Run { input } => {
                         for (port, btn, held) in &input.buttons {
                             core.set_button(*port, *btn, *held);
@@ -426,12 +453,12 @@ fn spawn_core_worker(
                         }
                         core.run();
                         let audio = core.audio().to_vec();
-                        let ram = want_ram.then(|| {
-                            std::sync::Arc::new(
-                                core.memory(xperience_emulation::MEMORY_SYSTEM_RAM)
-                                    .unwrap_or_default(),
-                            )
-                        });
+                        let ram = want_ram
+                            .then(|| {
+                                core.memory_ptr(xperience_emulation::MEMORY_SYSTEM_RAM)
+                                    .map(|(ptr, len)| (ptr as usize, len))
+                            })
+                            .flatten();
                         let aspect = core.av_info().aspect_ratio;
                         // Frames especulativos de run-ahead: áudio e RAM
                         // capturados do quadro real acima; o frame exibido é
@@ -505,7 +532,7 @@ fn spawn_core_worker(
             }
         })
         .expect("thread do core");
-    (tx, orx)
+    (tx, orx, handle)
 }
 
 /// Encaixa `path` num slot de memory card (`mem_id` 0 = slot 1, 1 = slot 2
@@ -629,6 +656,7 @@ fn command_rows(
     lid_open: bool,
     disc_in: bool,
     has_library: bool,
+    bios: bool,
 ) -> Vec<(PanelButton, String)> {
     let label = |b: PanelButton, base: &str| -> String {
         if flashed(flash, b) {
@@ -637,7 +665,17 @@ fn command_rows(
             base.to_string()
         }
     };
-    let mut rows = vec![(PanelButton::Notebook, "Anotações".to_string())];
+    // Boot pela BIOS: a estante inteira vira um comando — inserir um jogo
+    // é fechá-lo no drive da sessão viva, como no console real parado no
+    // menu da BIOS.
+    let mut rows = if bios && has_library {
+        vec![(PanelButton::DiscInserter, "Estante de games".to_string())]
+    } else {
+        vec![(PanelButton::Notebook, "Anotações".to_string())]
+    };
+    if bios {
+        return rows;
+    }
     if has_achievements {
         rows.push((PanelButton::Achievements, "Conquistas".to_string()));
     }
@@ -823,96 +861,49 @@ fn tone_click(plat: &Platform, freq: f32) {
 /// set_cartridge_motion` driving `draw_panel_slot`), right where the
 /// cartridge lives for the rest of the session: the game's art drops into
 /// the slot's dark mouth with a smoothstep ease until it seats, over the
-/// signal-off CRT — a quiet sliding hiss swelling and fading underneath and
-/// a firm seat-in click right at the end. A no-op with no cartridge art to
-/// animate — the slot would sit empty. Skipped for a headless `--shot`
-/// capture by the caller (`spec.shot.is_none()`, same reasoning
-/// `power_on_burst`/`power_off_burst` don't need — there's no button to
-/// click there, so this has no live trigger to skip in the first place;
-/// the guard is really about the "plain `--shot`" mode that still runs the
-/// live loop for a few frames).
-fn cartridge_insert_animation(plat: &Platform, cab: &mut Cabinet) {
-    const RATE: u32 = 22_050;
+/// signal-off CRT. Silenciosa de propósito (plan revision: "remover som ao
+/// encaixar e remover o disco") — o movimento é o próprio feedback. A no-op
+/// with no cartridge art to animate — the slot would sit empty. Skipped for
+/// a headless `--shot` capture by the caller (`spec.shot.is_none()`, same
+/// reasoning `power_on_burst`/`power_off_burst` don't need — there's no
+/// button to click there, so this has no live trigger to skip in the first
+/// place; the guard is really about the "plain `--shot`" mode that still
+/// runs the live loop for a few frames).
+fn cartridge_insert_animation(cab: &mut Cabinet) {
     const SPAN: Duration = Duration::from_millis(520);
-    // Sem foley aqui de propósito: o som embutido era o de cartucho do SNES
-    // (plan revision: "remover o som do cartucho... é o som do snes") — o
-    // deslize sintetizado + o clique do assento são o próprio movimento.
-    let audio = plat.open_audio(RATE).ok();
     let frame = Duration::from_millis(16);
-    let mut rng: u32 = 0x2468_ace0;
     let start = Instant::now();
 
     while start.elapsed() < SPAN {
         let t = (start.elapsed().as_secs_f32() / SPAN.as_secs_f32()).min(1.0);
         cab.set_cartridge_motion(Some((t, false)));
-        // A estante dissolve para a tela de AV (o disco desce por cima) —
-        // mesma TV trocando de entrada, sem "outra tela".
-        if t < 0.55 {
-            cab.present_shelf_fade(OFF_STATIC_LEVEL, t / 0.55);
-        } else {
-            cab.present_static(OFF_STATIC_LEVEL);
-        }
-
-        if let Some(a) = &audio {
-            let n = (RATE / 60) as usize;
-            let amp = (2200.0 * (std::f32::consts::PI * t).sin()) as i32;
-            let mut buf = Vec::with_capacity(n * 2);
-            for _ in 0..n {
-                rng ^= rng << 13;
-                rng ^= rng >> 17;
-                rng ^= rng << 5;
-                let s = (((rng >> 8) & 0xFFFF) as i32 - 0x8000) * amp / 0x8000;
-                buf.push(s.clamp(-32000, 32000) as i16);
-                buf.push(s.clamp(-32000, 32000) as i16);
-            }
-            a.queue(&buf);
-        }
+        // Só estática — a estante NÃO volta no meio da animação (era o
+        // "pisca": estática -> estante -> estática em meio segundo).
+        cab.present_static(OFF_STATIC_LEVEL);
         std::thread::sleep(frame);
     }
     cab.set_cartridge_motion(None);
     cab.present_static(OFF_STATIC_LEVEL);
-    tone_click(plat, 180.0);
 }
 
 /// The mirror of `cartridge_insert_animation`, played right as an
 /// already-off cartridge actually leaves (`UiEvent::Eject`'s second branch,
-/// plan revision: "criar animacao de... ejetar cartucho") — an unseat click
-/// first, then the same panel slot in reverse: the cartridge pops up out of
-/// the mouth and rises clear of the block, easing out as it goes. Also a
-/// no-op with no cartridge art. `cab.clear_panel()` on the way to the idle
-/// screen right after drops the panel entirely, so there's no stuck
-/// mid-motion state left over to reset here.
-fn cartridge_eject_animation(plat: &Platform, cab: &mut Cabinet) {
-    // Sem foley aqui de propósito: o som embutido era o de cartucho do SNES
-    // (plan revision: "remover o som do cartucho... é o som do snes") — o
-    // clique de destravar + o deslize sintetizado carregam o movimento.
-    tone_click(plat, 130.0);
-    const RATE: u32 = 22_050;
+/// plan revision: "criar animacao de... ejetar cartucho") — the same panel
+/// slot in reverse: the cartridge pops up out of the mouth and rises clear
+/// of the block, easing out as it goes. Silenciosa de propósito (plan
+/// revision: "remover som ao encaixar e remover o disco"). Also a no-op
+/// with no cartridge art. `cab.clear_panel()` on the way to the idle screen
+/// right after drops the panel entirely, so there's no stuck mid-motion
+/// state left over to reset here.
+fn cartridge_eject_animation(cab: &mut Cabinet) {
     const SPAN: Duration = Duration::from_millis(430);
-    let audio = plat.open_audio(RATE).ok();
     let frame = Duration::from_millis(16);
-    let mut rng: u32 = 0x0ff1_ce00;
     let start = Instant::now();
 
     while start.elapsed() < SPAN {
         let t = (start.elapsed().as_secs_f32() / SPAN.as_secs_f32()).min(1.0);
         cab.set_cartridge_motion(Some((t, true)));
         cab.present_static(OFF_STATIC_LEVEL);
-
-        if let Some(a) = &audio {
-            let n = (RATE / 60) as usize;
-            let amp = (2000.0 * (std::f32::consts::PI * t).sin()) as i32;
-            let mut buf = Vec::with_capacity(n * 2);
-            for _ in 0..n {
-                rng ^= rng << 13;
-                rng ^= rng >> 17;
-                rng ^= rng << 5;
-                let s = (((rng >> 8) & 0xFFFF) as i32 - 0x8000) * amp / 0x8000;
-                buf.push(s.clamp(-32000, 32000) as i16);
-                buf.push(s.clamp(-32000, 32000) as i16);
-            }
-            a.queue(&buf);
-        }
         std::thread::sleep(frame);
     }
 }
@@ -1034,9 +1025,12 @@ enum NoteEdit {
     SlotName,
     /// Naming the print just captured into this slot (plan revision — the
     /// Printscreen modal's second step): unlike `SlotName`, committing this
-    /// one also writes `runner::print_capture`'s image to disk for the
-    /// first time — the capture and the name land together.
+    /// one also writes `runner::print_capture`'s image to disk for the first
+    /// time — the capture and the name land together.
     PrintName(u8),
+    /// Renomear um memory card (o alvo vive em `card_rename`) — commit
+    /// renomeia o `.mcr` na biblioteca.
+    CardRename,
     /// Typing the Cheats modal's search filter (plan revision — the
     /// libretro-database expansion made some games' lists long enough that
     /// finding one by eye/scroll alone stopped being practical). Unlike
@@ -1051,7 +1045,10 @@ impl NoteEdit {
         match self {
             NoteEdit::None => 0,
             NoteEdit::Text => NOTE_CHAR_LIMIT,
-            NoteEdit::SlotName | NoteEdit::PrintName(_) | NoteEdit::CheatSearch => SLOT_NAME_LIMIT,
+            NoteEdit::SlotName
+            | NoteEdit::PrintName(_)
+            | NoteEdit::CheatSearch
+            | NoteEdit::CardRename => SLOT_NAME_LIMIT,
         }
     }
 
@@ -1062,6 +1059,7 @@ impl NoteEdit {
             NoteEdit::SlotName => "renomeando o print (clique fora cancela)",
             NoteEdit::PrintName(_) => "nome do print (opcional)",
             NoteEdit::CheatSearch => "buscar cheat (vazio mostra todos)",
+            NoteEdit::CardRename => "renomear memory card (clique fora cancela)",
         }
     }
 }
@@ -1093,6 +1091,11 @@ enum Modal {
     Cards,
     /// A mesma biblioteca, encaixando no slot 2 (os botões "MC slot 1/2").
     Cards2,
+    /// As ações sobre o card escolhido (usar/renomear/apagar) — o alvo e o
+    /// slot vivem em `card_action`.
+    CardsAction,
+    /// A confirmação do apagar (destrutivo — nunca apaga direto).
+    CardsConfirm,
     /// O seletor de discos de um jogo m3u (plano §6): troca o disco no
     /// drive com a sessão viva, estado serializado por baixo.
     Discos,
@@ -1389,6 +1392,24 @@ fn show_text_slot(cab: &mut Cabinet, notes_dir: &Path, title: &str, slot: u8, me
 /// Load the core + ROM and run until the player leaves, drawing into `cab` (the
 /// one persistent window). `plat` and `cab` both outlive the call so `xperience`
 /// can reuse them for the next screen.
+/// Guarda o quadro no buffer reutilizado do `last_frame` (565 converte
+/// para XRGB8888; 888 copia como veio).
+fn store_into(frame: &EmuFrame, buf: &mut Vec<u8>) {
+    buf.clear();
+    if frame.format == EmuFormat::Rgb565 {
+        buf.reserve(frame.width as usize * frame.height as usize * 4);
+        for chunk in frame.pixels.as_chunks::<2>().0 {
+            let v = u16::from_le_bytes([chunk[0], chunk[1]]);
+            let r = (((v >> 11) & 0x1f) * 255 / 31) as u8;
+            let g = (((v >> 5) & 0x3f) * 255 / 63) as u8;
+            let b = ((v & 0x1f) * 255 / 31) as u8;
+            buf.extend_from_slice(&[b, g, r, 255]);
+        }
+    } else {
+        buf.extend_from_slice(&frame.pixels);
+    }
+}
+
 pub fn run_game(
     plat: &mut Platform,
     cab: &mut Cabinet,
@@ -1398,11 +1419,12 @@ pub fn run_game(
     let runahead_cfg = spec.runahead.unwrap_or(cfg.runahead);
 
     // --- load + identify -------------------------------------------------
-    // A TV troca para AV 1 NO ATO da escolha: o carregar do core/disco
-    // (1-2s) acontece na tela escura da entrada — não sobre a estante
-    // congelada (era o "como se abrisse outra tela").
+    // IGUAL AO SNES: nada é apresentado aqui — a tela atual (a estante ou
+    // a tela inicial) fica CONGELADA durante o carregar do core/disco
+    // (1-2s). Trocar para estática no clique, e voltar a estante no meio
+    // da animação, era o que fazia a tela "piscar" / parecer uma nova
+    // tela por cima.
     cab.set_powered(false);
-    cab.present_static(OFF_STATIC_LEVEL);
     let mut core =
         Core::load(&spec.core).with_context(|| format!("loading core {}", spec.core.display()))?;
     log::info!("core: {} {}", core.system_name(), core.system_version());
@@ -1416,6 +1438,18 @@ pub fn run_game(
     // ignorada pelo core.
     core.set_variable("swanstation_GPU_Renderer", "Software");
     core.set_variable("swanstation_Renderer", "Software");
+    // O card do SLOT 2 não é exposto pelo protocolo (só o id 0 existe) —
+    // o core gerencia o segundo card num ARQUIVO próprio (plan revision:
+    // "ligando o card do slot 2 aos arquivos que o SwanStation lê").
+    core.set_variable("swanstation_MemoryCards_Card2Type", "Shared");
+    // A ponta de injeção: o card escolhido para o slot 2 é copiado para o
+    // arquivo do core ANTES do load (o core o carrega no boot do jogo).
+    if let Some(card2) = &spec.card2 {
+        let shared = std::path::Path::new(&spec.save_dir).join(MC2_SHARED_FILE);
+        if std::fs::copy(card2, &shared).is_ok() {
+            log::info!("card 2: {} no arquivo do core", card2.display());
+        }
+    }
 
     // Identidade do disco para o log — o serial lido de dentro do CHD
     // (a chave da estante; o core recebe o caminho, disco é need_fullpath).
@@ -1634,13 +1668,27 @@ pub fn run_game(
         .and_then(|d| d.first().cloned())
         .unwrap_or_else(|| spec.rom.clone());
     // Drive: tampa translúcida (OPEN abre/fecha sem desligar) e disco
-    // presente (removível só com a tampa aberta).
+    // presente (removível só com a tampa aberta). Boot pela BIOS: o drive
+    // começa VAZIO — o jogo entra pelo botão "Estante de games" do painel.
     let mut lid_open = false;
-    let mut disc_in = true;
+    let mut disc_in = !spec.bios;
     // "Disco arranhado": remover o disco com o console ligado simula erro
     // de leitura — a imagem rasga por ~2,8 s (overlay) e congela. Reset
     // boota a BIOS; inserir outro disco destrava.
     let mut disc_glitch: Option<Instant> = None;
+    // Os controles trocados de entrada (o clássico do Metal Gear: clicar na
+    // entrada do console passa o pad 1 para a porta 2). O ARRASTO: press
+    // numa entrada "pega" o controle, o movimento destaca o alvo e o soltar
+    // na outra entrada completa a troca.
+    let mut pads_swapped = false;
+    let mut pad_drag: Option<u8> = None;
+    let mut pad_hover: Option<u8> = None;
+    // O modo analógico de cada entrada (o LED vermelho do botão ANALOG):
+    // desligado zera os sticks daquela porta para o core.
+    let mut analog_on = [true, true];
+    // A vibração de cada entrada (o botão RUMBLE com o LED): ligada por
+    // padrão; o estado alimenta o LED e o roteamento do core.
+    let mut rumble_on = [true, true];
     // O disco deslizando para fora (remoção, `true`) ou de volta ao eixo
     // (inserção, `false`): (início, direção), animado no passe do jogo —
     // o drive desenhado segue `cartridge_motion`, não o estado lógico.
@@ -1655,6 +1703,7 @@ pub fn run_game(
         false,
         true,
         !spec.library.is_empty(),
+        spec.bios,
     );
     let decode_panel_art = |path: &Option<PathBuf>, kind: &str| {
         path.as_ref().and_then(|p| match decode_art(p, 640) {
@@ -1699,6 +1748,11 @@ pub fn run_game(
             .map(|(w, h, d)| (*w, *h, d.as_slice())),
         &panel_title,
         &commands,
+    );
+    // O nome dos cards encaixados vai impresso no adesivo das portas.
+    cab.set_card_labels(
+        crate::memcard::card_name(current_card.as_deref()).as_deref(),
+        crate::memcard::card_name(current_card2.as_deref()).as_deref(),
     );
     // Never inherited from whatever screen ran before (idle/shelf/settings
     // all turn it on) — see `Cabinet::show_close`'s own doc comment for why
@@ -1825,7 +1879,7 @@ pub fn run_game(
     // clicked to trigger it in the first place) and with no cartridge art to
     // animate.
     if spec.shot.is_none() && has_cartridge_art {
-        cartridge_insert_animation(plat, cab);
+        cartridge_insert_animation(cab);
     }
     if let Some(dir) = &spec.debug_cart_anim {
         std::fs::create_dir_all(dir).map_err(|e| anyhow!(e.to_string()))?;
@@ -1901,6 +1955,11 @@ pub fn run_game(
     // (see `NoteEdit`).
     let mut note_edit = NoteEdit::None;
     let mut note_draft = String::new();
+    // O card sob ação/renomeação (plano §3 + plan revision "crud para
+    // memory cards"): (caminho, port 0|1). `Modal::CardsAction`,
+    // `CardsConfirm` e `NoteEdit::CardRename` leem daqui.
+    let mut card_action: Option<(PathBuf, u8)> = None;
+    let mut card_rename: Option<(PathBuf, u8)> = None;
     // A save/load-state or print slot picker (plan revision) — see `Modal`.
     let mut modal = Modal::None;
     // Set the instant "Printscreen" is clicked; the frame that's live once
@@ -1911,7 +1970,7 @@ pub fn run_game(
     log::info!("running: rf ntsc + crt tube, run-ahead {runahead}");
     // O core mora na thread dele; a interface continua a 60 fps com o
     // último quadro enquanto o SwanStation bloqueia (boot, FMV).
-    let (core_tx, core_rx) = spawn_core_worker(
+    let (core_tx, core_rx, worker_handle) = spawn_core_worker(
         core,
         runahead as usize,
         ra_session.is_some(),
@@ -1920,48 +1979,21 @@ pub fn run_game(
     let mut in_flight = false;
     // Som do leitor de CD (plano revision: "na hesitação do core ou atraso
     // do quadro, inserir o som de leitura do cd"): a última vez que um
-    // quadro REAL chegou — `None` desde o ligar (o drive lê no boot).
+    // quadro REAL chegou — `None` desde o ligar (o drive lê no boot). E o
+    // plan revision "barulho do leitor tmb quando ocorre loading": loading
+    // com tela animada NÃO hesita (frames seguem chegando), mas o jogo roda
+    // LENTO enquanto o CD é lido em stream — quadros chegando com vão longo
+    // ligam o loop por uma janela curta (o fade do som cobre a emenda).
     let cd_loop: Option<&'static [i16]> = crate::sfx::cd_seek_loop();
     let mut last_frame_at: Option<Instant> = None;
-    /// Último quadro apresentável (já convertido para XRGB8888).
-    struct LastFrame {
-        w: u32,
-        h: u32,
-        rgba: Vec<u8>,
-        aspect: f32,
-    }
-    impl LastFrame {
-        fn fref(&self) -> FrameRef<'_> {
-            FrameRef {
-                width: self.w,
-                height: self.h,
-                pitch: self.w as usize * 4,
-                format: PlatFormat::Xrgb8888,
-                pixels: &self.rgba,
-            }
-        }
-        fn from_frame(frame: &EmuFrame) -> Self {
-            let mut rgba = Vec::with_capacity(frame.width as usize * frame.height as usize * 4);
-            if frame.format == EmuFormat::Rgb565 {
-                for chunk in frame.pixels.as_chunks::<2>().0 {
-                    let v = u16::from_le_bytes([chunk[0], chunk[1]]);
-                    let r = (((v >> 11) & 0x1f) * 255 / 31) as u8;
-                    let g = (((v >> 5) & 0x3f) * 255 / 63) as u8;
-                    let b = ((v & 0x1f) * 255 / 31) as u8;
-                    rgba.extend_from_slice(&[b, g, r, 255]);
-                }
-            } else {
-                rgba = frame.pixels.clone();
-            }
-            Self {
-                w: frame.width,
-                h: frame.height,
-                rgba,
-                aspect: 0.0,
-            }
-        }
-    }
-    let mut last_render: Option<(LastFrame, f32)> = None;
+    let mut last_aspect = 4.0_f32 / 3.0;
+    let mut drive_reading_until: Option<Instant> = None;
+    // O último quadro REAL (o core não é retido entre presents): buffer
+    // REUTILIZADO entre frames — sem alocação de 1,2 MB a 60 fps (era o
+    // `LastFrame::from_frame` inteiro por frame). XRGB8888 vem como o core
+    // entregou (upload direto, zero-conversão); RGB565 é convertido aqui.
+    let mut last_frame: Vec<u8> = Vec::new();
+    let mut last_frame_dims: Option<(u32, u32)> = None;
     // Drena o quadro em voo antes de uma operação de estado (reset, estado,
     // cheat, card, disco, desligar): o worker termina o quadro corrente.
     macro_rules! drain_core {
@@ -1975,9 +2007,9 @@ pub fn run_game(
                             audio.queue(&out.audio);
                         }
                         if let Some(frame) = &out.frame {
-                            let mut lf = LastFrame::from_frame(frame);
-                            lf.aspect = out.aspect;
-                            last_render = Some((lf, out.aspect));
+                            store_into(frame, &mut last_frame);
+                            last_frame_dims = Some((frame.width, frame.height));
+                            last_aspect = out.aspect;
                         }
                     }
                     Err(_) => {
@@ -1997,7 +2029,10 @@ pub fn run_game(
         if note_edit != NoteEdit::None {
             // Naming a fresh print (plan revision) renders in the modal, not
             // the notebook — everything else about polling/typing is shared.
-            let in_modal = matches!(note_edit, NoteEdit::PrintName(_) | NoteEdit::CheatSearch);
+            let in_modal = matches!(
+                note_edit,
+                NoteEdit::PrintName(_) | NoteEdit::CheatSearch | NoteEdit::CardRename
+            );
             let te = plat.poll_text_entry();
             if te.quit {
                 break 'run GameExit::Quit;
@@ -2031,6 +2066,9 @@ pub fn run_game(
             }
             let mut save = te.commit;
             let mut cancel = te.cancel;
+            // O rename devolve o jogador ao picker (a lista mostra o nome
+            // novo) — reaberto depois do fecho genérico do draft, adiante.
+            let mut card_reopen: Option<u8> = None;
             if let Some((x, y)) = te.click {
                 let (ox, oy) = cab.window_to_output(x, y);
                 let hit = if in_modal {
@@ -2093,6 +2131,40 @@ pub fn run_game(
                         }
                     }
                     NoteEdit::CheatSearch => cab.set_modal_search(note_draft.trim()),
+                    NoteEdit::CardRename => {
+                        if let Some((path, port)) = card_rename.take() {
+                            match crate::memcard::rename(&path, note_draft.trim()) {
+                                Ok(new_path) => {
+                                    log::info!("card renomeado -> {}", new_path.display());
+                                    // O card pode estar encaixado em
+                                    // QUALQUER slot (o picker onde o
+                                    // renomear foi acionado não importa):
+                                    // quem aponta para o caminho velho
+                                    // acompanha o novo — senão o slot fica
+                                    // com o nome/adereço desatualizado e a
+                                    // exclusividade nunca o enxerga.
+                                    if current_card.as_deref() == Some(path.as_path()) {
+                                        current_card = Some(new_path.clone());
+                                        sram_path = new_path.clone();
+                                    }
+                                    if current_card2.as_deref() == Some(path.as_path()) {
+                                        current_card2 = Some(new_path.clone());
+                                        sram2_path = new_path.clone();
+                                    }
+                                    cab.set_card_labels(
+                                        crate::memcard::card_name(current_card.as_deref())
+                                            .as_deref(),
+                                        crate::memcard::card_name(current_card2.as_deref())
+                                            .as_deref(),
+                                    );
+                                }
+                                Err(e) => {
+                                    log::warn!("renomeando {}: {e}", path.display())
+                                }
+                            }
+                            card_reopen = Some(port);
+                        }
+                    }
                     _ => {}
                 }
             }
@@ -2116,9 +2188,37 @@ pub fn run_game(
                 note_edit = NoteEdit::None;
                 note_draft.clear();
                 plat.stop_text_input(cab);
+                if let Some(port) = card_reopen.take() {
+                    // De volta ao picker: a lista mostra o nome novo.
+                    let (rows, _) = card_rows_with_icons(
+                        &crate::dirs::memcards_dir(),
+                        current_card.as_deref(),
+                        current_card2.as_deref(),
+                    );
+                    modal = if port == 1 {
+                        Modal::Cards2
+                    } else {
+                        Modal::Cards
+                    };
+                    cab.set_modal_with_icons(
+                        if port == 1 {
+                            "Memory Cards - slot 2"
+                        } else {
+                            "Memory Cards - slot 1"
+                        },
+                        &rows,
+                    );
+                }
             }
             if in_modal {
-                cab.present_modal();
+                let backdrop = if powered && last_frame_at.is_some() {
+                    ModalBackdrop::Frame {
+                        aspect_ratio: last_aspect,
+                    }
+                } else {
+                    ModalBackdrop::Static(OFF_STATIC_LEVEL)
+                };
+                cab.present_modal(backdrop);
             } else {
                 cab.present_pause();
             }
@@ -2135,6 +2235,37 @@ pub fn run_game(
             .poll(&mut input, &cfg.keymap)
             .into_iter()
             .filter_map(|ev| match ev {
+                UiEvent::MouseUp(x, y) => {
+                    // Solta o controle arrastado: sobre a OUTRA entrada
+                    // completa a troca; fora dela, cancela.
+                    if let Some(from) = pad_drag.take() {
+                        let (ox, oy) = cab.window_to_output(x, y);
+                        if let Some(to) = cab.hit_pad_port(ox, oy) {
+                            if to != from {
+                                pads_swapped = !pads_swapped;
+                                cab.push_osd(
+                                    &[if pads_swapped {
+                                        "CONTROLE NA ENTRADA 2"
+                                    } else {
+                                        "CONTROLE NA ENTRADA 1"
+                                    }],
+                                    None,
+                                    Duration::from_secs(2),
+                                );
+                            }
+                        }
+                    }
+                    pad_hover = None;
+                    None
+                }
+                UiEvent::MouseMove(x, y) => {
+                    // Enquanto arrasta, a entrada sob o cursor ganha destaque.
+                    if pad_drag.is_some() {
+                        let (ox, oy) = cab.window_to_output(x, y);
+                        pad_hover = cab.hit_pad_port(ox, oy);
+                    }
+                    None
+                }
                 UiEvent::Click(x, y) => {
                     let (ox, oy) = cab.window_to_output(x, y);
                     // The titlebar pair is drawn on every screen now —
@@ -2193,6 +2324,12 @@ pub fn run_game(
                             PanelButton::DiscInserter => Some(UiEvent::InsertDisc),
                             PanelButton::Cards1 => Some(UiEvent::OpenCards),
                             PanelButton::Cards2 => Some(UiEvent::OpenCards2),
+                            PanelButton::PadPort1 => Some(UiEvent::PadGrab(0)),
+                            PanelButton::PadPort2 => Some(UiEvent::PadGrab(1)),
+                            PanelButton::Analog1 => Some(UiEvent::AnalogToggle(0)),
+                            PanelButton::Analog2 => Some(UiEvent::AnalogToggle(1)),
+                            PanelButton::Rumble1 => Some(UiEvent::RumbleToggle(0)),
+                            PanelButton::Rumble2 => Some(UiEvent::RumbleToggle(1)),
                             PanelButton::Discos => Some(UiEvent::OpenDiscos),
                             // The shelf's own list button is shelf-side.
                             PanelButton::ShelfAchievements => None,
@@ -2249,13 +2386,53 @@ pub fn run_game(
                     } else {
                         tone_click(plat, 180.0);
                     }
+                    // Como o console original: abrir a tampa PARA o leitor
+                    // (o jogo vê a bandeja abrir e para de ler; o disco para
+                    // de girar); fechar faz o disco girar de volta e o jogo
+                    // tenta recuperar o que estava lendo.
+                    if disc_in {
+                        drain_core!();
+                        let _ = core_tx.send(CoreCmd::TrayEject { ejected: lid_open });
+                    }
                     cab.set_drive(lid_open, disc_in);
                     cab.push_osd(
                         &[if lid_open {
-                            "TAMPA ABERTA"
+                            "TAMPA ABERTA — LEITOR PARADO"
                         } else {
-                            "TAMPA FECHADA"
+                            "TAMPA FECHADA — LENDO"
                         }],
+                        None,
+                        Duration::from_secs(2),
+                    );
+                }
+                UiEvent::RumbleToggle(port) => {
+                    // O botão RUMBLE da entrada: alterna a vibração daquele
+                    // controle (o LED vermelho ao lado da copy reflete).
+                    rumble_on[port as usize] = !rumble_on[port as usize];
+                    let on = rumble_on[port as usize];
+                    cab.set_rumble_leds(rumble_on[0], rumble_on[1]);
+                    cab.push_osd(
+                        &[&format!(
+                            "CONTROLE {} VIBRAÇÃO {}",
+                            port + 1,
+                            if on { "LIGADA" } else { "DESLIGADA" }
+                        )],
+                        None,
+                        Duration::from_secs(2),
+                    );
+                }
+                UiEvent::AnalogToggle(port) => {
+                    // O botão ANALOG do controle original: alterna o modo
+                    // analógico da entrada (o LED vermelho acende/apaga).
+                    analog_on[port as usize] = !analog_on[port as usize];
+                    let on = analog_on[port as usize];
+                    cab.set_analog_leds(analog_on[0], analog_on[1]);
+                    cab.push_osd(
+                        &[&format!(
+                            "CONTROLE {} ANALOG {}",
+                            port + 1,
+                            if on { "LIGADO" } else { "DESLIGADO" }
+                        )],
                         None,
                         Duration::from_secs(2),
                     );
@@ -2266,7 +2443,8 @@ pub fn run_game(
                     } else if disc_in {
                         disc_in = false;
                         cab.set_drive(lid_open, disc_in);
-                        eject_clunk(plat);
+                        // Silencioso (plan revision: "remover som ao encaixar
+                        // e remover o disco") — o deslize visual carrega.
                         // O disco desliza para fora enquanto o jogo segue —
                         // sem isto o desenho fica sentado no drive (o visual
                         // é o `cartridge_motion`, não o estado lógico).
@@ -2281,9 +2459,11 @@ pub fn run_game(
                     }
                 }
                 UiEvent::InsertDisc => {
-                    if !lid_open {
+                    // BIOS: a estante abre direto — o console está parado no
+                    // menu com o drive vazio, sem o ritual da tampa.
+                    if !spec.bios && !lid_open {
                         cab.push_osd(&["ABRA A TAMPA (OPEN)"], None, Duration::from_secs(2));
-                    } else if disc_in {
+                    } else if !spec.bios && disc_in {
                         cab.push_osd(&["REMOVA O DISCO ATUAL"], None, Duration::from_secs(2));
                     } else if spec.library.is_empty() {
                         cab.push_osd(&["NENHUM JOGO NA ESTANTE"], None, Duration::from_secs(2));
@@ -2337,17 +2517,23 @@ pub fn run_game(
                         cab.set_powered(true);
                         if !in_flight {
                             let mut snap = PadSnapshot::default();
-                            for port in 0..MAX_PORTS {
+                            for (port, analog_enabled) in
+                                analog_on.iter().enumerate().take(MAX_PORTS)
+                            {
                                 for (rb, pb) in PAD {
                                     snap.buttons.push((port, rb, input.held(port, pb)));
                                 }
-                                snap.analog.push((
-                                    port,
-                                    input.analog(port, 0).0,
-                                    input.analog(port, 0).1,
-                                    input.analog(port, 1).0,
-                                    input.analog(port, 1).1,
-                                ));
+                                if *analog_enabled {
+                                    snap.analog.push((
+                                        port,
+                                        input.analog(port, 0).0,
+                                        input.analog(port, 0).1,
+                                        input.analog(port, 1).0,
+                                        input.analog(port, 1).1,
+                                    ));
+                                } else {
+                                    snap.analog.push((port, 0, 0, 0, 0));
+                                }
                             }
                             let _ = core_tx.send(CoreCmd::Run { input: snap });
                             in_flight = true;
@@ -2367,13 +2553,19 @@ pub fn run_game(
                 }
                 UiEvent::Eject => {
                     if powered {
-                        // OPEN com o console ligado: só a tampa (a troca de
-                        // disco é fria; o estado segue no core).
+                        // OPEN/CLOSE com o console ligado: só a tampa — mas
+                        // como no console real, abrir PARA o leitor (o jogo
+                        // vê a bandeja abrir) e fechar faz o disco voltar a
+                        // girar e o jogo tentar recuperar.
                         lid_open = !lid_open;
                         if lid_open {
                             eject_clunk(plat);
                         } else {
                             tone_click(plat, 180.0);
+                        }
+                        if disc_in {
+                            drain_core!();
+                            let _ = core_tx.send(CoreCmd::TrayEject { ejected: lid_open });
                         }
                         cab.set_drive(lid_open, disc_in);
                     } else {
@@ -2381,7 +2573,7 @@ pub fn run_game(
                             ra.save_progress();
                         }
                         if has_cartridge_art {
-                            cartridge_eject_animation(plat, cab);
+                            cartridge_eject_animation(cab);
                         }
                         break 'run GameExit::Ejected { static_level };
                     }
@@ -2572,34 +2764,26 @@ pub fn run_game(
                     cab.set_modal_searchable(true);
                 }
                 UiEvent::OpenCards => {
-                    if powered {
-                        // A trava física do slot (plano §3): o gesto
-                        // resiste, o OSD explica — igual ao ejetar ligado.
-                        cab.push_osd(
-                            &["CARD NO SLOT", "desligue o console para trocar"],
-                            None,
-                            Duration::from_secs(4),
-                        );
-                    } else {
-                        let (rows, _) =
-                            card_library(&crate::dirs::memcards_dir(), current_card.as_deref());
-                        modal = Modal::Cards;
-                        cab.set_modal("Memory Cards", &rows);
-                    }
+                    // Troca quente (plan revision): funciona ligado — o SRAM
+                    // do card atual é descarregado no arquivo dele antes do
+                    // WriteMem do novo (o físico: puxa um card, encaixa
+                    // outro; o jogo lê o que está no slot quando salva).
+                    let (rows, _) = card_rows_with_icons(
+                        &crate::dirs::memcards_dir(),
+                        current_card.as_deref(),
+                        current_card2.as_deref(),
+                    );
+                    modal = Modal::Cards;
+                    cab.set_modal_with_icons("Memory Cards - slot 1", &rows);
                 }
                 UiEvent::OpenCards2 => {
-                    if powered {
-                        cab.push_osd(
-                            &["CARD NO SLOT", "desligue o console para trocar"],
-                            None,
-                            Duration::from_secs(4),
-                        );
-                    } else {
-                        let (rows, _) =
-                            card_library(&crate::dirs::memcards_dir(), current_card2.as_deref());
-                        modal = Modal::Cards2;
-                        cab.set_modal("Memory Cards — slot 2", &rows);
-                    }
+                    let (rows, _) = card_rows_with_icons(
+                        &crate::dirs::memcards_dir(),
+                        current_card.as_deref(),
+                        current_card2.as_deref(),
+                    );
+                    modal = Modal::Cards2;
+                    cab.set_modal_with_icons("Memory Cards - slot 2", &rows);
                 }
                 UiEvent::OpenDiscos => {
                     let Some(list) = &discs else {
@@ -2749,70 +2933,258 @@ pub fn run_game(
                             );
                         }
                     }
-                    Modal::Cards => {
+                    Modal::Cards | Modal::Cards2 => {
+                        let port = if modal == Modal::Cards2 { 1 } else { 0 };
+                        let dir = crate::dirs::memcards_dir();
+                        let (_, cards) = card_rows_with_icons(&dir, None, None);
+                        if i == 0 {
+                            // CRUD — criar: um card formatado em branco nasce
+                            // na biblioteca; encaixar é escolher ele depois.
+                            match crate::memcard::create_blank(&dir) {
+                                Ok(path) => {
+                                    log::info!("card {}: criado", path.display());
+                                    cab.push_osd(&["CARD CRIADO"], None, Duration::from_secs(2));
+                                }
+                                Err(e) => log::warn!("card novo: {e}"),
+                            }
+                            let (rows, _) = card_rows_with_icons(
+                                &dir,
+                                current_card.as_deref(),
+                                current_card2.as_deref(),
+                            );
+                            cab.set_modal_with_icons(
+                                if port == 1 {
+                                    "Memory Cards - slot 2"
+                                } else {
+                                    "Memory Cards - slot 1"
+                                },
+                                &rows,
+                            );
+                            // Fica no picker — o card novo aparece na lista.
+                            continue;
+                        }
+                        let Some(path) = cards.get(i as usize - 1) else {
+                            continue;
+                        };
+                        // Segundo passo: as ações sobre o card, com a lista
+                        // dos saves (título, produto, ícone) no alto.
+                        card_action = Some((path.clone(), port));
+                        let name = crate::memcard::card_name(Some(path.as_path()))
+                            .unwrap_or_default();
+                        let info = crate::memcard::inspect(path);
+                        let used = info.as_ref().map(|c| c.used).unwrap_or(0);
+                        let mut rows: Vec<CardModalRow> = info
+                            .map(|c| {
+                                c.saves
+                                    .iter()
+                                    .map(|s| {
+                                        (
+                                            if s.title.is_empty() {
+                                                s.product.clone()
+                                            } else {
+                                                format!("{} — {}", s.title, s.product)
+                                            },
+                                            false,
+                                            s.icon.clone().map(|d| (16u32, 16u32, d)),
+                                        )
+                                    })
+                                    .collect()
+                            })
+                            .unwrap_or_default();
+                        rows.push(("Usar neste slot".to_string(), true, None));
+                        rows.push(("Renomear".to_string(), true, None));
+                        rows.push(("Apagar".to_string(), true, None));
+                        modal = Modal::CardsAction;
+                        cab.set_modal_with_icons(
+                            &format!("{name} - {used}/15 blocos"),
+                            &rows,
+                        );
+                    }
+                    Modal::CardsAction => {
                         modal = Modal::None;
                         cab.clear_modal();
-                        let dir = crate::dirs::memcards_dir();
-                        let (_, cards) = card_library(&dir, current_card.as_deref());
-                        if i == 0 {
-                            // "Criar cartão novo": nasce com o conteúdo atual
-                            // do slot (ou formatado pelo core) e já encaixa.
-                            let name = next_card_name(&dir);
-                            let path = dir.join(format!("{name}.mcr"));
-                            drain_core!();
-                            let (sc_tx, sc_rx) = std::sync::mpsc::channel();
-                            let _ = core_tx.send(CoreCmd::Sram { tx: sc_tx });
-                            if let Some(bytes) = sc_rx.recv().ok().flatten() {
-                                let _ = fs::create_dir_all(&dir);
-                                match fs::write(&path, &bytes) {
-                                    Ok(_) => log::info!(
-                                        "card 1: {} criado e encaixado ({} bytes)",
-                                        path.display(),
-                                        bytes.len()
-                                    ),
-                                    Err(e) => log::warn!("card 1: criando {}: {e}", path.display()),
+                        let Some((path, port)) = card_action.take() else {
+                            continue;
+                        };
+                        let n_saves = crate::memcard::inspect(&path)
+                            .map(|c| c.saves.len())
+                            .unwrap_or(0);
+                        let n_saves = n_saves as u16;
+                        let name = crate::memcard::card_name(Some(path.as_path()))
+                            .unwrap_or_default();
+                        let seated = if port == 1 {
+                            current_card2.as_deref() == Some(path.as_path())
+                        } else {
+                            current_card.as_deref() == Some(path.as_path())
+                        };
+                        if i < n_saves {
+                            // Linha informativa (um save do card) — clicar não
+                            // faz nada; as ações ficam logo abaixo.
+                            card_action = Some((path, port));
+                            continue;
+                        }
+                        match i - n_saves {
+                            // Usar: encaixa no slot e imprime o nome no
+                            // adesivo da porta. Na troca quente (ligado), o
+                            // SRAM do card que sai é descarregado no arquivo
+                            // dele ANTES do WriteMem do novo — o físico:
+                            // puxa um card (que guarda o que tem) e encaixa
+                            // o outro.
+                            0 => {
+                                // Troca quente: descarrega a SRAM dos DOIS
+                                // slots antes de mexer (o card que sai de
+                                // cada posição guarda o que tem — flush é
+                                // only-if-changed, então é de graça).
+                                if powered {
+                                    drain_core!();
+                                    let (f1_tx, f1_rx) = std::sync::mpsc::channel();
+                                    let _ = core_tx.send(CoreCmd::Sram { tx: f1_tx });
+                                    flush_sram(
+                                        &sram_path,
+                                        &mut last_sram,
+                                        f1_rx.recv().ok().flatten(),
+                                    );
+                                    let (f2_tx, f2_rx) = std::sync::mpsc::channel();
+                                    let _ = core_tx.send(CoreCmd::SramAt {
+                                        id: MEMORY_SAVE_RAM + 1,
+                                        tx: f2_tx,
+                                    });
+                                    flush_sram(
+                                        &sram2_path,
+                                        &mut last_sram2,
+                                        f2_rx.recv().ok().flatten(),
+                                    );
                                 }
+                                // Um card, um slot (o alvo é o PICKER que
+                                // abriu: port 0 -> slot 1, port 1 -> slot 2).
+                                // Se o card estava no OUTRO slot, sai de lá —
+                                // o core recebe uma SRAM zerada naquela porta
+                                // (o jogo vê um card em branco se salvar).
+                                if port == 1 {
+                                    if current_card.as_deref() == Some(path.as_path()) {
+                                        let _ = core_tx.send(CoreCmd::WriteMem {
+                                            id: MEMORY_SAVE_RAM,
+                                            bytes: vec![0; crate::memcard::CARD_SIZE],
+                                        });
+                                        current_card = None;
+                                        sram_path = PathBuf::new();
+                                    }
+                                    // SLOT 2 = ARQUIVO do core (o protocolo
+                                    // só expõe o card 1): copia o card
+                                    // escolhido para o arquivo que o core
+                                    // carrega/gerencia. Vale a partir do
+                                    // próximo boot do jogo.
+                                    let shared = std::path::Path::new(&spec.save_dir)
+                                        .join(MC2_SHARED_FILE);
+                                    match std::fs::copy(&path, &shared) {
+                                        Ok(_) => {
+                                            sram2_path = shared;
+                                            current_card2 = Some(path.clone());
+                                        }
+                                        Err(e) => {
+                                            log::warn!("card 2: copiando: {e}")
+                                        }
+                                    }
+                                } else {
+                                    if current_card2.as_deref() == Some(path.as_path()) {
+                                        let _ = core_tx.send(CoreCmd::WriteMem {
+                                            id: MEMORY_SAVE_RAM + 1,
+                                            bytes: vec![0; crate::memcard::CARD_SIZE],
+                                        });
+                                        current_card2 = None;
+                                        sram2_path = PathBuf::new();
+                                    }
+                                    seat_card(
+                                        &core_tx,
+                                        &mut sram_path,
+                                        &mut current_card,
+                                        0,
+                                        path.clone(),
+                                    );
+                                }
+                                cab.set_card_labels(
+                                    crate::memcard::card_name(current_card.as_deref())
+                                        .as_deref(),
+                                    crate::memcard::card_name(current_card2.as_deref())
+                                        .as_deref(),
+                                );
+                                cab.push_osd(
+                                    &[&format!("CARD: {name}")],
+                                    None,
+                                    Duration::from_secs(2),
+                                );
                             }
-                            seat_card(&core_tx, &mut sram_path, &mut current_card, 0, path);
-                        } else if let Some(path) = cards.get(i as usize - 1) {
-                            seat_card(&core_tx, &mut sram_path, &mut current_card, 0, path.clone());
+                            1 => {
+                                // Renomear: o draft vive DENTRO de um modal —
+                                // e o braço de ações acabou de fechar o dele
+                                // (clear_modal no topo): reabre um hospedeiro
+                                // antes, ou o draft não aparece e a TV fica
+                                // escura (o bug do "apagou a tela toda").
+                                card_rename = Some((path, port));
+                                note_edit = NoteEdit::CardRename;
+                                note_draft = name;
+                                let _ = seated;
+                                cab.set_modal("Memory Cards", &[]);
+                                cab.set_modal_draft(
+                                    Some(&note_draft),
+                                    note_edit.limit(),
+                                    note_edit.heading(),
+                                );
+                                plat.start_text_input(cab);
+                                continue;
+                            }
+                            2 => {
+                                // Apagar: confirmado em dois passos — e o
+                                // card encaixado em QUALQUER slot não apaga
+                                // (é o save vivo de um dos slots).
+                                if seated
+                                    || current_card.as_deref() == Some(path.as_path())
+                                    || current_card2.as_deref() == Some(path.as_path())
+                                {
+                                    cab.push_osd(
+                                        &["CARD EM USO", "encaixe outro card antes de apagar"],
+                                        None,
+                                        Duration::from_secs(3),
+                                    );
+                                    card_action = Some((path, port));
+                                    continue;
+                                }
+                                // O braço de confirmar precisa do alvo: o
+                                // take() do topo já consumiu — devolve.
+                                card_action = Some((path, port));
+                                modal = Modal::CardsConfirm;
+                                cab.set_modal(
+                                    &format!("Apagar \"{name}\"?"),
+                                    &[
+                                        ("Sim, apagar para sempre".to_string(), true),
+                                        ("Cancelar".to_string(), true),
+                                    ],
+                                );
+                                continue;
+                            }
+                            _ => continue,
                         }
                     }
-                    Modal::Cards2 => {
+                    Modal::CardsConfirm => {
                         modal = Modal::None;
                         cab.clear_modal();
-                        let dir = crate::dirs::memcards_dir();
-                        let (_, cards) = card_library(&dir, current_card2.as_deref());
+                        let Some((path, port)) = card_action.take() else {
+                            continue;
+                        };
                         if i == 0 {
-                            let name = next_card_name(&dir);
-                            let path = dir.join(format!("{name}.mcr"));
-                            drain_core!();
-                            let (sc_tx, sc_rx) = std::sync::mpsc::channel();
-                            let _ = core_tx.send(CoreCmd::SramAt {
-                                id: MEMORY_SAVE_RAM + 1,
-                                tx: sc_tx,
-                            });
-                            if let Some(bytes) = sc_rx.recv().ok().flatten() {
-                                let _ = fs::create_dir_all(&dir);
-                                match fs::write(&path, &bytes) {
-                                    Ok(_) => log::info!(
-                                        "card 2: {} criado e encaixado ({} bytes)",
-                                        path.display(),
-                                        bytes.len()
-                                    ),
-                                    Err(e) => log::warn!("card 2: criando {}: {e}", path.display()),
+                            match crate::memcard::delete(&path) {
+                                Ok(()) => {
+                                    log::info!("card {}: apagado", path.display());
+                                    cab.push_osd(
+                                        &["CARD APAGADO"],
+                                        None,
+                                        Duration::from_secs(2),
+                                    );
                                 }
+                                Err(e) => log::warn!("card {}: apagando: {e}", path.display()),
                             }
-                            seat_card(&core_tx, &mut sram2_path, &mut current_card2, 1, path);
-                        } else if let Some(path) = cards.get(i as usize - 1) {
-                            seat_card(
-                                &core_tx,
-                                &mut sram2_path,
-                                &mut current_card2,
-                                1,
-                                path.clone(),
-                            );
                         }
+                        let _ = port;
                     }
                     Modal::Inserir => {
                         modal = Modal::None;
@@ -2842,7 +3214,8 @@ pub fn run_game(
                             current_disc = path.clone();
                             cab.set_drive(lid_open, disc_in);
                             disc_motion = Some((Instant::now(), false));
-                            tone_click(plat, 180.0); // o clique do assento
+                            // Silencioso (plan revision: "remover som ao
+                            // encaixar e remover o disco").
                             cab.push_osd(&["DISCO INSERIDO"], None, Duration::from_secs(2));
                         } else {
                             cab.push_osd(&["FALHA AO INSERIR"], None, Duration::from_secs(2));
@@ -2923,7 +3296,22 @@ pub fn run_game(
                 | UiEvent::TextNext
                 | UiEvent::TextPinToggle
                 | UiEvent::TextDelete
-                | UiEvent::Click(..) => {}
+                | UiEvent::Click(..)
+                // O arrasto do controle: o GRAB abre o drag e o MouseUp/
+                // MouseMove são resolvidos no filtro lá em cima — nenhum
+                // precisa de tratamento aqui.
+                | UiEvent::MouseUp(..)
+                | UiEvent::MouseMove(..) => {}
+                UiEvent::PadGrab(port) => {
+                    // O drag começa: o controle "sai" da entrada e segue o
+                    // mouse até ser solto na outra.
+                    pad_drag = Some(port);
+                    cab.push_osd(
+                        &["ARRASTE O CONTROLE PARA A OUTRA ENTRADA"],
+                        None,
+                        Duration::from_secs(3),
+                    );
+                }
             }
         }
         // The command legend only changes when a "(feito!)" flash starts or
@@ -2942,14 +3330,33 @@ pub fn run_game(
                 lid_open,
                 disc_in,
                 !spec.library.is_empty(),
+                spec.bios,
             ));
             prev_sig = Some(sig);
         }
         cab.set_reset_pressed(reset_pressed(&flash));
+        cab.set_rumble_leds(rumble_on[0], rumble_on[1]);
+        // A entrada 2 só tem controle com a opção LIGADA na configuração E
+        // um segundo gamepad conectado (padrão: um controle só).
+        let second = cfg.pad2 && plat.gamepad_count() >= 2;
+        cab.set_pad_entries(
+            pads_swapped,
+            second,
+            if pad_drag.is_some() { pad_hover } else { None },
+        );
 
         if !powered {
             cab.set_session_time(live_session_time(powered_elapsed, powered_since));
-            cab.present_static(OFF_STATIC_LEVEL);
+            // O picker de memory cards (e a fila de ações/confirmação) vive
+            // no console DESLIGADO — a trava física — então o modal tem de
+            // ser apresentado NESTE ramo: sem isto ele era criado e nunca
+            // aparecia (e os cliques nele não roteavam — o modal_buttons
+            // só se atualiza no present).
+            if modal != Modal::None {
+                cab.present_modal(ModalBackdrop::Static(OFF_STATIC_LEVEL));
+            } else {
+                cab.present_static(OFF_STATIC_LEVEL);
+            }
             pace_frame(&mut next, frame_time);
             continue;
         }
@@ -2990,7 +3397,14 @@ pub fn run_game(
 
                     // RA evaluation contra a RAM do quadro real (cópia que o
                     // worker fez antes do run-ahead).
-                    if let (true, Some(ra), Some(ram)) = (powered, &mut ra_session, &out.ram) {
+                    if let (true, Some(ra), Some((ptr, len))) = (powered, &mut ra_session, &out.ram)
+                    {
+                        // SAFETY: o worker está bloqueado no recv — o Run
+                        // seguinte só é enviado depois deste bloco — então a
+                        // RAM do core não é mutada nem realocada durante a
+                        // leitura; o ponteiro é válido enquanto o jogo
+                        // carregado vive (re-consultado a cada Run).
+                        let ram = unsafe { std::slice::from_raw_parts(*ptr as *const u8, *len) };
                         let unlocks = ra.tick(ram);
                         for unlock in unlocks {
                             log::info!(
@@ -3034,6 +3448,11 @@ pub fn run_game(
                     }
 
                     if let Some(frame) = &out.frame {
+                        // Quadro chegando LENTO (vão > ~70 ms = menos de ~14
+                        // fps): o jogo está preso no CD — leitor lendo.
+                        if last_frame_at.is_some_and(|t| t.elapsed() > Duration::from_millis(70)) {
+                            drive_reading_until = Some(Instant::now() + Duration::from_millis(150));
+                        }
                         last_frame_at = Some(Instant::now());
                         // O clique do "Printscreen" que estava pendente segura
                         // ESTE quadro (o primeiro depois do clique) e abre a
@@ -3057,12 +3476,34 @@ pub fn run_game(
                             );
                             last_dims = Some(dims);
                         }
-                        let mut lf = LastFrame::from_frame(frame);
-                        lf.aspect = out.aspect;
-                        let fref = lf.fref();
+                        // XRGB8888: o FrameRef EMPRESTA os pixels do core
+                        // (zero-cópia); RGB565: converte no buffer. Em ambos
+                        // o buffer fica guardado para o "reapresenta".
+                        let fref: FrameRef = if frame.format == EmuFormat::Xrgb8888 {
+                            // Zero-cópia: o FrameRef EMPRESTA os pixels do
+                            // core diretamente.
+                            FrameRef {
+                                width: frame.width,
+                                height: frame.height,
+                                pitch: frame.width as usize * 4,
+                                format: PlatFormat::Xrgb8888,
+                                pixels: &frame.pixels,
+                            }
+                        } else {
+                            store_into(frame, &mut last_frame);
+                            FrameRef {
+                                width: frame.width,
+                                height: frame.height,
+                                pitch: frame.width as usize * 4,
+                                format: PlatFormat::Xrgb8888,
+                                pixels: &last_frame,
+                            }
+                        };
                         cab.set_session_time(live_session_time(powered_elapsed, powered_since));
-                        cab.present_frame(&fref, lf.aspect);
-                        last_render = Some((lf, out.aspect));
+                        cab.present_frame(&fref, out.aspect);
+                        store_into(frame, &mut last_frame);
+                        last_frame_dims = Some((frame.width, frame.height));
+                        last_aspect = out.aspect;
 
                         if let Some(slot) = note_request.take() {
                             match save_note_image(&spec.notes_dir, &title, slot, frame) {
@@ -3086,8 +3527,15 @@ pub fn run_game(
                         // capturamos no primeiro Some depois do alvo).
                         if frames >= spec.shot.as_ref().map_or(u32::MAX, |(_, at)| *at) {
                             if let Some((path, _)) = &spec.shot {
-                                if let Some((lf, _)) = &last_render {
-                                    cab.capture_bmp(&lf.fref(), lf.aspect, path)
+                                if let Some((w, h)) = last_frame_dims {
+                                    let fref = FrameRef {
+                                        width: w,
+                                        height: h,
+                                        pitch: w as usize * 4,
+                                        format: PlatFormat::Xrgb8888,
+                                        pixels: &last_frame,
+                                    };
+                                    cab.capture_bmp(&fref, last_aspect, path)
                                         .map_err(|e| anyhow!(e.to_string()))?;
                                     log::info!("wrote {} after {} frames", path.display(), frames);
                                 }
@@ -3122,17 +3570,31 @@ pub fn run_game(
             // pacing, sem desperdiçar uma iteração por frame.
             if !in_flight {
                 let mut snap = PadSnapshot::default();
-                for port in 0..MAX_PORTS {
+                for (port, analog_enabled) in analog_on.iter().enumerate().take(MAX_PORTS) {
+                    // O clássico da troca de entrada: com os controles
+                    // "trocados" no painel, o port lê o gamepad da outra
+                    // entrada (pad 1 joga como 2 — Psycho Mantis aprova).
+                    let src = if pads_swapped {
+                        MAX_PORTS - 1 - port
+                    } else {
+                        port
+                    };
                     for (rb, pb) in PAD {
-                        snap.buttons.push((port, rb, input.held(port, pb)));
+                        snap.buttons.push((port, rb, input.held(src, pb)));
                     }
-                    snap.analog.push((
-                        port,
-                        input.analog(port, 0).0,
-                        input.analog(port, 0).1,
-                        input.analog(port, 1).0,
-                        input.analog(port, 1).1,
-                    ));
+                    // O botão ANALOG da entrada: desligado, os sticks ficam
+                    // mudos (o controle vira digital, igual ao original).
+                    if *analog_enabled {
+                        snap.analog.push((
+                            port,
+                            input.analog(src, 0).0,
+                            input.analog(src, 0).1,
+                            input.analog(src, 1).0,
+                            input.analog(src, 1).1,
+                        ));
+                    } else {
+                        snap.analog.push((port, 0, 0, 0, 0));
+                    }
                 }
                 let _ = core_tx.send(CoreCmd::Run { input: snap });
                 in_flight = true;
@@ -3153,9 +3615,16 @@ pub fn run_game(
             }
             // Sem quadro novo (worker ocupado no boot/FMV), reapresenta o
             // último: o gabinete segue vivo e o disco continua girando.
-            if let Some((lf, aspect)) = &last_render {
+            if let Some((w, h)) = last_frame_dims {
+                let fref = FrameRef {
+                    width: w,
+                    height: h,
+                    pitch: w as usize * 4,
+                    format: PlatFormat::Xrgb8888,
+                    pixels: &last_frame,
+                };
                 cab.set_session_time(live_session_time(powered_elapsed, powered_since));
-                cab.present_frame(&lf.fref(), *aspect);
+                cab.present_frame(&fref, last_aspect);
             }
             // O rasgo do "disco arranhado" durante a janela de erro.
             if let Some(t0) = disc_glitch {
@@ -3166,10 +3635,14 @@ pub fn run_game(
                 }
             }
             // O drive "lê" quando o core hesita: mais de 250 ms desde o
-            // último quadro real (ou desde o ligar — o boot lê o disco).
+            // último quadro real (ou desde o ligar — o boot lê o disco) —
+            // ou quando os quadros chegam lento (loading com tela viva:
+            // o jogo corre devagar lendo o CD em stream). Com a tampa
+            // aberta o leitor está PARADO — nada de som de leitura.
             if let Some(loop_samples) = cd_loop {
-                let hesitating =
-                    last_frame_at.is_none_or(|t| t.elapsed() > Duration::from_millis(250));
+                let hesitating = !lid_open
+                    && (last_frame_at.is_none_or(|t| t.elapsed() > Duration::from_millis(250))
+                        || drive_reading_until.is_some_and(|t| Instant::now() < t));
                 cab.tick_cd_noise(hesitating, loop_samples, crate::sfx::RATE);
             }
         } else if paused {
@@ -3180,8 +3653,11 @@ pub fn run_game(
             }
         } else {
             // A save/load-state or print slot picker is open (plan
-            // revision): the modal, frozen same as the book is.
-            cab.present_modal();
+            // revision): the modal, frozen same as the book is — composto
+            // sobre o ÚLTIMO quadro do jogo, dentro da TV.
+            cab.present_modal(ModalBackdrop::Frame {
+                aspect_ratio: last_aspect,
+            });
         }
 
         pace_frame(&mut next, frame_time);
@@ -3192,16 +3668,22 @@ pub fn run_game(
     let (f_tx, f_rx) = std::sync::mpsc::channel();
     let _ = core_tx.send(CoreCmd::Sram { tx: f_tx });
     flush_sram(&sram_path, &mut last_sram, f_rx.recv().ok().flatten());
+    // O core desliga AGORA: ao cair, ele escreve os cards nos arquivos
+    // (o card 2 mora no ARQUIVO dele). A sincronia do card 2 com a
+    // biblioteca espera essa escrita terminar.
+    drop(core_tx);
+    let _ = worker_handle.join();
     if current_card2.is_some() {
-        let (f2_tx, f2_rx) = std::sync::mpsc::channel();
-        let _ = core_tx.send(CoreCmd::SramAt {
-            id: MEMORY_SAVE_RAM + 1,
-            tx: f2_tx,
-        });
-        flush_sram(&sram2_path, &mut last_sram2, f2_rx.recv().ok().flatten());
+        // O conteúdo que o core escreveu volta para o card da biblioteca
+        // que estava encaixado no slot 2.
+        let shared = std::path::Path::new(&spec.save_dir).join(MC2_SHARED_FILE);
+        if shared.exists() {
+            if let Some(dest) = &current_card2 {
+                let _ = std::fs::copy(&shared, dest);
+                log::info!("card 2: {} sincronizado", dest.display());
+            }
+        }
     }
-    let _ = core_tx.send(CoreCmd::Quit);
-
     // Bank whatever powered-on stretch was still running (exiting while on,
     // e.g. window closed mid-session) and add it to the all-time total.
     if let Some(t) = powered_since.take() {
@@ -3218,13 +3700,13 @@ pub fn run_game(
 
 #[cfg(test)]
 mod tests {
+    use super::card_rows_with_icons;
     use super::{
         add_playtime, cheat_state_path, delete_text_slot, frame_to_rgb8, game_dir,
         legacy_note_text_path, load_cheat_state, migrate_legacy_text_notes, note_dir,
         note_slot_path, note_text_slot_path, read_text_slot, rom_title, save_cheat_state,
         save_note_image, save_text_slot, sram_file, state_file, total_playtime_secs, EmuFrame,
     };
-    use super::{card_library, next_card_name};
     use xperience_emulation::PixelFormat as EmuFormat;
 
     fn scratch_dir(name: &str) -> std::path::PathBuf {
@@ -3276,32 +3758,51 @@ mod tests {
     #[test]
     fn card_library_lists_mcr_files_and_marks_the_current() {
         let dir = scratch_dir("cards");
-        std::fs::write(dir.join("Cartão 1.mcr"), b"a").unwrap();
+        // Um card válido (128 KB com o "MC") e um arquivo lixo.
+        let mut card = vec![0u8; 131_072];
+        card[0..2].copy_from_slice(b"MC");
+        std::fs::write(dir.join("Cartão 1.mcr"), card).unwrap();
         std::fs::write(dir.join("RPG.mcr"), b"b").unwrap();
         std::fs::write(dir.join("leia-me.txt"), b"not a card").unwrap();
 
-        let (rows, cards) = card_library(&dir, None);
-        // Linha 0 é sempre "criar"; depois os .mcr em ordem de nome.
+        let (rows, cards) = card_rows_with_icons(&dir, None, None);
+        // Linha 0 é sempre "criar"; depois os .mcr em ordem de nome. O
+        // conteúdo b"a" não é um card válido — o rótulo avisa.
         assert_eq!(rows[0].0, "(criar cartão novo)");
         assert_eq!(cards.len(), 2);
         assert!(rows[1].0.starts_with("Cartão 1"));
-        assert!(rows.iter().any(|r| r.0 == "RPG"));
+        assert!(rows[1].0.contains("0/15 blocos"));
+        assert!(rows[2].0.contains("inválido"));
 
         // O card no slot ganha o sufixo "— no slot".
-        let (rows, _) = card_library(&dir, Some(&cards[0]));
-        assert!(rows[1].0.contains("— no slot"));
+        let (rows, _) = card_rows_with_icons(&dir, Some(&cards[0]), None);
+        assert!(rows[1].0.contains("- no slot"));
 
         std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
-    fn next_card_name_skips_existing() {
+    fn card_name_generator_skips_existing() {
         let dir = scratch_dir("card-name");
-        assert_eq!(next_card_name(&dir), "Cartão 1");
-        std::fs::write(dir.join("Cartão 1.mcr"), b"x").unwrap();
-        assert_eq!(next_card_name(&dir), "Cartão 2");
-        std::fs::write(dir.join("Cartão 2.mcr"), b"x").unwrap();
-        assert_eq!(next_card_name(&dir), "Cartão 3");
+        let make = |n: u32| {
+            let mut card = vec![0u8; 131_072];
+            card[0..2].copy_from_slice(b"MC");
+            std::fs::write(dir.join(format!("Cartão {n}.mcr")), card).unwrap();
+        };
+        assert_eq!(
+            crate::memcard::create_blank(&dir).unwrap().file_name(),
+            Some(std::ffi::OsStr::new("Cartão 1.mcr"))
+        );
+        make(1);
+        assert_eq!(
+            crate::memcard::create_blank(&dir).unwrap().file_name(),
+            Some(std::ffi::OsStr::new("Cartão 2.mcr"))
+        );
+        make(2);
+        assert_eq!(
+            crate::memcard::create_blank(&dir).unwrap().file_name(),
+            Some(std::ffi::OsStr::new("Cartão 3.mcr"))
+        );
         std::fs::remove_dir_all(&dir).ok();
     }
 
