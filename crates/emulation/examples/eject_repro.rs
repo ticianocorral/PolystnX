@@ -25,7 +25,9 @@ fn main() -> anyhow::Result<()> {
     while let Some(a) = it.next() {
         match a.as_str() {
             "--core" => core_path = Some(it.next().ok_or(anyhow::anyhow!("falta valor"))?.into()),
-            "--bios-dir" => bios_dir = Some(it.next().ok_or(anyhow::anyhow!("falta valor"))?.into()),
+            "--bios-dir" => {
+                bios_dir = Some(it.next().ok_or(anyhow::anyhow!("falta valor"))?.into())
+            }
             "--rom" => rom = Some(it.next().ok_or(anyhow::anyhow!("falta valor"))?.into()),
             "--pre" => pre = it.next().ok_or(anyhow::anyhow!("falta valor"))?.parse()?,
             "--post" => post = it.next().ok_or(anyhow::anyhow!("falta valor"))?.parse()?,
@@ -74,7 +76,10 @@ fn main() -> anyhow::Result<()> {
     eprintln!("EJETANDO a bandeja…");
     let t = Instant::now();
     let ok = core.set_eject_state(true);
-    eprintln!("set_eject_state(true) -> {ok:?} ({:.3}s)", t.elapsed().as_secs_f32());
+    eprintln!(
+        "set_eject_state(true) -> {ok:?} ({:.3}s)",
+        t.elapsed().as_secs_f32()
+    );
 
     let t = Instant::now();
     for i in 0..post {
