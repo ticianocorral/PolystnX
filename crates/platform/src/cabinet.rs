@@ -4458,8 +4458,7 @@ fn draw_slot_furniture(
             let which = pi + 1;
             let l1 = format!("CONTROLE {which} CONECTADO");
             let full = l1.chars().count() as i32 * GLYPH_W as i32;
-            let scale = ((hole.width() as i32 - 12) as f32 / full as f32)
-                .clamp(0.55, 1.0);
+            let scale = ((hole.width() as i32 - 12) as f32 / full as f32).clamp(0.55, 1.0);
             let sh = ((GLYPH_H as f32 * scale).round() as i32).max(11);
             let l1y = hole.y() + 3;
             draw_text_bold(
