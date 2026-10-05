@@ -4612,16 +4612,18 @@ fn draw_slot_furniture(
         (reset_r * 2) as u32,
         (reset_r * 2) as u32,
     );
-    // O rótulo "RESET" gravado no botão, na escala CHEIA (1.0) e em bold —
-    // o mesmo corpo dos rótulos POWER/OPEN (o 0.7 fino era ilegível).
+    // O rótulo "RESET" gravado no botão: escala cheia nos painéis largos;
+    // 0.7 no estreito (o botão é menor lá e o 1.0 transborda o círculo).
     let label = "RESET";
-    let lw = label.chars().count() as i32 * GLYPH_W as i32;
+    let r_scale = if door_w < 150 { 0.7_f32 } else { 1.0 };
+    let rw = label.chars().count() as f32 * GLYPH_W as f32 * r_scale;
+    let rh = (GLYPH_H as f32 * r_scale).round() as i32;
     draw_text_bold(
         canvas,
         font,
-        col_l - lw / 2,
-        reset_cy - GLYPH_H as i32 / 2,
-        TextStyle::new(1.0, (38, 38, 36)),
+        col_l - rw as i32 / 2,
+        reset_cy - rh / 2,
+        TextStyle::new(r_scale, (38, 38, 36)),
         label,
         usize::MAX,
     );
@@ -5094,10 +5096,10 @@ fn draw_panel(
             )
         };
         cy += 4;
-        // Mesma ideia da tela de jogo: duas faixas de botão no topo
+        // Mesma ideia da tela de jogo: duas faixas de botão de UMA LINHA
         // ("Estante de games" e o boot da BIOS) + o console da altura da
-        // face do jogo — aproximado do que vem acima.
-        const INSERT_H: u32 = 464;
+        // face do jogo — 32 + 8 + 32 + 10 + face (334).
+        const INSERT_H: u32 = 416;
         let insert_block = Rect::new(x, cy, inner_w, INSERT_H);
         let (insert_drawn, bios_drawn) = draw_idle_slot(
             canvas,
