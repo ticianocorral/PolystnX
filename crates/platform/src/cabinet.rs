@@ -4270,7 +4270,7 @@ fn draw_slot_furniture(
     // Rótulo GRANDE (o 0.75 não dava leitura): escala 1.0, o mesmo corpo
     // dos rótulos POWER/OPEN. O pé do bloco empilha as portas de card e as
     // ENTRADAS DE CONTROLE — MESMO TAMANHO (placa contínua na carcaça real).
-    let door_h = 62;
+    let door_h = 44;
     let door_w = (block.width() as i32 / 2 - 14).max(1);
     let port_h = door_h;
     let ports_y = block.bottom() - port_h;
@@ -5097,7 +5097,7 @@ fn draw_panel(
         // Mesma ideia da tela de jogo: duas faixas de botão no topo
         // ("Estante de games" e o boot da BIOS) + o console da altura da
         // face do jogo — aproximado do que vem acima.
-        const INSERT_H: u32 = 464;
+        const INSERT_H: u32 = 446;
         let insert_block = Rect::new(x, cy, inner_w, INSERT_H);
         let (insert_drawn, bios_drawn) = draw_idle_slot(
             canvas,
@@ -5212,7 +5212,7 @@ fn draw_panel(
     let mut console_face_hits: Option<FaceHits> = None;
     {
         cy += 4;
-        const CARTRIDGE_H: u32 = 334;
+        const CARTRIDGE_H: u32 = 316;
         let (t, ejecting) = panel.cartridge_motion.unwrap_or((1.0, false));
         let face_hits = draw_panel_slot(
             canvas,
