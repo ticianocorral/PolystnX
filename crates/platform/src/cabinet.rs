@@ -4505,7 +4505,8 @@ fn draw_slot_furniture(
                     PSX_SHELL,
                     Rect::new(x + 1, l2y + 1, w as u32 - 2, sh as u32 - 2),
                 );
-                let copy_w = copy.chars().count() as i32 * (GLYPH_W as f32 * copy_scale).round() as i32;
+                let copy_w =
+                    copy.chars().count() as i32 * (GLYPH_W as f32 * copy_scale).round() as i32;
                 draw_text_bold(
                     canvas,
                     font,
