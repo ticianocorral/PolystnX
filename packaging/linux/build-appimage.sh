@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Wraps the already-built psx-xperience binary into an AppImage.
-# Usage: build-appimage.sh <path-to-xperience-binary> <version> <out-path>
+# Wraps the already-built polystnx binary into an AppImage.
+# Usage: build-appimage.sh <path-to-polystnx-binary> <version> <out-path>
 set -euo pipefail
 
 BIN="$1"
@@ -13,14 +13,14 @@ trap 'rm -rf "$WORK"' EXIT
 
 APPDIR="$WORK/PSX_Xperience.AppDir"
 mkdir -p "$APPDIR/usr/bin"
-cp "$BIN" "$APPDIR/usr/bin/psx-xperience"
-chmod +x "$APPDIR/usr/bin/psx-xperience"
-cp "$HERE/psx-xperience.desktop" "$APPDIR/psx-xperience.desktop"
-cp "$HERE/psx-xperience.png" "$APPDIR/psx-xperience.png"
+cp "$BIN" "$APPDIR/usr/bin/polystnx"
+chmod +x "$APPDIR/usr/bin/polystnx"
+cp "$HERE/polystnx.desktop" "$APPDIR/polystnx.desktop"
+cp "$HERE/polystnx.png" "$APPDIR/polystnx.png"
 cat > "$APPDIR/AppRun" << 'EOF'
 #!/bin/sh
 HERE="$(dirname "$(readlink -f "$0")")"
-exec "$HERE/usr/bin/psx-xperience" "$@"
+exec "$HERE/usr/bin/polystnx" "$@"
 EOF
 chmod +x "$APPDIR/AppRun"
 

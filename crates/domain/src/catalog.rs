@@ -1,7 +1,7 @@
 //! The catalogue: a folder scan (plano §2) plus a small JSON sidecar for
 //! what a scan alone can't know — when a disc was first seen and how many
 //! times it's been played. No database: the app is portable, everything it
-//! needs lives in plain files next to it (`xperience_app::dirs`).
+//! needs lives in plain files next to it (`polystnx_app::dirs`).
 
 use std::borrow::Cow;
 use std::cell::RefCell;
@@ -350,7 +350,7 @@ mod tests {
 
     fn fake_catalog(rows: Vec<RomRow>) -> Catalog {
         let store_path = std::env::temp_dir().join(format!(
-            "xperience-catalog-test-{}-{:?}.json",
+            "polystnx-catalog-test-{}-{:?}.json",
             std::process::id(),
             std::thread::current().id()
         ));

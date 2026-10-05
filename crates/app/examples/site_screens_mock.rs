@@ -3,15 +3,15 @@
 //! the same headless path as `ra_osd_mock`. Every pixel of game art is drawn
 //! here from scratch — no ROM imagery anywhere on the site.
 //!
-//! Run: `cargo run -p xperience-app --example site_screens_mock` — writes
+//! Run: `cargo run -p polystnx-app --example site_screens_mock` — writes
 //! BMPs to /tmp/site-mocks/ (hero, inicial, ra, cart-NN frames). Convert to
 //! site/assets/ with `sips -s format png` and assemble the GIF with ffmpeg.
 
 use std::path::PathBuf;
 use std::time::Duration;
 
-use xperience_app::idle;
-use xperience_platform::{FrameRef, PanelButton, PixelFormat, Platform};
+use polystnx_app::idle;
+use polystnx_platform::{FrameRef, PanelButton, PixelFormat, Platform};
 
 const GAME_TITLE: &str = "Mundo do Tomate (homebrew)";
 
@@ -26,22 +26,22 @@ fn main() -> anyhow::Result<()> {
 
     let plat = Platform::new().map_err(|e| anyhow::anyhow!(e.to_string()))?;
     let mut cab = plat
-        .create_cabinet("PSX Xperience", 1280, 800, false)
+        .create_cabinet("PolystnX", 1280, 800, false)
         .map_err(|e| anyhow::anyhow!(e.to_string()))?;
-    cab.set_nameplate("PSX Xperience v1.0.0-beta\nSwanStation 1.63");
+    cab.set_nameplate("PolystnX v1.0.0-beta\nSwanStation 1.63");
 
     // A logo oficial do RA (o favicon embutido no app) para o badge, e a
     // conta "ativa" — como no app real, o badge acompanha todas as telas.
-    if let Ok(icon) = image::load_from_memory(xperience_app::RA_ICON_PNG) {
+    if let Ok(icon) = image::load_from_memory(polystnx_app::RA_ICON_PNG) {
         let icon = icon.to_rgba8();
         cab.set_image(
-            xperience_platform::RA_LOGO_IMG,
+            polystnx_platform::RA_LOGO_IMG,
             icon.width(),
             icon.height(),
             icon.as_raw(),
         );
     }
-    cab.set_ra_status(Some(xperience_platform::RaStatus { hardcore: true }));
+    cab.set_ra_status(Some(polystnx_platform::RaStatus { hardcore: true }));
 
     let logo = logo_image();
     let label = label_image();
@@ -101,10 +101,10 @@ fn main() -> anyhow::Result<()> {
     println!("wrote hero.bmp");
 
     // --- O badge fixo do RA (fila de OSD vazia): hardcore e softcore. ---
-    cab.set_ra_status(Some(xperience_platform::RaStatus { hardcore: true }));
+    cab.set_ra_status(Some(polystnx_platform::RaStatus { hardcore: true }));
     cab.capture_bmp(&frame, 4.0 / 3.0, &out.join("ra-badge-hardcore.bmp"))
         .map_err(|e| anyhow::anyhow!(e.to_string()))?;
-    cab.set_ra_status(Some(xperience_platform::RaStatus { hardcore: false }));
+    cab.set_ra_status(Some(polystnx_platform::RaStatus { hardcore: false }));
     cab.capture_bmp(&frame, 4.0 / 3.0, &out.join("ra-badge-softcore.bmp"))
         .map_err(|e| anyhow::anyhow!(e.to_string()))?;
     cab.set_ra_status(None);
@@ -112,14 +112,14 @@ fn main() -> anyhow::Result<()> {
 
     // --- Conquistas: notificação no queixo da TV, badge sintético. ---
     let badge = badge_image();
-    cab.set_image(xperience_platform::DEMO_BADGE_IMG, 64, 64, &badge);
+    cab.set_image(polystnx_platform::DEMO_BADGE_IMG, 64, 64, &badge);
     cab.push_osd(
         &[
             "CONQUISTA DESBLOQUEADA",
             "Primeiro Tomate Colhido",
             "+10 pontos",
         ],
-        Some(xperience_platform::DEMO_BADGE_IMG),
+        Some(polystnx_platform::DEMO_BADGE_IMG),
         Duration::from_secs(6),
     );
     cab.capture_bmp(&frame, 4.0 / 3.0, &out.join("ra.bmp"))
@@ -130,15 +130,15 @@ fn main() -> anyhow::Result<()> {
     //     e o painel lateral com as conquistas do RA e a medalha de prêmio
     //     (a prata vazada do "beaten-softcore", como na conta real). ---
     {
-        use xperience_app::ra::{medal_image_id, medal_rgba, Medal};
+        use polystnx_app::ra::{medal_image_id, medal_rgba, Medal};
         let mut cab = plat
-            .create_cabinet("PSX Xperience", 1280, 800, false)
+            .create_cabinet("PolystnX", 1280, 800, false)
             .map_err(|e| anyhow::anyhow!(e.to_string()))?;
-        cab.set_nameplate("PSX Xperience v1.0.0-beta\nSwanStation 1.63");
-        if let Ok(icon) = image::load_from_memory(xperience_app::RA_ICON_PNG) {
+        cab.set_nameplate("PolystnX v1.0.0-beta\nSwanStation 1.63");
+        if let Ok(icon) = image::load_from_memory(polystnx_app::RA_ICON_PNG) {
             let icon = icon.to_rgba8();
             cab.set_image(
-                xperience_platform::RA_LOGO_IMG,
+                polystnx_platform::RA_LOGO_IMG,
                 icon.width(),
                 icon.height(),
                 icon.as_raw(),
@@ -167,13 +167,13 @@ fn main() -> anyhow::Result<()> {
         }
         let covers_ids: Vec<u64> = covers.iter().map(|(id, _, _)| *id).collect();
 
-        cab.set_shelf_panel(xperience_platform::ShelfPanelInfo {
+        cab.set_shelf_panel(polystnx_platform::ShelfPanelInfo {
             title: GAME_TITLE.to_string(),
             logo_img: Some(logo_id),
             cartridge_img: Some(cart_id),
             backcover_img: None,
             release: Some("1993".to_string()),
-            section: xperience_platform::PanelSection::Informacoes,
+            section: polystnx_platform::PanelSection::Informacoes,
             achievements_reason: None,
             manual_first_page: None,
             info: vec![

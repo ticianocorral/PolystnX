@@ -1,5 +1,5 @@
 [package]
-name = "xperience-app"
+name = "polystnx-app"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -8,8 +8,8 @@ repository.workspace = true
 publish = false
 
 [[bin]]
-name = "psx-xperience"
-path = "src/bin/psx_xperience.rs"
+name = "polystnx"
+path = "src/bin/polystnx.rs"
 
 [[bin]]
 name = "emu-run"
@@ -21,15 +21,15 @@ path = "src/bin/selector.rs"
 
 [dependencies]
 libc = "0.2"
-xperience-emulation = { path = "../emulation" }
-xperience-platform = { path = "../platform" }
-xperience-domain = { path = "../domain" }
-xperience-ntsc = { path = "../ntsc" }
+polystnx-emulation = { path = "../emulation" }
+polystnx-platform = { path = "../platform" }
+polystnx-domain = { path = "../domain" }
+polystnx-ntsc = { path = "../ntsc" }
 anyhow.workspace = true
 log.workspace = true
 env_logger.workspace = true
 md-5.workspace = true
-xperience-ra.workspace = true
+polystnx-ra.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 ureq.workspace = true

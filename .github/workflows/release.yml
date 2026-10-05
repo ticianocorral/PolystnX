@@ -34,15 +34,15 @@ jobs:
         id: ver
         run: echo "v=$(grep '^version' Cargo.toml | head -1 | cut -d'"' -f2)" >> "$GITHUB_OUTPUT"
       - name: Build (vendored SDL3)
-        run: cargo build --release --bin psx-xperience --features xperience-platform/vendored-sdl
+        run: cargo build --release --bin polystnx --features polystnx-platform/vendored-sdl
       - name: Package DMG
         run: |
-          ./packaging/macos/build-dmg.sh target/release/psx-xperience "${{ steps.ver.outputs.v }}" \
-            "PSX-Xperience-${{ steps.ver.outputs.v }}-macos.dmg"
+          ./packaging/macos/build-dmg.sh target/release/polystnx "${{ steps.ver.outputs.v }}" \
+            "PolystnX-${{ steps.ver.outputs.v }}-macos.dmg"
       - uses: actions/upload-artifact@v4
         with:
           name: macos-dmg
-          path: PSX-Xperience-*.dmg
+          path: PolystnX-*.dmg
 
   windows:
     runs-on: windows-latest
@@ -53,21 +53,21 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - name: Build (vendored SDL3)
-        run: cargo build --release --workspace --features xperience-platform/vendored-sdl
+        run: cargo build --release --workspace --features polystnx-platform/vendored-sdl
       - name: Package zip
         shell: bash
         run: |
           VERSION=$(grep '^version' Cargo.toml | head -1 | cut -d'"' -f2)
-          DIR="dist/PSX Xperience"
+          DIR="dist/PolystnX"
           mkdir -p "$DIR"
-          cp target/release/psx-xperience.exe target/release/emu-run.exe \
+          cp target/release/polystnx.exe target/release/emu-run.exe \
              target/release/selector.exe "$DIR/"
           cp README.md CHANGELOG.md THIRD-PARTY-NOTICES.md "$DIR/"
-          (cd dist && 7z a "../PSX-Xperience-$VERSION-windows-x86_64.zip" "PSX Xperience")
+          (cd dist && 7z a "../PolystnX-$VERSION-windows-x86_64.zip" "PolystnX")
       - uses: actions/upload-artifact@v4
         with:
           name: windows-zip
-          path: PSX-Xperience-*.zip
+          path: PolystnX-*.zip
 
   linux:
     runs-on: ubuntu-latest
@@ -94,15 +94,15 @@ jobs:
         id: ver
         run: echo "v=$(grep '^version' Cargo.toml | head -1 | cut -d'"' -f2)" >> "$GITHUB_OUTPUT"
       - name: Build (vendored SDL3)
-        run: cargo build --release --bin psx-xperience --features xperience-platform/vendored-sdl
+        run: cargo build --release --bin polystnx --features polystnx-platform/vendored-sdl
       - name: Package AppImage
         run: |
-          ./packaging/linux/build-appimage.sh target/release/psx-xperience "${{ steps.ver.outputs.v }}" \
-            "PSX-Xperience-${{ steps.ver.outputs.v }}-linux-x86_64.AppImage"
+          ./packaging/linux/build-appimage.sh target/release/polystnx "${{ steps.ver.outputs.v }}" \
+            "PolystnX-${{ steps.ver.outputs.v }}-linux-x86_64.AppImage"
       - uses: actions/upload-artifact@v4
         with:
           name: linux-appimage
-          path: PSX-Xperience-*.AppImage
+          path: PolystnX-*.AppImage
 
   publish:
     needs: [macos, windows, linux]

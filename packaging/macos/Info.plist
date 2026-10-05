@@ -3,17 +3,17 @@
 <plist version="1.0">
 <dict>
 	<key>CFBundleName</key>
-	<string>PSX Xperience</string>
+	<string>PolystnX</string>
 	<key>CFBundleDisplayName</key>
-	<string>PSX Xperience</string>
+	<string>PolystnX</string>
 	<key>CFBundleIdentifier</key>
-	<string>dev.ticianocorral.psx-xperience</string>
+	<string>dev.ticianocorral.polystnx</string>
 	<key>CFBundleVersion</key>
 	<string>__VERSION__</string>
 	<key>CFBundleShortVersionString</key>
 	<string>__VERSION__</string>
 	<key>CFBundleExecutable</key>
-	<string>psx-xperience</string>
+	<string>polystnx</string>
 	<key>CFBundleIconFile</key>
 	<string>AppIcon</string>
 	<key>CFBundlePackageType</key>

@@ -6,14 +6,14 @@
 //! ("jogo", "vídeo", "sistema", "controles") plus "Voltar". No nesting
 //! deeper than a section: click a row to act on it (or gamepad nav +
 //! Confirm/Back — plan revision: no keyboard shortcuts). Edits save to
-//! `psx-xperience.cfg` immediately, not on some later "apply" step — there's
+//! `polystnx.cfg` immediately, not on some later "apply" step — there's
 //! nothing to lose by backing out.
 
 use std::sync::mpsc::{self, Receiver};
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
-use xperience_platform::{
+use polystnx_platform::{
     Cabinet, GamepadBtn, MenuMode, MenuNav, PadButton, Platform, Screen, SettingsButton,
     SettingsPanelInfo,
 };

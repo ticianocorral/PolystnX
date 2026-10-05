@@ -1015,6 +1015,82 @@ dependencies = [
 ]
 
 [[package]]
+name = "polystnx-app"
+version = "0.2.0"
+dependencies = [
+ "anyhow",
+ "env_logger",
+ "image",
+ "libc",
+ "log",
+ "lopdf",
+ "md-5",
+ "polystnx-domain",
+ "polystnx-emulation",
+ "polystnx-ntsc",
+ "polystnx-platform",
+ "polystnx-ra",
+ "serde",
+ "serde_json",
+ "toml 0.8.23",
+ "ureq",
+ "winres",
+ "zip",
+]
+
+[[package]]
+name = "polystnx-domain"
+version = "0.2.0"
+dependencies = [
+ "crc32fast",
+ "log",
+ "md-5",
+ "polystnx-ra",
+ "roxmltree",
+ "serde",
+ "serde_json",
+ "sha1",
+ "thiserror",
+]
+
+[[package]]
+name = "polystnx-emulation"
+version = "0.2.0"
+dependencies = [
+ "anyhow",
+ "libloading",
+ "log",
+ "thiserror",
+]
+
+[[package]]
+name = "polystnx-ntsc"
+version = "0.2.0"
+dependencies = [
+ "cc",
+]
+
+[[package]]
+name = "polystnx-platform"
+version = "0.2.0"
+dependencies = [
+ "log",
+ "noto-sans-mono-bitmap",
+ "sdl3",
+ "thiserror",
+]
+
+[[package]]
+name = "polystnx-ra"
+version = "0.2.0"
+dependencies = [
+ "cc",
+ "chd",
+ "log",
+ "md-5",
+]
+
+[[package]]
 name = "portable-atomic"
 version = "1.15.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1987,82 +2063,6 @@ name = "writeable"
 version = "0.6.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3ad82d2a33cdc9674dc7465672f271e096168fcdbe0f799d9e6db8c5892679dc"
-
-[[package]]
-name = "xperience-app"
-version = "0.1.4"
-dependencies = [
- "anyhow",
- "env_logger",
- "image",
- "libc",
- "log",
- "lopdf",
- "md-5",
- "serde",
- "serde_json",
- "toml 0.8.23",
- "ureq",
- "winres",
- "xperience-domain",
- "xperience-emulation",
- "xperience-ntsc",
- "xperience-platform",
- "xperience-ra",
- "zip",
-]
-
-[[package]]
-name = "xperience-domain"
-version = "0.1.4"
-dependencies = [
- "crc32fast",
- "log",
- "md-5",
- "roxmltree",
- "serde",
- "serde_json",
- "sha1",
- "thiserror",
- "xperience-ra",
-]
-
-[[package]]
-name = "xperience-emulation"
-version = "0.1.4"
-dependencies = [
- "anyhow",
- "libloading",
- "log",
- "thiserror",
-]
-
-[[package]]
-name = "xperience-ntsc"
-version = "0.1.4"
-dependencies = [
- "cc",
-]
-
-[[package]]
-name = "xperience-platform"
-version = "0.1.4"
-dependencies = [
- "log",
- "noto-sans-mono-bitmap",
- "sdl3",
- "thiserror",
-]
-
-[[package]]
-name = "xperience-ra"
-version = "0.1.4"
-dependencies = [
- "cc",
- "chd",
- "log",
- "md-5",
-]
 
 [[package]]
 name = "yoke"

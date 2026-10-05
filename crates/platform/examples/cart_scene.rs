@@ -10,12 +10,12 @@
 //! ffmpeg -i "art.png" -f rawvideo -pix_fmt rgba art.raw
 //! python3 -c "import struct; d=open('art.raw','rb').read(); \
 //!   open('art.bin','wb').write(struct.pack('<II',700,500)+d)"
-//! cargo run -p xperience-platform --example cart_scene -- out art.bin
+//! cargo run -p polystnx-platform --example cart_scene -- out art.bin
 //! ```
 
 use std::path::PathBuf;
 
-use xperience_platform::{Cabinet, PanelButton, Platform};
+use polystnx_platform::{Cabinet, PanelButton, Platform};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     std::env::set_var("SDL_VIDEODRIVER", "dummy");

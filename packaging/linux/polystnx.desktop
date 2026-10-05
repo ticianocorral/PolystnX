@@ -1,8 +1,8 @@
 [Desktop Entry]
 Type=Application
-Name=PSX Xperience
+Name=PolystnX
 Comment=Personal, non-commercial PSX emulator with a CRT-TV frame
-Exec=psx-xperience
-Icon=psx-xperience
+Exec=polystnx
+Icon=polystnx
 Categories=Game;Emulator;
 Terminal=false

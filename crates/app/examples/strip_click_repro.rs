@@ -3,13 +3,13 @@
 //! (clicking the ">" arrow of the favorites strip), then runs the shelf and
 //! screenshots before/after so the scroll can be eyeballed.
 //!
-//! Usage: cargo run --example strip_click_repro -p xperience-app
+//! Usage: cargo run --example strip_click_repro -p polystnx-app
 
 use std::time::Duration;
 
-use xperience_app::shelf::{self, ShelfOpts};
-use xperience_domain::Catalog;
-use xperience_platform::Platform;
+use polystnx_app::shelf::{self, ShelfOpts};
+use polystnx_domain::Catalog;
+use polystnx_platform::Platform;
 
 fn make_catalog(n_favs: usize) -> anyhow::Result<(tempdir::TempDir, Catalog)> {
     let dir = tempdir::TempDir::new()?;
@@ -23,7 +23,7 @@ fn make_catalog(n_favs: usize) -> anyhow::Result<(tempdir::TempDir, Catalog)> {
     std::thread::sleep(Duration::from_millis(20));
     let store = dir.path().join("library.json");
     let cat = Catalog::open(&roms, &store)?;
-    let entries = cat.list(xperience_domain::Order::Name)?;
+    let entries = cat.list(polystnx_domain::Order::Name)?;
     for e in entries.iter().take(n_favs) {
         cat.set_favorite(&e.rom.sha1, true)?;
     }
@@ -38,7 +38,7 @@ fn main() -> anyhow::Result<()> {
         .map_err(|e| anyhow::anyhow!(e.to_string()))?;
 
     let mut opts = ShelfOpts {
-        order: xperience_domain::Order::Name,
+        order: polystnx_domain::Order::Name,
         max_frames: Some(3),
         shot: Some("/tmp/repro_before.bmp".into()),
         fade_in: None,
@@ -51,7 +51,7 @@ fn main() -> anyhow::Result<()> {
     // shelf's own math.
     let (scr_w, _scr_h) = cab.shelf_screen_size();
     let y0 = 28 + 28 + 24; // MARGIN + HEADER_H + FAV_LABEL_H
-    let (left, right) = (xperience_app::shelf::strip_arrow_rects)(scr_w, y0);
+    let (left, right) = (polystnx_app::shelf::strip_arrow_rects)(scr_w, y0);
     println!("left rect {left:?}, right rect {right:?}");
     let strip_vis = (scr_w as i32 - 28 * 2) as u32 / (160 + 14);
     println!("scr_w {scr_w}, strip_vis {strip_vis} (6 favorites)");

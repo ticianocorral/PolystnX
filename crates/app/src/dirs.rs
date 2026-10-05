@@ -1,6 +1,6 @@
 //! Portable app layout: every folder the app uses lives in one root — no
 //! database. `roms/` (drop ROMs here), `core/` (the SwanStation core), `assets/`
-//! (local cover/logo art), `saves/`, `notes/`, plus `psx-xperience.cfg` and
+//! (local cover/logo art), `saves/`, `notes/`, plus `polystnx.cfg` and
 //! `library.json` at the root.
 //!
 //! macOS special case: the `.app` on this platform ships in `/Applications`
@@ -11,7 +11,7 @@
 //! user data.
 //!
 //! Linux special case: AppImage is a read-only container that extracts to a
-//! temp directory. So on Linux the root is `~/.local/share/PSX Xperience`
+//! temp directory. So on Linux the root is `~/.local/share/PolystnX`
 //! (following XDG directory conventions), created on first launch. This
 //! also supports regular Linux builds next to the executable.
 //!
@@ -19,7 +19,7 @@
 //! a `.exe` anywhere the user put it is already writable and exactly where
 //! they'd look for `roms/` next to it.
 
-#[cfg(not(target_os = "linux"))]
+#[cfg(not(target_os = "windows"))]
 use std::path::Path;
 use std::path::PathBuf;
 
@@ -44,21 +44,89 @@ pub fn app_root() -> PathBuf {
     }
 }
 
-/// `~/Documents/PSX Xperience` — split out from `app_root` so it can be
-/// unit-tested with a synthetic home directory.
+/// `~/Documents/PolystnX` — split out from `app_root` so it can be
+/// unit-tested with a synthetic home directory. Puro de propósito: a
+/// migração do legado acontece no boot, ver [`migrate_legacy_data_root`].
 #[cfg(target_os = "macos")]
 fn macos_root_for(home: &Path) -> PathBuf {
-    home.join("Documents").join("PSX Xperience")
+    home.join("Documents").join("PolystnX")
 }
 
-/// XDG_DATA_HOME/.../PSX Xperience, falling back to ~/.local/share if unset.
+/// XDG_DATA_HOME/.../PolystnX, falling back to ~/.local/share if unset.
 #[cfg(target_os = "linux")]
 fn linux_app_root() -> PathBuf {
     let data_home = std::env::var_os("XDG_DATA_HOME")
         .map(PathBuf::from)
         .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local/share")))
         .unwrap_or_else(|| PathBuf::from("."));
-    data_home.join("PSX Xperience")
+    data_home.join("PolystnX")
+}
+
+/// One-time rename da raiz do rebrand: `PSX Xperience` → `PolystnX` — os
+/// roms/saves/memcards de quem já usava o app continuam no lugar, sem cópia
+/// (rename no mesmo volume é atômico). Chamado no boot dos executáveis,
+/// ANTES de qualquer acesso a [`app_root`]; getter de path nenhum migra
+/// (testes com home sintética não podem mexer no disco real).
+pub fn migrate_legacy_data_root() {
+    static DONE: std::sync::OnceLock<()> = std::sync::OnceLock::new();
+    DONE.get_or_init(|| {
+        // O arquivo de configuração também trocou de nome no rebrand —
+        // renomeia dentro da raiz (que já foi migrada acima, se preciso).
+        #[cfg(any(target_os = "macos", target_os = "linux"))]
+        {
+            let cfg_dir = app_root().join("config");
+            let old = cfg_dir.join("psx-xperience.cfg");
+            let new = cfg_dir.join("polystnx.cfg");
+            if !new.exists() && old.exists() {
+                if let Err(e) = std::fs::rename(&old, &new) {
+                    log::warn!(
+                        "migração da configuração: {} → {}: {e}",
+                        old.display(),
+                        new.display()
+                    );
+                }
+            }
+        }
+        #[cfg(target_os = "macos")]
+        {
+            let home = std::env::var_os("HOME")
+                .map(PathBuf::from)
+                .unwrap_or_else(|| PathBuf::from("."));
+            try_migrate_legacy_root(
+                &home.join("Documents").join("PolystnX"),
+                &home.join("Documents").join("PSX Xperience"),
+            );
+        }
+        #[cfg(target_os = "linux")]
+        {
+            let data_home = std::env::var_os("XDG_DATA_HOME")
+                .map(PathBuf::from)
+                .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local/share")))
+                .unwrap_or_else(|| PathBuf::from("."));
+            try_migrate_legacy_root(
+                &data_home.join("PolystnX"),
+                &data_home.join("PSX Xperience"),
+            );
+        }
+    });
+}
+
+/// A migração em si — separada para o teste poder exercitar com diretórios
+/// sintéticos. Falha fica registrada e de lado: sem o legado migrado o app
+/// simplesmente começa uma raiz nova.
+fn try_migrate_legacy_root(new_root: &Path, legacy_root: &Path) -> bool {
+    if !new_root.exists() && legacy_root.exists() {
+        if let Err(e) = std::fs::rename(legacy_root, new_root) {
+            log::warn!(
+                "migração da pasta de dados: {} → {}: {e}",
+                legacy_root.display(),
+                new_root.display()
+            );
+            return false;
+        }
+        return true;
+    }
+    false
 }
 
 pub fn roms_dir() -> PathBuf {
@@ -124,7 +192,7 @@ pub fn config_dir() -> PathBuf {
 }
 
 pub fn config_path() -> PathBuf {
-    config_dir().join("psx-xperience.cfg")
+    config_dir().join("polystnx.cfg")
 }
 
 /// Play counts / added-at / last-played-at, keyed by ROM hash — the only
@@ -149,11 +217,45 @@ mod tests {
 
     #[cfg(target_os = "macos")]
     #[test]
-    fn macos_root_is_documents_psx_xperience() {
+    fn macos_root_is_documents_polystnx() {
         assert_eq!(
             super::macos_root_for(Path::new("/Users/rex")),
-            Path::new("/Users/rex/Documents/PSX Xperience")
+            Path::new("/Users/rex/Documents/PolystnX")
         );
+    }
+
+    #[test]
+    fn legacy_root_is_renamed_into_place_not_copied() {
+        let home = std::env::temp_dir().join(format!("polystnx-migra-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&home);
+        let legacy = home.join("PSX Xperience");
+        let new_root = home.join("PolystnX");
+        std::fs::create_dir_all(legacy.join("saves")).unwrap();
+        std::fs::write(legacy.join("saves").join("card.mcr"), b"mcr").unwrap();
+        assert!(!new_root.exists());
+        assert!(super::try_migrate_legacy_root(&new_root, &legacy));
+        assert!(new_root.join("saves").join("card.mcr").is_file());
+        assert!(!legacy.exists());
+        // segunda chamada: nada para migrar (o legado já não existe)
+        assert!(!super::try_migrate_legacy_root(&new_root, &legacy));
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    #[test]
+    fn migration_never_touches_an_existing_new_root() {
+        let home = std::env::temp_dir().join(format!("polystnx-migra2-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&home);
+        let legacy = home.join("PSX Xperience");
+        let new_root = home.join("PolystnX");
+        std::fs::create_dir_all(&legacy).unwrap();
+        std::fs::create_dir_all(&new_root).unwrap();
+        std::fs::write(legacy.join("antigo.txt"), b"a").unwrap();
+        std::fs::write(new_root.join("novo.txt"), b"n").unwrap();
+        // destino já existe: o legado fica intocado
+        assert!(!super::try_migrate_legacy_root(&new_root, &legacy));
+        assert!(legacy.join("antigo.txt").is_file());
+        assert!(new_root.join("novo.txt").is_file());
+        let _ = std::fs::remove_dir_all(&home);
     }
 
     #[cfg(target_os = "linux")]
@@ -169,7 +271,7 @@ mod tests {
                         std::env::var("HOME").unwrap_or_default()
                     ))
             )
-            .join("PSX Xperience")
+            .join("PolystnX")
         );
     }
 

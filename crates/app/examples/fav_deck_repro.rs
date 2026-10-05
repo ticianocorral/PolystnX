@@ -4,15 +4,15 @@
 use std::path::PathBuf;
 use std::time::Duration;
 
-use xperience_app::dirs;
-use xperience_app::shelf::{self, ShelfOpts};
-use xperience_domain::{Catalog, Order};
-use xperience_platform::Platform;
+use polystnx_app::dirs;
+use polystnx_app::shelf::{self, ShelfOpts};
+use polystnx_domain::{Catalog, Order};
+use polystnx_platform::Platform;
 
 fn main() -> anyhow::Result<()> {
     let mut plat = Platform::new().map_err(|e| anyhow::anyhow!(e.to_string()))?;
     let mut cab = plat
-        .create_cabinet("PSX Xperience", 1280, 800, false)
+        .create_cabinet("PolystnX", 1280, 800, false)
         .map_err(|e| anyhow::anyhow!(e.to_string()))?;
     let catalog = Catalog::open(&dirs::roms_dir(), &dirs::library_path())
         .map_err(|e| anyhow::anyhow!(e.to_string()))?;

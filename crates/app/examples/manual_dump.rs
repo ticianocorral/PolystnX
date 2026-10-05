@@ -1,7 +1,7 @@
 //! Despeja páginas de um PDF como PNGs usando o parser do app —
 //! ferramenta de diagnóstico (dev).
 //!
-//! Usage: cargo run -p xperience-app --example manual_dump -- <pdf> <página inicial> <página final> <out-prefix>
+//! Usage: cargo run -p polystnx-app --example manual_dump -- <pdf> <página inicial> <página final> <out-prefix>
 use std::path::PathBuf;
 
 fn main() {
@@ -10,10 +10,10 @@ fn main() {
     let from: usize = args[2].parse().unwrap();
     let to: usize = args[3].parse().unwrap();
     let prefix = &args[4];
-    let pages = xperience_app::manual::page_count(&pdf).unwrap();
+    let pages = polystnx_app::manual::page_count(&pdf).unwrap();
     println!("páginas: {pages}");
     for p in from..=to.min(pages) {
-        match xperience_app::manual::render_page(&pdf, p, 800) {
+        match polystnx_app::manual::render_page(&pdf, p, 800) {
             Ok(Some(img)) => {
                 let out = format!("{prefix}-p{p:03}.png");
                 image::save_buffer(&out, &img.rgba, img.w, img.h, image::ColorType::Rgba8).unwrap();

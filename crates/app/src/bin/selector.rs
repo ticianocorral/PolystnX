@@ -1,21 +1,22 @@
 //! Standalone shelf preview: a scrollable grid of covers (or a multicart
-//! list, see `xperience_app::shelf`) with a details panel, mouse and
+//! list, see `polystnx_app::shelf`) with a details panel, mouse and
 //! gamepad navigation only (no keyboard). On confirm it prints the chosen ROM
 //! path to stdout and exits 0; on cancel it exits 1. The shelf itself lives
-//! in `xperience_app::shelf`, shared with the unified `xperience` binary —
+//! in `polystnx_app::shelf`, shared with the unified `xperience` binary —
 //! this binary is just a dev/test harness for it, reading `roms/` next to
 //! wherever it's run from (same portable layout as `xperience`, see
-//! `xperience_app::dirs`).
+//! `polystnx_app::dirs`).
 
 use std::path::PathBuf;
 
 use anyhow::{anyhow, Context, Result};
-use xperience_app::dirs;
-use xperience_app::shelf::{self, Pick, ShelfOpts};
-use xperience_domain::{Catalog, Order};
-use xperience_platform::Platform;
+use polystnx_app::dirs;
+use polystnx_app::shelf::{self, Pick, ShelfOpts};
+use polystnx_domain::{Catalog, Order};
+use polystnx_platform::Platform;
 
 fn main() -> Result<()> {
+    polystnx_app::dirs::migrate_legacy_data_root();
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("warn")).init();
 
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -35,7 +36,7 @@ fn main() -> Result<()> {
 
     let mut plat = Platform::new().map_err(|e| anyhow!(e.to_string()))?;
     let mut cab = plat
-        .create_cabinet("PSX Xperience", 1280, 800, false)
+        .create_cabinet("PolystnX", 1280, 800, false)
         .map_err(|e| anyhow!(e.to_string()))?;
 
     // Headless self-check: the "Histórico" screen, dev/testing only.

@@ -3,6 +3,6 @@
 #include <stddef.h>
 #include "snes_ntsc.h"
 
-size_t xperience_snes_ntsc_sizeof(void) {
+size_t polystnx_snes_ntsc_sizeof(void) {
     return sizeof(struct snes_ntsc_t);
 }

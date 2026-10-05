@@ -17,7 +17,7 @@ pub const API_BASE: &str = "https://retroachievements.org";
 
 /// Identifies the app to the RA server in every call (third-party clients
 /// are welcome as long as they name themselves).
-const USER_AGENT: &str = concat!("psx-xperience/", env!("CARGO_PKG_VERSION"));
+const USER_AGENT: &str = concat!("polystnx/", env!("CARGO_PKG_VERSION"));
 
 fn agent() -> ureq::Agent {
     ureq::AgentBuilder::new()
@@ -122,7 +122,7 @@ fn cache_path(hash: &str) -> std::path::PathBuf {
 /// (algoritmo validado contra o site na Fase 0); chamado uma vez por jogo
 /// por visita da estante.
 pub fn hash_rom(path: &std::path::Path) -> Result<String, String> {
-    xperience_ra::hash::psx_disc_hash(path)
+    polystnx_ra::hash::psx_disc_hash(path)
 }
 
 /// The cached identification for `hash`, if a previous fetch left one.
@@ -292,7 +292,7 @@ fn write_cache(hash: &str, text: &str) -> Result<(), String> {
 
 // ---- fase 3: live session -------------------------------------------
 
-use xperience_ra::runtime::{Achievement, Session};
+use polystnx_ra::runtime::{Achievement, Session};
 
 /// O RA injeta um "achievement" de aviso em toda resposta para clientes
 /// que não estão no registro oficial de emuladores (`CLIENT_WARNING_ID` no
@@ -1452,7 +1452,7 @@ mod tests {
     }
 
     /// Hits the real API — manual sanity check only:
-    /// `cargo test -p xperience-app --lib ra -- --ignored`
+    /// `cargo test -p polystnx-app --lib ra -- --ignored`
     #[test]
     #[ignore]
     fn bad_token_is_rejected_by_the_real_api() {

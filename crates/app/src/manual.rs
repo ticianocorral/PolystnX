@@ -310,7 +310,7 @@ mod tests {
             .into_bytes(),
         );
 
-        let dir = std::env::temp_dir().join("xperience-manual-test");
+        let dir = std::env::temp_dir().join("polystnx-manual-test");
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("manual.pdf");
         std::fs::write(&path, pdf).unwrap();

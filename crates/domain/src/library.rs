@@ -191,7 +191,7 @@ mod tests {
     use super::*;
 
     /// O serial lido de um CHD real não é reproduzível em teste unitário
-    /// (precisa de um CHD de verdade — provado em `xperience-ra`'s tests e
+    /// (precisa de um CHD de verdade — provado em `polystnx-ra`'s tests e
     /// no `docs/fase-2.md`); o que é reproduzível aqui é o cache.
     #[test]
     fn disc_cache_roundtrip_and_mtime_invalidation() {

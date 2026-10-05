@@ -112,12 +112,12 @@ mod tests {
     /// Hits the real network — not run by default (`cargo test` skips
     /// `#[ignore]`d tests), only a manual sanity check that the mirror is
     /// up and serving something `NoIntroDat::load` can actually parse:
-    /// `cargo test -p xperience-app --lib dat_update -- --ignored`
+    /// `cargo test -p polystnx-app --lib dat_update -- --ignored`
     #[test]
     #[ignore]
     fn downloads_and_parses_the_real_dat() {
         let (tx, rx) = std::sync::mpsc::channel();
-        let dest = std::env::temp_dir().join("xperience-dat-update-test.dat");
+        let dest = std::env::temp_dir().join("polystnx-dat-update-test.dat");
         let worker_dest = dest.clone();
         std::thread::spawn(move || download_and_install(&worker_dest, &tx));
         loop {
@@ -129,7 +129,7 @@ mod tests {
                 CoreUpdateMsg::Failed(e) => panic!("download failed: {e}"),
             }
         }
-        let dat = xperience_domain::NoIntroDat::load(&dest).unwrap();
+        let dat = polystnx_domain::NoIntroDat::load(&dest).unwrap();
         // Chrono Trigger (USA)'s headerless CRC32 in this mirror.
         assert_eq!(
             dat.lookup("2D206BF7").map(|i| i.name.as_str()),

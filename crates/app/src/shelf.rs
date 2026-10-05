@@ -1,4 +1,4 @@
-//! The selector shelf, factored out of the `selector` binary so `xperience` can
+//! The selector shelf, factored out of the `selector` binary so `polystnx` can
 //! show it between games: a scrollable grid of covers (or a multicart-style
 //! list when no cover art is around) with a details panel, mouse and gamepad
 //! navigation only (plan revision: no keyboard shortcuts, so type-to-search
@@ -17,8 +17,8 @@ use std::sync::mpsc::{self, Receiver};
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
-use xperience_domain::{Catalog, CatalogEntry, Order};
-use xperience_platform::{
+use polystnx_domain::{Catalog, CatalogEntry, Order};
+use polystnx_platform::{
     Cabinet, MenuMode, MenuNav, PanelSection, Platform, Screen, ShelfButton, ShelfPanelInfo,
 };
 
@@ -492,7 +492,7 @@ fn backcover_id(sha1: &str) -> u64 {
 /// 3. the stem with its trailing "(...)" tags peeled one group at a time
 ///    ("X (USA) (Rev 1)" -> "X (USA)" -> "X"), so a single base-named art
 ///    file serves every variant ROM of the same game.
-fn find_local_art(dir: &Path, rom_path: &str, display: Option<&str>) -> Option<PathBuf> {
+pub(crate) fn find_local_art(dir: &Path, rom_path: &str, display: Option<&str>) -> Option<PathBuf> {
     let stem = Path::new(rom_path).file_stem()?.to_str()?;
     let mut candidates: Vec<String> = display.map(|d| vec![d.to_string()]).unwrap_or_default();
     candidates.push(stem.to_string());
@@ -2390,7 +2390,7 @@ pub fn run(
 /// listando os jogos mais jogados em todo periodo") — the shelf's own
 /// "Histórico" button. Clicking a row launches it, same as the shelf's own
 /// grid; "Voltar" here means "back to the shelf", not all the way to idle
-/// (the caller, `xperience.rs`'s main loop, treats this call's `Pick::Back`
+/// (the caller, `polystnx.rs`'s main loop, treats this call's `Pick::Back`
 /// that way, same as it already special-cases `Pick::Settings`).
 pub fn run_history(plat: &mut Platform, cab: &mut Cabinet, catalog: &Catalog) -> Result<Pick> {
     let logo_dir = crate::dirs::assets_dir().join("logo");

@@ -8,13 +8,13 @@
 //!
 //! The core path also reads from $PSX_XPERIENCE_CORE. See docs/fase-0.md for where
 //! to get the core, docs/fase-1.md for save states / SRAM / run-ahead. The
-//! run-loop itself lives in `xperience_app::runner`, shared with `xperience`.
+//! run-loop itself lives in `polystnx_app::runner`, shared with `polystnx`.
 
 use std::path::PathBuf;
 
 use anyhow::{anyhow, bail, Result};
-use xperience_app::config::Config;
-use xperience_app::runner::{run_game, GameSpec};
+use polystnx_app::config::Config;
+use polystnx_app::runner::{run_game, GameSpec};
 
 struct Args {
     core: PathBuf,
@@ -199,7 +199,7 @@ fn parse_args() -> Result<Args> {
     };
     let save_dir = save_dir.unwrap_or_else(|| PathBuf::from("."));
     // system directory do core = a BIOS (plano §1.1) — igual ao app.
-    let system_dir = system_dir.unwrap_or_else(xperience_app::dirs::bios_dir);
+    let system_dir = system_dir.unwrap_or_else(polystnx_app::dirs::bios_dir);
     let notes_dir = notes_dir.unwrap_or_else(|| save_dir.join("notes"));
     Ok(Args {
         core,
@@ -257,6 +257,7 @@ config.toml's [keyboard] section only ever holds gameplay binds).\n\
 Closing the window always quits, on or off — no ceremony.";
 
 fn main() -> Result<()> {
+    polystnx_app::dirs::migrate_legacy_data_root();
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
     let args = parse_args()?;
 
@@ -265,10 +266,10 @@ fn main() -> Result<()> {
         log::info!("config: {}", p.display());
     }
 
-    let mut platform = xperience_platform::Platform::new().map_err(|e| anyhow!(e.to_string()))?;
+    let mut platform = polystnx_platform::Platform::new().map_err(|e| anyhow!(e.to_string()))?;
     platform.set_pad_map(cfg.padmap.clone());
     let mut cabinet = platform
-        .create_cabinet("PSX Xperience", 1024, 768, false)
+        .create_cabinet("PolystnX", 1024, 768, false)
         .map_err(|e| anyhow!(e.to_string()))?;
     if cfg.fullscreen {
         cabinet.toggle_fullscreen();

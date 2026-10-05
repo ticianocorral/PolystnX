@@ -11,8 +11,7 @@ use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
-const RELEASES_API: &str =
-    "https://api.github.com/repos/ticianocorral/psx-xperience/releases/latest";
+const RELEASES_API: &str = "https://api.github.com/repos/ticianocorral/polystnx/releases/latest";
 
 /// What's worth telling the player about at startup — `idle::run` only ever
 /// receives one of these when there's actually something to say (see
@@ -139,7 +138,7 @@ fn asset_for_platform(assets: &[GhAsset]) -> Option<String> {
 fn newer_release(current: &str) -> Option<AppUpdate> {
     let resp = agent()
         .get(RELEASES_API)
-        .set("User-Agent", "psx-xperience-update-check")
+        .set("User-Agent", "psx-polystnx-update-check")
         .call()
         .ok()?;
     let release: GhRelease = resp.into_json().ok()?;
@@ -210,7 +209,7 @@ pub fn download_asset(url: &str, dest_dir: &Path, tx: &Sender<u32>) -> Result<Pa
 /// Aplica, no arranque, uma atualização baixada pela tela de update — o
 /// "será atualizado ao reiniciar" (plan revision). Melhor-esforço: qualquer
 /// falha loga e mantém o arquivo para tentar de novo. Antes do SDL, na
-/// main do `xperience`.
+/// main do `polystnx`.
 pub fn apply_pending_update() {
     let Some(dir) = crate::dirs::update_dir_opt() else {
         return;
@@ -252,7 +251,7 @@ pub fn apply_pending_update() {
 #[cfg(target_os = "macos")]
 fn apply_macos_dmg(dmg: &Path) -> Result<(), String> {
     use std::process::Command;
-    let mnt = std::env::temp_dir().join("xperience-update-mnt");
+    let mnt = std::env::temp_dir().join("polystnx-update-mnt");
     let _ = std::fs::remove_dir_all(&mnt);
     std::fs::create_dir_all(&mnt).map_err(|e| e.to_string())?;
     let out = Command::new("hdiutil")
@@ -353,7 +352,7 @@ mod tests {
 
     /// Hits the real GitHub API — not run by default (`cargo test` skips
     /// `#[ignore]`d tests), only a manual sanity check:
-    /// `cargo test -p xperience-app --lib -- --ignored hits_the_real_github_api`.
+    /// `cargo test -p polystnx-app --lib -- --ignored hits_the_real_github_api`.
     #[test]
     #[ignore]
     fn hits_the_real_github_api() {

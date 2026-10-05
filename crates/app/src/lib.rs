@@ -1,16 +1,16 @@
-//! Shared bits for the `xperience-app` binaries.
+//! Shared bits for the `polystnx-app` binaries.
 //!
-//! - [`config`] — `psx-xperience.cfg` (run-ahead, fullscreen, key binds).
+//! - [`config`] — `polystnx.cfg` (run-ahead, fullscreen, key binds).
 //! - [`core_update`] — download/update the SwanStation core from the libretro buildbot.
 //! - [`dirs`] — the portable app layout (one root: next to the executable
-//!   on Windows/Linux, `~/Documents/PSX Xperience` on macOS).
+//!   on Windows/Linux, `~/Documents/PSX PolystnX` on macOS).
 //! - [`devmenu`] — the dev-mode menu (Konami-code secret; blank for now).
-//! - [`idle`] — the idle/root screen (`xperience`'s home: TV off, "Inserir cartucho").
+//! - [`idle`] — the idle/root screen (`polystnx`'s home: TV off, "Inserir cartucho").
 //! - [`rom_rename`] — rename ROMs to their canonical No-Intro name (settings-screen action).
-//! - [`runner`] — the emulator run-loop (`emu-run`, and `xperience` between games).
-//! - [`settings`] — the settings screen (`xperience` only, opened with `O` on the shelf).
+//! - [`runner`] — the emulator run-loop (`emu-run`, and `polystnx` between games).
+//! - [`settings`] — the settings screen (`polystnx` only, opened with `O` on the shelf).
 //! - [`sfx`] — the console's embedded foley sounds (insert/eject/power/reset).
-//! - [`shelf`] — the selector grid (`selector`, and `xperience` between games).
+//! - [`shelf`] — the selector grid (`selector`, and `polystnx` between games).
 //! - [`update_check`] — startup checks for a newer release/SwanStation core.
 
 pub mod bios;
@@ -32,7 +32,7 @@ pub mod shelf;
 pub mod update_check;
 
 /// A logo oficial do RetroAchievements (o favicon do site, embutida) — o
-/// runner/bin registra no `Cabinet` com [`xperience_platform::RA_LOGO_IMG`]
+/// runner/bin registra no `Cabinet` com [`polystnx_platform::RA_LOGO_IMG`]
 /// para o badge do queixo. Vermelho/dourado/azul: a marca lida na própria
 /// TV.
 pub const RA_ICON_PNG: &[u8] = include_bytes!("../assets/ra-icon.png");

@@ -5,8 +5,8 @@
 
 use std::path::{Path, PathBuf};
 
-pub use xperience_ra::hash::normalize_serial;
-use xperience_ra::hash::psx_serial;
+pub use polystnx_ra::hash::normalize_serial;
+use polystnx_ra::hash::psx_serial;
 
 /// Um jogo identificado: o serial canônico do primeiro disco (a identidade
 /// que sustenta estante, playtime, favoritos e RA) e quantos discos são.

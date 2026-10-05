@@ -3,7 +3,7 @@
 //! real nameplate) with the notification block in the chin's right side, and
 //! captures it headlessly via `Cabinet::capture_bmp`.
 //!
-//! Run: `cargo run -p xperience-app --example ra_osd_mock` — writes BMPs to
+//! Run: `cargo run -p polystnx-app --example ra_osd_mock` — writes BMPs to
 //! docs/mocks/ (convert with `sips -s format png` or any image tool).
 //!
 //! Now uses the real OSD queue (`Cabinet::push_osd`) that ships in-game.
@@ -11,7 +11,7 @@
 use std::path::PathBuf;
 use std::time::Duration;
 
-use xperience_platform::{FrameRef, PanelButton, PixelFormat, Platform, DEMO_BADGE_IMG};
+use polystnx_platform::{FrameRef, PanelButton, PixelFormat, Platform, DEMO_BADGE_IMG};
 
 fn main() -> anyhow::Result<()> {
     let out_dir = PathBuf::from("docs/mocks");
@@ -19,12 +19,12 @@ fn main() -> anyhow::Result<()> {
 
     let plat = Platform::new().map_err(|e| anyhow::anyhow!(e.to_string()))?;
     let mut cab = plat
-        .create_cabinet("PSX Xperience", 1280, 800, false)
+        .create_cabinet("PolystnX", 1280, 800, false)
         .map_err(|e| anyhow::anyhow!(e.to_string()))?;
 
     // What the app shows in-game today: nameplate with versions, the panel's
     // command rows, power on, a running session clock.
-    cab.set_nameplate("PSX Xperience v0.14.0\nSwanStation 1.63");
+    cab.set_nameplate("PolystnX v0.14.0\nSwanStation 1.63");
     cab.set_panel(
         None,
         None,
