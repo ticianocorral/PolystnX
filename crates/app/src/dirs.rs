@@ -19,7 +19,6 @@
 //! a `.exe` anywhere the user put it is already writable and exactly where
 //! they'd look for `roms/` next to it.
 
-#[cfg(not(target_os = "windows"))]
 use std::path::Path;
 use std::path::PathBuf;
 
@@ -72,7 +71,7 @@ pub fn migrate_legacy_data_root() {
     DONE.get_or_init(|| {
         // O arquivo de configuração também trocou de nome no rebrand —
         // renomeia dentro da raiz (que já foi migrada acima, se preciso).
-        #[cfg(any(target_os = "macos", target_os = "linux"))]
+        // Vale em todas as plataformas: no Windows a raiz é a pasta do exe.
         {
             let cfg_dir = app_root().join("config");
             let old = cfg_dir.join("psx-xperience.cfg");
@@ -113,7 +112,9 @@ pub fn migrate_legacy_data_root() {
 
 /// A migração em si — separada para o teste poder exercitar com diretórios
 /// sintéticos. Falha fica registrada e de lado: sem o legado migrado o app
-/// simplesmente começa uma raiz nova.
+/// simplesmente começa uma raiz nova. No Windows não há raiz legada (o
+/// layout portável nasce novo no rebrand) — só testes a exercitam lá.
+#[cfg(any(target_os = "macos", target_os = "linux", test))]
 fn try_migrate_legacy_root(new_root: &Path, legacy_root: &Path) -> bool {
     if !new_root.exists() && legacy_root.exists() {
         if let Err(e) = std::fs::rename(legacy_root, new_root) {
