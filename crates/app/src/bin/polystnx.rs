@@ -1,8 +1,8 @@
 //! The whole thing: idle → selector → game → idle → …, in one process, no
 //! shell glue, no installation. Portable: `roms/`, `core/`, `assets/`,
-//! `saves/`, `notes/` and a `config/` folder (psx-xperience.cfg, nointro.dat,
+//! `saves/`, `notes/` and a `config/` folder (polystnx.cfg, nointro.dat,
 //! library.json, hashcache.json) all live in one root (see
-//! `xperience_app::dirs`) — next to the executable on Windows/Linux,
+//! `polystnx_app::dirs`) — next to the executable on Windows/Linux,
 //! `~/Documents/PSX Xperience` on macOS — drop ROMs in `roms/` and go.
 //!
 //! The idle screen (TV off, "Estante de games"/"Configurações" in place of
@@ -13,11 +13,11 @@
 //! (state, saves, TV to snow) and back on again, and Eject only takes once
 //! off, landing back on the idle screen (plan §3.3). "Configurações" (idle
 //! screen or shelf) opens settings (controls, run-ahead, fullscreen, SwanStation
-//! core download/update) — see `xperience_app::settings`.
+//! core download/update) — see `polystnx_app::settings`.
 //!
 //! Usage:
-//!   psx-xperience [--core path/to/swanstation_libretro.{dylib,so,dll}]
-//!             [--config psx-xperience.cfg] [--save-dir DIR] [--system-dir DIR]
+//!   polystnx [--core path/to/swanstation_libretro.{dylib,so,dll}]
+//!             [--config polystnx.cfg] [--save-dir DIR] [--system-dir DIR]
 //!             [--order shelf|name] [--runahead N]
 //!
 //! No `--core`/`$PSX_XPERIENCE_CORE`? Looks for one already downloaded into
@@ -28,15 +28,15 @@ use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, Receiver};
 
 use anyhow::{anyhow, Context, Result};
-use xperience_app::config::Config;
-use xperience_app::core_update;
-use xperience_app::idle::{self, IdleExit};
-use xperience_app::runner::{run_game, GameExit, GameSpec};
-use xperience_app::settings;
-use xperience_app::shelf::{self, Pick, ShelfOpts};
-use xperience_app::update_check::{self, UpdateNotice};
-use xperience_domain::{Catalog, Order};
-use xperience_platform::{Cabinet, MenuMode, MenuNav, Platform, RaStatus, Screen};
+use polystnx_app::config::Config;
+use polystnx_app::core_update;
+use polystnx_app::idle::{self, IdleExit};
+use polystnx_app::runner::{run_game, GameExit, GameSpec};
+use polystnx_app::settings;
+use polystnx_app::shelf::{self, Pick, ShelfOpts};
+use polystnx_app::update_check::{self, UpdateNotice};
+use polystnx_domain::{Catalog, Order};
+use polystnx_platform::{Cabinet, MenuMode, MenuNav, Platform, RaStatus, Screen};
 
 struct Args {
     /// Explicit override; `None` means "look in `core/` at launch, and again
@@ -65,7 +65,7 @@ struct Args {
 }
 
 fn default_core_path() -> Option<PathBuf> {
-    let p = xperience_app::dirs::core_dir().join(core_update::core_file_name());
+    let p = polystnx_app::dirs::core_dir().join(core_update::core_file_name());
     p.is_file().then_some(p)
 }
 
@@ -131,10 +131,10 @@ fn parse_args() -> Result<Args> {
         }
     }
 
-    let save_dir = save_dir.unwrap_or_else(xperience_app::dirs::saves_dir);
+    let save_dir = save_dir.unwrap_or_else(polystnx_app::dirs::saves_dir);
     // O system directory do core é a BIOS (plano §1.1) — bios/, nunca saves/.
-    let system_dir = system_dir.unwrap_or_else(xperience_app::dirs::bios_dir);
-    let notes_dir = notes_dir.unwrap_or_else(xperience_app::dirs::notes_dir);
+    let system_dir = system_dir.unwrap_or_else(polystnx_app::dirs::bios_dir);
+    let notes_dir = notes_dir.unwrap_or_else(polystnx_app::dirs::notes_dir);
     Ok(Args {
         core,
         config,
@@ -151,7 +151,7 @@ fn parse_args() -> Result<Args> {
     })
 }
 
-const HELP: &str = "psx-xperience [--core <lib>] [--config psx-xperience.cfg]\n\
+const HELP: &str = "polystnx [--core <lib>] [--config polystnx.cfg]\n\
        [--save-dir DIR] [--system-dir DIR] [--notes-dir DIR]\n\
        [--order shelf|name] [--runahead N]\n\
        [--debug-settings main|controls --shot out.bmp]\n\
@@ -164,7 +164,7 @@ game, the panel's Power button powers off (saves, TV to snow) and back on\n\
 again; Eject only takes once off, back to idle.\n\
 \"Configurações\" (idle screen or shelf) opens settings (controls, núcleo\n\
 SwanStation, run-ahead, fullscreen, checar atualizações ao abrir) — saved\n\
-straight to psx-xperience.cfg. Window-close on the idle screen, or closing a\n\
+straight to polystnx.cfg. Window-close on the idle screen, or closing a\n\
 game window, ends the app — no ceremony there.\n\
 \n\
 The cabinet's nameplate shows the app's own version and, once a core is\n\
@@ -176,7 +176,7 @@ failure). First run without the SwanStation core or nointro.dat? The idle\n\
 screen opens on a setup page inside the TV, one download button each.\n\
 \n\
 Portable: roms/, core/, assets/ (cover/logo art, matched by ROM file name),\n\
-saves/, notes/, psx-xperience.cfg, library.json all live in one root — next to\n\
+saves/, notes/, polystnx.cfg, library.json all live in one root — next to\n\
 this executable on Windows/Linux, ~/Documents/PSX Xperience on macOS.\n\
 Drop ROMs into roms/ and go; no --core/$PSX_XPERIENCE_CORE? Use\n\
 the settings screen's \"Núcleo\" to download SwanStation automatically, or drop\n\
@@ -185,6 +185,7 @@ THIRD-PARTY-NOTICES.md). An optional nointro.dat at the root gives games\n\
 their canonical No-Intro name.";
 
 fn main() -> Result<()> {
+    polystnx_app::dirs::migrate_legacy_data_root();
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
     // A pasta de updates mudou de lugar (plan revision 1.1.5 do irmão de
     // SNES, aplicada aqui) — o pacote pendente que ficou em saves/update/
@@ -193,20 +194,20 @@ fn main() -> Result<()> {
     // O "será atualizado ao reiniciar" (plan revision): um update baixado
     // pela tela do app vale aqui — substitui o binário/bundle antes de
     // qualquer SDL. Melhor-esforço; falha loga e segue com o atual.
-    xperience_app::update_check::apply_pending_update();
+    polystnx_app::update_check::apply_pending_update();
     let args = parse_args()?;
 
     for dir in [
-        xperience_app::dirs::roms_dir(),
-        xperience_app::dirs::core_dir(),
-        xperience_app::dirs::assets_dir().join("logo"),
-        xperience_app::dirs::assets_dir().join("cover"),
-        xperience_app::dirs::assets_dir().join("disc"),
-        xperience_app::dirs::assets_dir().join("backcover"),
+        polystnx_app::dirs::roms_dir(),
+        polystnx_app::dirs::core_dir(),
+        polystnx_app::dirs::assets_dir().join("logo"),
+        polystnx_app::dirs::assets_dir().join("cover"),
+        polystnx_app::dirs::assets_dir().join("disc"),
+        polystnx_app::dirs::assets_dir().join("backcover"),
         args.save_dir.clone(),
         args.notes_dir.clone(),
-        xperience_app::dirs::retroachievements_dir(),
-        xperience_app::dirs::config_dir(),
+        polystnx_app::dirs::retroachievements_dir(),
+        polystnx_app::dirs::config_dir(),
     ] {
         let _ = std::fs::create_dir_all(&dir);
     }
@@ -223,27 +224,27 @@ fn main() -> Result<()> {
     // (No-Intro/Redump, pelo serial) quando instalado; sem DAT, tabela
     // embutida; sem ambos, o nome do arquivo.
     let open_catalog = || {
-        let dat = xperience_app::dat_update::dat_installed().then(|| {
-            xperience_domain::nointro::NoIntroDat::load(&xperience_app::dirs::nointro_dat_path())
+        let dat = polystnx_app::dat_update::dat_installed().then(|| {
+            polystnx_domain::nointro::NoIntroDat::load(&polystnx_app::dirs::nointro_dat_path())
                 .map_err(|e| log::warn!("DAT no-intro: {e}"))
                 .ok()
         });
         Catalog::open_with_dat(
-            &xperience_app::dirs::roms_dir(),
-            &xperience_app::dirs::library_path(),
+            &polystnx_app::dirs::roms_dir(),
+            &polystnx_app::dirs::library_path(),
             dat.as_ref().and_then(|d| d.as_ref()),
         )
     };
     // A BIOS padrão (configurações → bios): o core recebe o diretório de
     // staging com o symlink da escolhida; sem escolha, a pasta raiz.
-    let effective_system_dir = xperience_app::bios::selected_system_dir(
-        &xperience_app::dirs::bios_dir(),
+    let effective_system_dir = polystnx_app::bios::selected_system_dir(
+        &polystnx_app::dirs::bios_dir(),
         cfg.bios_default.as_deref(),
     );
     let mut catalog = open_catalog().with_context(|| "opening the catalog")?;
     // A estante inteira para o modal "Inserir disco" da troca quente.
     let library: Vec<(String, PathBuf)> = catalog
-        .list(xperience_domain::catalog::Order::Name)
+        .list(polystnx_domain::catalog::Order::Name)
         .unwrap_or_default()
         .iter()
         .map(|e| (e.title().into_owned(), PathBuf::from(&e.rom.path)))
@@ -255,7 +256,7 @@ fn main() -> Result<()> {
     plat.set_pad_map(cfg.padmap.clone());
     // One window for the whole session — shelf and game both draw into it.
     let mut cab = plat
-        .create_cabinet("PSX Xperience", 1280, 800, cfg.fullscreen)
+        .create_cabinet("PolystnX", 1280, 800, cfg.fullscreen)
         .map_err(|e| anyhow!(e.to_string()))?;
     // DEBUG: autoplay — pula idle e estante, vai reto ao jogo. É o mesmo
     // mecanismo do lançamento por processo (abaixo) exposto para dev.
@@ -265,16 +266,16 @@ fn main() -> Result<()> {
             .map(PathBuf::from)
     }) {
         let cartridge = args.autoplay_cartridge.clone(); // a arte vai via --cartridge do pai
-        let core = xperience_app::dirs::core_dir().join(core_update::core_file_name());
+        let core = polystnx_app::dirs::core_dir().join(core_update::core_file_name());
         let spec = GameSpec {
             core,
             rom,
-            system_dir: xperience_app::dirs::roms_dir()
+            system_dir: polystnx_app::dirs::roms_dir()
                 .parent()
                 .unwrap()
                 .join("bios"),
-            save_dir: xperience_app::dirs::saves_dir(),
-            notes_dir: xperience_app::dirs::notes_dir(),
+            save_dir: polystnx_app::dirs::saves_dir(),
+            notes_dir: polystnx_app::dirs::notes_dir(),
             runahead: None,
             shot: None,
             logo: None,
@@ -300,10 +301,10 @@ fn main() -> Result<()> {
     // RetroAchievements, uma vez para todas as telas (início, estante, jogo):
     // a logo oficial (favicon embutido) do badge e o badge em si — conta
     // configurada = "RA ATIVADO" no queixo do que for que a tela esteja na TV.
-    if let Ok(icon) = image::load_from_memory(xperience_app::RA_ICON_PNG) {
+    if let Ok(icon) = image::load_from_memory(polystnx_app::RA_ICON_PNG) {
         let icon = icon.to_rgba8();
         cab.set_image(
-            xperience_platform::RA_LOGO_IMG,
+            polystnx_platform::RA_LOGO_IMG,
             icon.width(),
             icon.height(),
             icon.as_raw(),
@@ -336,7 +337,7 @@ fn main() -> Result<()> {
             &mut cab,
             idle::RESTING_STATIC,
             core_path.is_some(),
-            xperience_app::dat_update::dat_installed(),
+            polystnx_app::dat_update::dat_installed(),
             path,
         )?;
         log::info!("wrote {} (idle preview)", path.display());
@@ -355,7 +356,7 @@ fn main() -> Result<()> {
     let mut update_rx: Option<Receiver<UpdateNotice>> = None;
     if cfg.check_updates_on_start {
         let (tx, rx) = mpsc::channel();
-        let core_dir = xperience_app::dirs::core_dir();
+        let core_dir = polystnx_app::dirs::core_dir();
         let app_version = env!("CARGO_PKG_VERSION").to_string();
         std::thread::spawn(move || update_check::check(core_dir, app_version, tx));
         update_rx = Some(rx);
@@ -380,7 +381,7 @@ fn main() -> Result<()> {
                 idle_static,
                 &mut update_rx,
                 core_path.is_some(),
-                xperience_app::dat_update::dat_installed(),
+                polystnx_app::dat_update::dat_installed(),
             )?
         };
         plat.set_konami_watch(false);
@@ -430,7 +431,7 @@ fn main() -> Result<()> {
                 // O menu do devmode (plan revision: "por enquanto criar menu
                 // em branco apenas com o botão voltar") — `true` aqui é o
                 // fechamento da janela dentro dele, que encerra o app.
-                if xperience_app::devmenu::run(&mut plat, &mut cab)? {
+                if polystnx_app::devmenu::run(&mut plat, &mut cab)? {
                     break 'app;
                 }
                 continue 'app;
@@ -511,7 +512,7 @@ fn main() -> Result<()> {
             // a TV trocando de entrada. O mesmo na volta, no Ejected.
             drop(cab);
             cab = plat
-                .create_cabinet("PSX Xperience", 1280, 800, cfg.fullscreen)
+                .create_cabinet("PolystnX", 1280, 800, cfg.fullscreen)
                 .map_err(|e| anyhow!(e.to_string()))?;
 
             let Some(core) = &core_path else {
@@ -626,8 +627,8 @@ fn no_core_screen(plat: &mut Platform, cab: &mut Cabinet) -> Result<bool> {
 /// `apply_pending_update`, que olha o caminho novo. Idempotente: destino já
 /// existente fica como está, nada é sobrescrito.
 fn migrate_update_out_of_saves() {
-    let old = xperience_app::dirs::saves_dir().join("update");
-    let new = xperience_app::dirs::app_root().join("update");
+    let old = polystnx_app::dirs::saves_dir().join("update");
+    let new = polystnx_app::dirs::app_root().join("update");
     let Ok(entries) = std::fs::read_dir(&old) else {
         return;
     };
@@ -652,7 +653,7 @@ fn migrate_update_out_of_saves() {
 }
 
 /// One-time, best-effort copy of real play progress (saves/notebooks) from
-/// the pre-portable `~/.local/share/psx-xperience` location, if the new
+/// the pre-portable `~/.local/share/polystnx` location, if the new
 /// folders are still empty and the old ones exist. The catalog's play-count
 /// history is deliberately NOT migrated (fresh start) — but a save state or
 /// SRAM file is actual game progress, worth not losing silently just because
@@ -660,10 +661,10 @@ fn migrate_update_out_of_saves() {
 /// Windows used `%APPDATA%`, not covered here — lower value to chase).
 fn migrate_old_data() {
     if let Some(home) = std::env::var_os("HOME") {
-        let old_base = PathBuf::from(home).join(".local/share/psx-xperience");
+        let old_base = PathBuf::from(home).join(".local/share/polystnx");
         migrate_pairs([
-            (old_base.join("saves"), xperience_app::dirs::saves_dir()),
-            (old_base.join("notes"), xperience_app::dirs::notes_dir()),
+            (old_base.join("saves"), polystnx_app::dirs::saves_dir()),
+            (old_base.join("notes"), polystnx_app::dirs::notes_dir()),
         ]);
     }
     migrate_macos_bundle_sibling();
@@ -672,20 +673,20 @@ fn migrate_old_data() {
 }
 
 /// Plan revision: "criar pasta config e colocar o cfg, o dat, library e o
-/// hash" — move `psx-xperience.cfg`, `nointro.dat`, `library.json` e
+/// hash" — move `polystnx.cfg`, `nointro.dat`, `library.json` e
 /// `hashcache.json` da raiz do app para `config/`. Idempotente: só move
 /// quando o destino não existe (um `--config` explícito nunca é tocado —
 /// a migração só trata os nomes padrão na raiz). Roda antes do
 /// `Config::load` e da abertura do catálogo, que leem os caminhos novos.
 fn migrate_root_files_into_config() {
-    let config = xperience_app::dirs::config_dir();
+    let config = polystnx_app::dirs::config_dir();
     for item in [
-        "psx-xperience.cfg",
+        "polystnx.cfg",
         "nointro.dat",
         "library.json",
         "hashcache.json",
     ] {
-        let src = xperience_app::dirs::app_root().join(item);
+        let src = polystnx_app::dirs::app_root().join(item);
         let dst = config.join(item);
         if !src.is_file() || dst.exists() {
             continue;
@@ -704,8 +705,8 @@ fn migrate_root_files_into_config() {
 /// `retroachievements/`. Idempotente: só move quando o destino não existe
 /// (dois lados vivos = fica como está; nada do RA é sobrescrito).
 fn migrate_ra_out_of_saves() {
-    let ra = xperience_app::dirs::retroachievements_dir();
-    let saves = xperience_app::dirs::saves_dir();
+    let ra = polystnx_app::dirs::retroachievements_dir();
+    let saves = polystnx_app::dirs::saves_dir();
     for item in ["ra-cache", "ra-earned", "ra-progress", "ra-pending.jsonl"] {
         let src = saves.join(item);
         let dst = ra.join(item);
@@ -750,11 +751,11 @@ fn migrate_macos_bundle_sibling() {
         return; // dev build, not a packaged .app — nothing to migrate
     };
     migrate_pairs([
-        (old_root.join("roms"), xperience_app::dirs::roms_dir()),
-        (old_root.join("core"), xperience_app::dirs::core_dir()),
-        (old_root.join("assets"), xperience_app::dirs::assets_dir()),
-        (old_root.join("saves"), xperience_app::dirs::saves_dir()),
-        (old_root.join("notes"), xperience_app::dirs::notes_dir()),
+        (old_root.join("roms"), polystnx_app::dirs::roms_dir()),
+        (old_root.join("core"), polystnx_app::dirs::core_dir()),
+        (old_root.join("assets"), polystnx_app::dirs::assets_dir()),
+        (old_root.join("saves"), polystnx_app::dirs::saves_dir()),
+        (old_root.join("notes"), polystnx_app::dirs::notes_dir()),
     ]);
 }
 

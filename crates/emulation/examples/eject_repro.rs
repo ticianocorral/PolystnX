@@ -3,14 +3,14 @@
 //! pela disk control interface (fora do `retro_run`, como o worker faz) e
 //! continua rodando — depois fecha a bandeja de volta.
 //!
-//!   cargo run -p xperience-emulation --example eject_repro -- \
+//!   cargo run -p polystnx-emulation --example eject_repro -- \
 //!       --core core/swanstation_libretro.dylib \
 //!       --bios-dir .../bios --rom "....chd" [--pre N] [--post N]
 
 use std::path::PathBuf;
 use std::time::Instant;
 
-use xperience_emulation::Core;
+use polystnx_emulation::Core;
 
 fn main() -> anyhow::Result<()> {
     let mut it = std::env::args().skip(1);

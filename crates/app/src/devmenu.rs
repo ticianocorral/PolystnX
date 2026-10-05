@@ -13,7 +13,7 @@ use std::sync::mpsc::{self, Receiver, TryRecvError};
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
-use xperience_platform::{Cabinet, MenuMode, MenuNav, Platform, Screen};
+use polystnx_platform::{Cabinet, MenuMode, MenuNav, Platform, Screen};
 
 use crate::dirs;
 
@@ -451,7 +451,7 @@ mod tests {
     /// raiz temporária única por teste (sem dep de tempfile)
     fn tempfile_root(tag: &str) -> std::path::PathBuf {
         std::env::temp_dir().join(format!(
-            "xperience-devmenu-test-{}-{tag}",
+            "polystnx-devmenu-test-{}-{tag}",
             std::process::id()
         ))
     }

@@ -3,7 +3,7 @@
 //! action. Para PSX o nome canônico vem do **DAT por serial**
 //! (`nointro.dat` — Redump "Sony - PlayStation", o mesmo casamento do
 //! catálogo: `SLUS-00402` → "Tekken 3 (USA)"); sem DAT, da tabela embutida
-//! (`xperience_domain::psx`). Um jogo que nenhuma das duas fontes conhece
+//! (`polystnx_domain::psx`). Um jogo que nenhuma das duas fontes conhece
 //! fica com o nome que o usuário deu. Best-effort throughout: a single file
 //! that can't be renamed (permissions, a same-named file already there) is
 //! skipped and logged, not fatal.
@@ -17,7 +17,7 @@
 use std::fs;
 use std::path::Path;
 
-use xperience_domain::{library, nointro::NoIntroDat, psx};
+use polystnx_domain::{library, nointro::NoIntroDat, psx};
 
 use crate::runner::sanitize_dir_name;
 

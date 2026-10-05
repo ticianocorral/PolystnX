@@ -2,7 +2,7 @@
 //! ("the byte at 0x0000 becomes 100") fires exactly when the memory says
 //! so, survives save/load, and resets.
 
-use xperience_ra::runtime::{Achievement, Session};
+use polystnx_ra::runtime::{Achievement, Session};
 
 fn ach(id: u32, memaddr: &str) -> Achievement {
     Achievement {

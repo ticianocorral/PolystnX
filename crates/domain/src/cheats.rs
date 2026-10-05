@@ -38,7 +38,7 @@
 //! of games had a curated entry for here; this app has no way to read
 //! 2000+ games' headers without owning every cartridge, so there's no way
 //! to key a comprehensive database by that fact). A caller passes whatever
-//! title it already has for display (`xperience_app::runner` passes the
+//! title it already has for display (`polystnx_app::runner` passes the
 //! ROM file's stem, the same string saves/notes are already keyed by) —
 //! exact match first (case-insensitive), so a ROM named the usual
 //! `Title (Region)` way gets exactly that region's addresses; if that

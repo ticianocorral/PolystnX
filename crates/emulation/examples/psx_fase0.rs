@@ -6,14 +6,14 @@
 //! does `RETRO_MEMORY_SAVE_RAM` carry it, or does the plan B (core options)
 //! decide?
 //!
-//!   cargo run -p xperience-emulation --example psx_fase0 -- \
+//!   cargo run -p polystnx-emulation --example psx_fase0 -- \
 //!       --core core/swanstation_libretro.dylib \
 //!       --bios-dir "…" /bios --rom jogo.chd --save-dir "…" /saves \
 //!       [--frames N] [--shot out.bmp]
 
 use std::path::PathBuf;
 
-use xperience_emulation::{Core, MEMORY_SAVE_RAM, MEMORY_SYSTEM_RAM};
+use polystnx_emulation::{Core, MEMORY_SAVE_RAM, MEMORY_SYSTEM_RAM};
 
 struct Args {
     core: PathBuf,
@@ -94,12 +94,12 @@ fn write_bmp(
     path: &std::path::Path,
     w: u32,
     h: u32,
-    format: xperience_emulation::PixelFormat,
+    format: polystnx_emulation::PixelFormat,
     pixels: &[u8],
 ) -> anyhow::Result<()> {
     let rgba: Vec<u8> = match format {
-        xperience_emulation::PixelFormat::Xrgb8888 => pixels.to_vec(),
-        xperience_emulation::PixelFormat::Rgb565 => pixels
+        polystnx_emulation::PixelFormat::Xrgb8888 => pixels.to_vec(),
+        polystnx_emulation::PixelFormat::Rgb565 => pixels
             .as_chunks::<2>()
             .0
             .iter()

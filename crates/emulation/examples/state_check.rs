@@ -1,13 +1,13 @@
 //! Sanity-check save states and SRAM against a real core + ROM.
 //!
-//!   cargo run -p xperience-emulation --example state_check -- <core> <rom.sfc>
+//!   cargo run -p polystnx-emulation --example state_check -- <core> <rom.sfc>
 //!
 //! Runs to frame 600 twice — once straight, once via a save at 300 and a
 //! reload — and checks the frame hashes match. Then reports SRAM size.
 
 use std::hash::{Hash, Hasher};
 
-use xperience_emulation::{Button, Core};
+use polystnx_emulation::{Button, Core};
 
 fn frame_hash(core: &mut Core) -> u64 {
     let f = core.take_frame().expect("a frame");

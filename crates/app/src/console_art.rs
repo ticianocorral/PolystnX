@@ -5,7 +5,7 @@
 //! same "local file wins" convention per-game art already follows; a broken
 //! override falls back to the baked-in image instead of dropping it.
 
-use xperience_platform::Cabinet;
+use polystnx_platform::Cabinet;
 
 use crate::dirs;
 
@@ -16,6 +16,12 @@ const DEFAULT_CONSOLE_TAG: &[u8] = include_bytes!("../assets/console_tag.png");
 /// O leitor de CD real (foto recortada, mascarada em círculo) — placeholder
 /// sob o disco girando.
 const DEFAULT_CD_READER: &[u8] = include_bytes!("../assets/cd_reader.png");
+/// A mesa do spindle (onde o CD assenta) — recorte da mesa do leitor, girado
+/// em runtime com o mesmo ângulo do disco.
+const DEFAULT_CD_SEAT: &[u8] = include_bytes!("../assets/cd_seat.png");
+/// A logo pixel-art mostrada no painel quando o console boota pela BIOS
+/// ("Ligar sem disco") — o jogo do topo do painel quando não há jogo.
+const DEFAULT_BIOS_LOGO: &[u8] = include_bytes!("../assets/bios_logo.png");
 /// O vidro da tampa de acrílico (gradientes de reflexo pré-renderizados —
 /// círculos chapados ficavam estranhos por cima da arte do disco).
 const DEFAULT_LID_GLASS: &[u8] = include_bytes!("../assets/lid_glass.png");
@@ -28,6 +34,7 @@ pub(crate) fn load_brand_images(cab: &mut Cabinet) {
     load_console_logo(cab);
     load_slot_tag(cab);
     load_cd_reader(cab);
+    load_cd_seat(cab);
 }
 
 /// O placeholder do leitor: sempre a imagem embutida (não tem override —
@@ -53,6 +60,36 @@ pub(crate) fn load_cd_reader(cab: &mut Cabinet) {
         Err(e) => {
             log::warn!("console art: vidro da tampa embutido: {e}");
             cab.set_lid_glass(None);
+        }
+    }
+}
+
+/// A logo do boot pela BIOS: sempre a imagem embutida — decodificada sob
+/// demanda (uma vez por sessão de BIOS, ao montar o painel).
+pub(crate) fn bios_panel_logo() -> Option<(u32, u32, Vec<u8>)> {
+    match image::load_from_memory(DEFAULT_BIOS_LOGO) {
+        Ok(img) => {
+            let img = img.thumbnail(640, 640).to_rgba8();
+            Some((img.width(), img.height(), img.into_raw()))
+        }
+        Err(e) => {
+            log::warn!("console art: logo da BIOS embutida: {e}");
+            None
+        }
+    }
+}
+
+/// A mesa do spindle: sempre a imagem embutida (é "hardware", como o leitor).
+pub(crate) fn load_cd_seat(cab: &mut Cabinet) {
+    match image::load_from_memory(DEFAULT_CD_SEAT) {
+        Ok(img) => {
+            let img = img.thumbnail(256, 256).to_rgba8();
+            let (w, h) = img.dimensions();
+            cab.set_cd_seat(Some((w, h, img.as_raw().as_slice())));
+        }
+        Err(e) => {
+            log::warn!("console art: mesa do spindle embutida: {e}");
+            cab.set_cd_seat(None);
         }
     }
 }
@@ -133,16 +170,18 @@ mod tests {
     #[test]
     fn built_in_brand_images_decode() {
         // The whole point of the baked-in images: they must decode and keep
-        // their shapes even after the thumbnail cap — the logo is the XP
-        // Xperience lockup (quase quadrado), a tag continua wordmark 4:1.
+        // their shapes even after the thumbnail cap — the logo is the
+        // PolystnX lockup (símbolo em cima do wordmark, quase quadrado) e a
+        // tag continua uma wordmark deitada.
         let logo = image::load_from_memory(DEFAULT_CONSOLE_LOGO)
             .expect("built-in console logo")
             .thumbnail(640, 640);
         let tag = image::load_from_memory(DEFAULT_CONSOLE_TAG)
             .expect("built-in console tag")
             .thumbnail(1024, 1024);
-        assert!(logo.width() > logo.height());
-        assert!(tag.width() > tag.height() * 4);
+        assert!(logo.width() > logo.height() / 2);
+        assert!(logo.height() > logo.width() / 2);
+        assert!(tag.width() > tag.height() * 2);
         // The wordmarks carry alpha (transparent margins around the text).
         assert!(image::load_from_memory(DEFAULT_CONSOLE_LOGO)
             .expect("logo")

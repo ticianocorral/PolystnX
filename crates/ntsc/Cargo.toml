@@ -1,5 +1,5 @@
 [package]
-name = "xperience-ntsc"
+name = "polystnx-ntsc"
 version.workspace = true
 edition.workspace = true
 license = "LGPL-2.1-or-later"

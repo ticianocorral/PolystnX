@@ -1,7 +1,7 @@
 //! No-Intro DAT parsing (plan §4.1): canonical ROM titles by CRC32. No
 //! network here — the app downloads the DAT itself when missing (setup
-//! screen, `xperience_app::dat_update`, from the libretro-database mirror)
-//! or the user drops one at `xperience_app::dirs::nointro_dat_path`.
+//! screen, `polystnx_app::dat_update`, from the libretro-database mirror)
+//! or the user drops one at `polystnx_app::dirs::nointro_dat_path`.
 //! Entirely optional: without it, the catalog falls back to the SNES
 //! header's internal title or the file name, same as before.
 
@@ -174,7 +174,7 @@ fn base_serial(serial: &str) -> Option<&str> {
 }
 
 /// `slus_004.02` → `SLUS-00402` — a mesma normalização do scan de discos
-/// (`xperience_ra::hash::normalize_serial`), replicada aqui para o domain
+/// (`polystnx_ra::hash::normalize_serial`), replicada aqui para o domain
 /// não depender do crate de RA para uma função de três linhas.
 fn normalize_serial(raw: &str) -> String {
     raw.trim()
@@ -299,7 +299,7 @@ mod tests {
         // contents. Thread id disambiguates them, same fix `catalog.rs`'s
         // own temp-file tests already use.
         let path = std::env::temp_dir().join(format!(
-            "xperience-nointro-test-{}-{:?}.dat",
+            "polystnx-nointro-test-{}-{:?}.dat",
             std::process::id(),
             std::thread::current().id()
         ));

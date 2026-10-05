@@ -1,5 +1,5 @@
 [package]
-name = "xperience-domain"
+name = "polystnx-domain"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -16,4 +16,4 @@ crc32fast.workspace = true
 md-5.workspace = true
 sha1.workspace = true
 roxmltree = "0.21"
-xperience-ra.workspace = true
+polystnx-ra.workspace = true

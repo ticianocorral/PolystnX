@@ -1,7 +1,7 @@
 //! Dump a CHD's header and CD track metadata — the Fase 0 ground truth for
 //! the custom cdreader (`src/hash.rs`).
 //!
-//!   cargo run -p xperience-ra --example dump_chd -- <file.chd>
+//!   cargo run -p polystnx-ra --example dump_chd -- <file.chd>
 
 use std::fs::File;
 

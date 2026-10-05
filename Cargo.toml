@@ -10,10 +10,10 @@ members = [
 ]
 
 [workspace.package]
-version = "0.1.4"
+version = "0.2.0"
 edition = "2021"
 license = "MIT"
-repository = "https://github.com/ticianocorral/psx-xperience"
+repository = "https://github.com/ticianocorral/polystnx"
 rust-version = "1.98"
 
 [workspace.dependencies]
@@ -27,7 +27,7 @@ serde_json = "1"
 ureq = { version = "2", features = ["json"] }
 crc32fast = "1.4"
 md-5 = "0.10"
-xperience-ra = { path = "crates/ra" }
+polystnx-ra = { path = "crates/ra" }
 sha1 = "0.10"
 hex = "0.4"
 

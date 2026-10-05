@@ -1,4 +1,4 @@
-# PSX Xperience
+# PolystnX
 
 O segundo console da família **Retro Xperience** — emuladores-portáteis
 onde o console inteiro vive na tela, com **a mesma interface** do
@@ -35,7 +35,7 @@ cargo build && cargo test
 Sem SDL3 no sistema, compile-o junto (precisa de CMake + toolchain C):
 
 ```bash
-cargo build --features xperience-platform/vendored-sdl
+cargo build --features polystnx-platform/vendored-sdl
 ```
 
 `emu-run` roda um disco solto sem o resto do app:

@@ -1,5 +1,5 @@
 [package]
-name = "xperience-emulation"
+name = "polystnx-emulation"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

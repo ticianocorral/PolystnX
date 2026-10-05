@@ -1,5 +1,5 @@
 //! The emulator run-loop, factored out of the `emu-run` binary so the unified
-//! `xperience` binary can call it between selector visits. Presentation is fixed:
+//! `polystnx` binary can call it between selector visits. Presentation is fixed:
 //! RF NTSC + CRT-tube warp (see docs/fase-0.md).
 
 use std::collections::HashMap;
@@ -8,10 +8,10 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, Context, Result};
-use xperience_emulation::{
+use polystnx_emulation::{
     AnalogStick, Button, Core, Frame as EmuFrame, PixelFormat as EmuFormat, MEMORY_SAVE_RAM,
 };
-use xperience_platform::{
+use polystnx_platform::{
     Cabinet, FrameRef, ModalBackdrop, PanelButton, PixelFormat as PlatFormat, Platform, UiEvent,
     MAX_PORTS,
 };
@@ -119,8 +119,8 @@ pub struct GameSpec {
     pub debug_cart_anim: Option<std::path::PathBuf>,
 }
 
-const PAD: [(Button, xperience_platform::PadButton); 14] = {
-    use xperience_platform::PadButton as P;
+const PAD: [(Button, polystnx_platform::PadButton); 14] = {
+    use polystnx_platform::PadButton as P;
     [
         (Button::B, P::B),
         (Button::Y, P::Y),
@@ -455,7 +455,7 @@ fn spawn_core_worker(
                         let audio = core.audio().to_vec();
                         let ram = want_ram
                             .then(|| {
-                                core.memory_ptr(xperience_emulation::MEMORY_SYSTEM_RAM)
+                                core.memory_ptr(polystnx_emulation::MEMORY_SYSTEM_RAM)
                                     .map(|(ptr, len)| (ptr as usize, len))
                             })
                             .flatten();
@@ -586,7 +586,7 @@ pub(crate) fn pace_frame(next: &mut Instant, frame_time: Duration) {
     *next += frame_time;
     let now = Instant::now();
     if *next <= now {
-        if xperience_platform::trace_enabled() {
+        if polystnx_platform::trace_enabled() {
             let late = now - *next;
             if late > Duration::from_millis(2) {
                 log::warn!(
@@ -932,7 +932,7 @@ fn save_cheat_state(path: &Path, state: &[bool]) {
 
 /// `(description, on)` pairs for the panel — cheap enough to rebuild on every
 /// toggle/navigate, there are only ever a handful.
-fn cheat_rows(defs: &[xperience_domain::CheatDef], state: &[bool]) -> Vec<(String, bool)> {
+fn cheat_rows(defs: &[polystnx_domain::CheatDef], state: &[bool]) -> Vec<(String, bool)> {
     defs.iter()
         .zip(state)
         .map(|(d, &on)| (d.desc.to_string(), on))
@@ -1390,7 +1390,7 @@ fn show_text_slot(cab: &mut Cabinet, notes_dir: &Path, title: &str, slot: u8, me
 }
 
 /// Load the core + ROM and run until the player leaves, drawing into `cab` (the
-/// one persistent window). `plat` and `cab` both outlive the call so `xperience`
+/// one persistent window). `plat` and `cab` both outlive the call so `polystnx`
 /// can reuse them for the next screen.
 /// Guarda o quadro no buffer reutilizado do `last_frame` (565 converte
 /// para XRGB8888; 888 copia como veio).
@@ -1456,7 +1456,7 @@ pub fn run_game(
     if spec.bios {
         log::info!("sem disco — boot na BIOS");
     } else {
-        match xperience_domain::DiscId::from_path(&spec.rom) {
+        match polystnx_domain::DiscId::from_path(&spec.rom) {
             Ok(id) => log::info!("disco: {} ({} disco/s)", id.serial, id.discs),
             Err(e) => log::warn!("disco: {e}"),
         }
@@ -1570,11 +1570,11 @@ pub fn run_game(
     // --- cheats: the full libretro-database slice for this title (plan
     // §4.4, revision) --- Matched by the ROM's own title (same string
     // saves/notes are keyed by), not the cartridge header any more — see
-    // `xperience_domain::cheats`'s doc comment for why. Empty if nothing in
+    // `polystnx_domain::cheats`'s doc comment for why. Empty if nothing in
     // the database lines up with it. Loaded before the side panel below,
     // since its command legend needs to know whether to show the Cheats
     // button at all (plan revision).
-    let cheat_defs = xperience_domain::cheats_for_title(&title);
+    let cheat_defs = polystnx_domain::cheats_for_title(&title);
     let cheat_path = cheat_state_path(&spec.save_dir, &title);
     let mut cheat_state = load_cheat_state(&cheat_path, cheat_defs.len());
     // RetroAchievements hardcore (plan fase 3): cheats stay off entirely.
@@ -1657,7 +1657,7 @@ pub fn run_game(
         .map(|e| e.eq_ignore_ascii_case("m3u"))
         .unwrap_or(false))
     .then(|| {
-        xperience_domain::disc::playlist(&spec.rom)
+        polystnx_domain::disc::playlist(&spec.rom)
             .map_err(|e| log::warn!("m3u {}: {e}", spec.rom.display()))
             .ok()
     })
@@ -1672,6 +1672,10 @@ pub fn run_game(
     // começa VAZIO — o jogo entra pelo botão "Estante de games" do painel.
     let mut lid_open = false;
     let mut disc_in = !spec.bios;
+    // A sessão nasceu no boot da BIOS ("Ligar sem disco")? Inserir um jogo
+    // pela tampa encerra o modo — o painel passa a se comportar como o de
+    // um jogo aberto pela estante.
+    let mut bios_session = spec.bios;
     // "Disco arranhado": remover o disco com o console ligado simula erro
     // de leitura — a imagem rasga por ~2,8 s (overlay) e congela. Reset
     // boota a BIOS; inserir outro disco destrava.
@@ -1703,7 +1707,7 @@ pub fn run_game(
         false,
         true,
         !spec.library.is_empty(),
-        spec.bios,
+        bios_session,
     );
     let decode_panel_art = |path: &Option<PathBuf>, kind: &str| {
         path.as_ref().and_then(|p| match decode_art(p, 640) {
@@ -1715,11 +1719,16 @@ pub fn run_game(
                     let (w, h) = (img.0 as i32, img.1 as i32);
                     let (cx, cy) = (w as f32 / 2.0, h as f32 / 2.0);
                     let r = w.min(h) as f32 / 2.0;
+                    // Furo central de CD de verdade (Ø15mm num disco de
+                    // Ø120mm = 12,5% do raio): por ele aparece a mesa do
+                    // spindle, que gira com o MESMO ângulo do disco.
+                    let hole = r * 0.125;
                     for y in 0..h {
                         for x in 0..w {
                             let dx = x as f32 + 0.5 - cx;
                             let dy = y as f32 + 0.5 - cy;
-                            if dx * dx + dy * dy > r * r {
+                            let d2 = dx * dx + dy * dy;
+                            if d2 > r * r || d2 < hole * hole {
                                 img.2[(y * w + x) as usize * 4 + 3] = 0;
                             }
                         }
@@ -1733,12 +1742,19 @@ pub fn run_game(
             }
         })
     };
-    let logo_img = decode_panel_art(&spec.logo, "logo");
+    // Boot pela BIOS: o topo do painel mostra a logo pixel-art da BIOS
+    // (não há jogo de onde tirar logo).
+    let logo_img = if spec.bios {
+        crate::console_art::bios_panel_logo()
+    } else {
+        decode_panel_art(&spec.logo, "logo")
+    };
     // Console tag wordmark on the slot's base (plan revision) — reloaded per
     // game launch so a direct `emu-run` shows it too; the baked-in image is
     // the fallback (see `console_art`).
     crate::console_art::load_slot_tag(cab);
     crate::console_art::load_cd_reader(cab);
+    crate::console_art::load_cd_seat(cab);
     let cartridge_img = decode_panel_art(&spec.cartridge, "disco");
     let has_cartridge_art = cartridge_img.is_some();
     cab.set_panel(
@@ -3212,6 +3228,70 @@ pub fn run_game(
                             disc_in = true;
                             disc_glitch = None;
                             current_disc = path.clone();
+                            // O painel acompanha o jogo inserido — título,
+                            // logo e arte do disco, igual ao que a estante
+                            // mostra ao abrir o jogo direto. (A sessão de
+                            // cheats/notas/RA continua a do boot: na prática
+                            // quem insere pela tampa parte da BIOS, onde
+                            // tudo isso é vazio.)
+                            bios_session = false;
+                            prev_sig = None;
+                            if let Some((new_title, _)) = spec.library.get(i as usize) {
+                                let assets = crate::dirs::assets_dir();
+                                let rom_str = path.to_string_lossy();
+                                let logo = crate::shelf::find_local_art(
+                                    &assets.join("logo"),
+                                    &rom_str,
+                                    Some(new_title),
+                                );
+                                // A arte do disco vive em assets/disc (o
+                                // PSX não tem "cartucho"); cartridge fica
+                                // como fallback pela convenção antiga.
+                                let cart = crate::shelf::find_local_art(
+                                    &assets.join("disc"),
+                                    &rom_str,
+                                    Some(new_title),
+                                )
+                                .or_else(|| {
+                                    crate::shelf::find_local_art(
+                                        &assets.join("cartridge"),
+                                        &rom_str,
+                                        Some(new_title),
+                                    )
+                                });
+                                let logo_img = decode_panel_art(&logo, "logo");
+                                let cart_img = decode_panel_art(&cart, "disco");
+                                let rows = command_rows(
+                                    &flash,
+                                    !cheat_defs.is_empty(),
+                                    ra_session.is_some(),
+                                    discs.is_some(),
+                                    all_slots_pinned(&notes_meta),
+                                    lid_open,
+                                    true,
+                                    !spec.library.is_empty(),
+                                    false,
+                                );
+                                cab.set_panel(
+                                    logo_img
+                                        .as_ref()
+                                        .map(|(w, h, d)| (*w, *h, d.as_slice())),
+                                    cart_img
+                                        .as_ref()
+                                        .map(|(w, h, d)| (*w, *h, d.as_slice())),
+                                    new_title,
+                                    &rows,
+                                );
+                                // set_panel zera o estado do painel — reafirma
+                                // o que está vivo na sessão.
+                                cab.set_card_labels(
+                                    crate::memcard::card_name(current_card.as_deref())
+                                        .as_deref(),
+                                    crate::memcard::card_name(current_card2.as_deref())
+                                        .as_deref(),
+                                );
+                                cab.set_powered(powered);
+                            }
                             cab.set_drive(lid_open, disc_in);
                             disc_motion = Some((Instant::now(), false));
                             // Silencioso (plan revision: "remover som ao
@@ -3330,7 +3410,7 @@ pub fn run_game(
                 lid_open,
                 disc_in,
                 !spec.library.is_empty(),
-                spec.bios,
+                bios_session,
             ));
             prev_sig = Some(sig);
         }
@@ -3707,11 +3787,10 @@ mod tests {
         note_slot_path, note_text_slot_path, read_text_slot, rom_title, save_cheat_state,
         save_note_image, save_text_slot, sram_file, state_file, total_playtime_secs, EmuFrame,
     };
-    use xperience_emulation::PixelFormat as EmuFormat;
+    use polystnx_emulation::PixelFormat as EmuFormat;
 
     fn scratch_dir(name: &str) -> std::path::PathBuf {
-        let dir =
-            std::env::temp_dir().join(format!("xperience-test-{name}-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("polystnx-test-{name}-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         dir
     }
@@ -3729,7 +3808,7 @@ mod tests {
 
     #[test]
     fn missing_file_defaults_everything_off() {
-        let path = std::env::temp_dir().join("xperience-cheat-test-missing.cheats");
+        let path = std::env::temp_dir().join("polystnx-cheat-test-missing.cheats");
         assert_eq!(load_cheat_state(&path, 2), vec![false, false]);
     }
 

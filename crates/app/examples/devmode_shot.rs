@@ -8,16 +8,16 @@
 
 use std::path::{Path, PathBuf};
 
-use xperience_app::{devmenu, idle};
-use xperience_platform::Platform;
+use polystnx_app::{devmenu, idle};
+use polystnx_platform::Platform;
 
 fn main() -> anyhow::Result<()> {
     let dir = PathBuf::from(std::env::args().nth(1).unwrap_or_else(|| "/tmp".into()));
     let plat = Platform::new().map_err(|e| anyhow::anyhow!(e.to_string()))?;
     let mut cab = plat
-        .create_cabinet("PSX Xperience", 1280, 800, false)
+        .create_cabinet("PolystnX", 1280, 800, false)
         .map_err(|e| anyhow::anyhow!(e.to_string()))?;
-    cab.set_nameplate("PSX Xperience v0.14.0\nSwanStation 1.63 TaC2rea");
+    cab.set_nameplate("PolystnX v0.14.0\nSwanStation 1.63 TaC2rea");
 
     // Dev mode on, as the idle screen would after the Konami code — the
     // idle panel must show "Dev" right above "Configurações".

@@ -4,7 +4,7 @@
 //! bitmap text, letterboxed images). The cabinet furniture (the chamfer ring
 //! from the window edge down to the glass) is redrawn every frame so nothing
 //! ever recreates the window. NTSC colour bleed is applied upstream
-//! (`xperience-ntsc`).
+//! (`polystnx-ntsc`).
 
 use std::borrow::Cow;
 use std::collections::HashMap;
@@ -58,6 +58,8 @@ const SLOT_TAG_IMG: u64 = u64::MAX - 6;
 pub const CD_READER_IMG: u64 = u64::MAX - 8;
 /// O vidro da tampa de acrílico (reflexos pré-renderizados com gradiente).
 pub const LID_GLASS_IMG: u64 = u64::MAX - 9;
+/// A mesa do spindle (onde o CD assenta) — desenhada girando com o disco.
+pub const CD_SEAT_IMG: u64 = u64::MAX - 10;
 
 /// The pause book: two pages, not warped by the tube — a dedicated screen
 /// (plan §3.2/§3.4), not cabinet furniture, so it replaces the whole window
@@ -105,7 +107,7 @@ const PSX_BTN_OPEN: (u8, u8, u8) = (52, 82, 148);
 /// app calls `Cabinet::set_nameplate` with its own version appended, and
 /// what the idle screen's panel falls back to in plain text when there's no
 /// logo image loaded (`draw_panel`'s idle branch).
-pub const BRAND: &str = "PSX Xperience";
+pub const BRAND: &str = "PolystnX";
 const BRAND_TEXT: (u8, u8, u8) = (92, 86, 78);
 
 /// Glyph cell (Noto Sans Mono, anti-aliased, rasterized once at boot into an
@@ -136,7 +138,7 @@ fn glyph_index(ch: char) -> u32 {
     }
 }
 
-/// Pixel layout of a core framebuffer. Mirrors `xperience_emulation::PixelFormat`
+/// Pixel layout of a core framebuffer. Mirrors `polystnx_emulation::PixelFormat`
 /// so the platform layer stays independent of the emulation crate.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PixelFormat {
@@ -1429,6 +1431,18 @@ impl Cabinet {
             Some((w, h, rgba)) => self.set_image(CD_READER_IMG, w, h, rgba),
             None => {
                 self.images.remove(&CD_READER_IMG);
+            }
+        }
+    }
+
+    /// A mesa do spindle (onde o CD assenta): desenhada no eixo do leitor
+    /// com o MESMO ângulo do disco — aparece pelo furo central do CD e
+    /// durante a ejeção. Sem ela, o furo mostra o poço parado.
+    pub fn set_cd_seat(&mut self, img: Option<(u32, u32, &[u8])>) {
+        match img {
+            Some((w, h, rgba)) => self.set_image(CD_SEAT_IMG, w, h, rgba),
+            None => {
+                self.images.remove(&CD_SEAT_IMG);
             }
         }
     }
@@ -4337,19 +4351,17 @@ fn draw_slot_furniture(
         );
         // O estado do slot no adesivo, UMA LINHA CENTRALIZADA (plan
         // revision: "deixe apenas uma linha - e alinhe a copy centralizada"):
-        // card encaixado = o NOME dele em VERDE negrito; vazio = "inserir
-        // memory card" em VERMELHO negrito (o convite à biblioteca).
+        // card encaixado = o NOME dele em PRETO negrito (legibilidade no
+        // adesivo claro; máximo de 16 caracteres); vazio = "inserir memory
+        // card" em VERMELHO negrito (o convite à biblioteca).
         let scale = 0.7_f32;
         let dw = (GLYPH_W as f32 * scale).round() as i32;
         let shown = match card {
-            Some(name) => {
-                let max_chars = ((panel.width() as i32 - 4) / dw).max(1) as usize;
-                clip_label(name, max_chars)
-            }
+            Some(name) => Cow::Owned(name.chars().take(16).collect()),
             None => Cow::Borrowed("inserir memory card"),
         };
         let color = if card.is_some() {
-            (70, 190, 100)
+            (24, 24, 22)
         } else {
             (215, 70, 60)
         };
@@ -4797,6 +4809,41 @@ fn draw_panel_slot(
         false,
     );
 
+    // A mesa do spindle: onde o CD assenta. GIRA com o MESMO ângulo do
+    // disco (mesmo eixo, mesmo quad rotacionado) — aparece pelo furo
+    // central do CD e durante a animação de ejeção; sem disco, fica parada
+    // no último ângulo do giro.
+    if let Some(seat) = images.get(&CD_SEAT_IMG) {
+        // A mesa é o mesmo recorte da arte do leitor (mesma escala: placa a
+        // 0.112 do lado do vão) — girada ela cobre a versão estática que veio
+        // na textura do leitor, sem emenda.
+        let side_seat = (disc.width().min(disc.height()) as f32) * 1.08 * 0.45;
+        let scx = disc.x() as f32 + disc.width() as f32 / 2.0;
+        let scy = disc.y() as f32 + disc.height() as f32 / 2.0;
+        let shw = side_seat / 2.0;
+        let sa = spin_deg.to_radians();
+        let (ss, sc) = (sa.sin(), sa.cos());
+        let white = sdl3::pixels::FColor::WHITE;
+        let seat_corner = |sx: f32, sy: f32| -> Vertex {
+            let (lx, ly) = (sx * shw, sy * shw);
+            Vertex {
+                position: sdl3::render::FPoint::new(
+                    scx + lx * sc - ly * ss,
+                    scy + lx * ss + ly * sc,
+                ),
+                color: white,
+                tex_coord: sdl3::render::FPoint::new((sx + 1.0) / 2.0, (sy + 1.0) / 2.0),
+            }
+        };
+        let seat_verts = [
+            seat_corner(-1.0, -1.0),
+            seat_corner(1.0, -1.0),
+            seat_corner(1.0, 1.0),
+            seat_corner(-1.0, 1.0),
+        ];
+        let _ = canvas.render_geometry(&seat_verts, Some(&seat.tex), &[0, 1, 2, 0, 2, 3]);
+    }
+
     // O disco: desce de cima, ENCAIXA no centro da área livre (entre os
     // botões) e, com o console ligado, GIRA (a arte rotaciona em torno do
     // eixo). Menor que o bloco: cabe no espaço entre Power/Reset e Eject.
@@ -4880,8 +4927,9 @@ fn draw_idle_slot(
 ) -> (Rect, Rect) {
     // As duas faixas de botão no topo — a estante em cima, o boot da BIOS
     // logo abaixo — e o console ocupa o resto, com a MESMA altura da face
-    // da tela de jogo.
-    let btn_h = (GLYPH_H as i32 * 2 + 16) as u32;
+    // da tela de jogo. Mesma altura dos outros botões do painel
+    // (Configurações e as linhas de comando: GLYPH_H + 12).
+    let btn_h = GLYPH_H + 12;
     let strip = Rect::new(block.x(), block.y(), block.width(), btn_h);
     let insert = draw_button(canvas, font, strip, label, true);
     let bios_strip = Rect::new(

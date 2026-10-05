@@ -60,7 +60,7 @@ extern "C" {
         rgb_out: *mut c_void,
         out_pitch: c_long,
     );
-    fn xperience_snes_ntsc_sizeof() -> usize;
+    fn polystnx_snes_ntsc_sizeof() -> usize;
 }
 
 /// Video-signal presets. `Rf` is our tuning (see the vendor README); the rest
@@ -135,7 +135,7 @@ pub struct NtscFilter {
 
 impl NtscFilter {
     pub fn new(preset: Preset) -> Self {
-        let bytes = unsafe { xperience_snes_ntsc_sizeof() };
+        let bytes = unsafe { polystnx_snes_ntsc_sizeof() };
         let table = vec![0u64; bytes.div_ceil(8)].into_boxed_slice();
         let mut me = Self {
             table,
