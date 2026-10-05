@@ -4587,7 +4587,7 @@ fn draw_slot_furniture(
     // O raio acompanha a face, mas com teto: a face cresceu quando as
     // portas desceram, e os botões não podem crescer junto — além de mudar
     // o desenho deles, cada px de raio rouba largura do disco.
-    let btn_r = ((face_h as f32 * 0.26).round() as i32).min(38);
+    let btn_r = ((face_h as f32 * 0.26).round() as i32).min(if door_w < 150 { 30 } else { 38 });
     let col_l = block.x() + 10 + btn_r;
     let col_r = block.right() - 10 - btn_r;
 
