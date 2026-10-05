@@ -4483,27 +4483,21 @@ fn draw_slot_furniture(
                 &l1,
                 usize::MAX,
             );
-            // Linha 2: os botões ANALOG e RUMBLE — preenchem a linha inteira
-            // do furo, metade para cada: plaquinha do cinza dos botões, cópia
-            // centrada (escala cheia no largo, 0.7 no estreito) e o LED
-            // vermelho na PONTA DIREITA (aceso = ligado). Clicar alterna.
+            // Linha 2+: os botões ANALOG e RUMBLE. No painel LARGO ficam
+            // lado a lado (metade do furo cada); no ESTREITO empilham na
+            // vertical, cada um com a largura inteira do furo — alvo de
+            // toque maior e copy legível. Copy à esquerda, LED vermelho na
+            // PONTA DIREITA (aceso = ligado). Clicar alterna.
             let analog_on = if pi == 0 { analog.0 } else { analog.1 };
             let rumble_on = if pi == 0 { rumble.0 } else { rumble.1 };
-            let l2y = l1y + lh + 2;
-            let gap = 6;
-            let half = (hole.width() as i32 - 12 - gap) / 2;
             let copy_scale = if narrow { 0.7_f32 } else { 1.0 };
             let copy_h = (GLYPH_H as f32 * copy_scale).round() as i32;
-            let mut tag = |x: i32, w: i32, copy: &str, on: bool| {
-                fill(
-                    canvas,
-                    PSX_SHELL_EDGE,
-                    Rect::new(x, l2y, w as u32, sh as u32),
-                );
+            let mut tag = |x: i32, y: i32, w: i32, h: i32, copy: &str, on: bool| {
+                fill(canvas, PSX_SHELL_EDGE, Rect::new(x, y, w as u32, h as u32));
                 fill(
                     canvas,
                     PSX_SHELL,
-                    Rect::new(x + 1, l2y + 1, w as u32 - 2, sh as u32 - 2),
+                    Rect::new(x + 1, y + 1, w as u32 - 2, h as u32 - 2),
                 );
                 let copy_w =
                     copy.chars().count() as i32 * (GLYPH_W as f32 * copy_scale).round() as i32;
@@ -4511,7 +4505,7 @@ fn draw_slot_furniture(
                     canvas,
                     font,
                     x + (w - copy_w - 14) / 2,
-                    l2y + (sh - copy_h) / 2,
+                    y + (h - copy_h) / 2,
                     TextStyle::new(copy_scale, (40, 38, 35)),
                     copy,
                     usize::MAX,
@@ -4521,15 +4515,30 @@ fn draw_slot_furniture(
                     canvas,
                     if on { (235, 50, 50) } else { (86, 28, 28) },
                     x + w - 8,
-                    l2y + sh / 2,
+                    y + h / 2,
                     3,
                 );
             };
-            tag(hole.x() + 6, half, "ANALOG", analog_on);
-            let r_x = hole.x() + 6 + half + gap;
-            tag(r_x, half, "RUMBLE", rumble_on);
-            analog_rects[pi] = Rect::new(hole.x() + 6, l2y, half as u32, sh as u32);
-            rumble_rects[pi] = Rect::new(r_x, l2y, half as u32, sh as u32);
+            if narrow {
+                // Empilhados: cada plaquinha ocupa a largura do furo.
+                let fw = hole.width() as i32 - 12;
+                let th = (hole.height() as i32 - 6 - sh - 2 - 2) / 2;
+                let a_y = l1y + sh + 2;
+                let r_y = a_y + th + 2;
+                tag(hole.x() + 6, a_y, fw, th, "ANALOG", analog_on);
+                tag(hole.x() + 6, r_y, fw, th, "RUMBLE", rumble_on);
+                analog_rects[pi] = Rect::new(hole.x() + 6, a_y, fw as u32, th as u32);
+                rumble_rects[pi] = Rect::new(hole.x() + 6, r_y, fw as u32, th as u32);
+            } else {
+                let l2y = l1y + lh + 2;
+                let gap = 6;
+                let half = (hole.width() as i32 - 12 - gap) / 2;
+                tag(hole.x() + 6, l2y, half, sh, "ANALOG", analog_on);
+                let r_x = hole.x() + 6 + half + gap;
+                tag(r_x, l2y, half, sh, "RUMBLE", rumble_on);
+                analog_rects[pi] = Rect::new(hole.x() + 6, l2y, half as u32, sh as u32);
+                rumble_rects[pi] = Rect::new(r_x, l2y, half as u32, sh as u32);
+            }
         }
         if !connected {
             // A entrada vazia (a foto do console real): 3 quadradinhos, cada
