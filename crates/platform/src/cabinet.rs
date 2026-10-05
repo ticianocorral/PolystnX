@@ -4450,14 +4450,30 @@ fn draw_slot_furniture(
         } else {
             pads.0 || pads.1
         };
+        // Painel ESTREITO (Steam Deck, furo < 150 px): o layout adaptativo
+        // (copy e plaquinhas reduzidas que cabem). Painel LARGO (full HD):
+        // o desenho em escala cheia como estava antes do layout adaptativo.
+        let narrow = hole.width() < 150;
         if connected {
             let which = pi + 1;
             let l1 = format!("CONTROLE {which} CONECTADO");
             let full = l1.chars().count() as i32 * GLYPH_W as i32;
-            let scale = ((hole.width() as i32 - 12) as f32 / full as f32).min(1.0);
-            let sh = GLYPH_H as i32;
-            let lh = GLYPH_H as i32;
-            let l1y = hole.y() + 4;
+            let scale = if narrow {
+                ((hole.width() as i32 - 12) as f32 / full as f32).clamp(0.55, 1.0)
+            } else {
+                ((hole.width() as i32 - 12) as f32 / full as f32).min(1.0)
+            };
+            let sh = if narrow {
+                ((GLYPH_H as f32 * scale).round() as i32).max(11)
+            } else {
+                GLYPH_H as i32
+            };
+            let lh = if narrow {
+                ((GLYPH_H as f32 * scale).round() as i32).max(11)
+            } else {
+                GLYPH_H as i32
+            };
+            let l1y = hole.y() + if narrow { 3 } else { 4 };
             draw_text_bold(
                 canvas,
                 font,
@@ -4467,15 +4483,17 @@ fn draw_slot_furniture(
                 &l1,
                 usize::MAX,
             );
-            // Linha 2: os botões ANALOG e RUMBLE GIGANTES — preenchem a
-            // linha inteira do furo, metade para cada: plaquinha do cinza
-            // dos botões, copy centrada na escala 0.7 e o LED vermelho na
-            // PONTA DIREITA (aceso = ligado). Clicar alterna.
+            // Linha 2: os botões ANALOG e RUMBLE — preenchem a linha inteira
+            // do furo, metade para cada: plaquinha do cinza dos botões, cópia
+            // centrada (escala cheia no largo, 0.7 no estreito) e o LED
+            // vermelho na PONTA DIREITA (aceso = ligado). Clicar alterna.
             let analog_on = if pi == 0 { analog.0 } else { analog.1 };
             let rumble_on = if pi == 0 { rumble.0 } else { rumble.1 };
             let l2y = l1y + lh + 2;
             let gap = 6;
             let half = (hole.width() as i32 - 12 - gap) / 2;
+            let copy_scale = if narrow { 0.7_f32 } else { 1.0 };
+            let copy_h = (GLYPH_H as f32 * copy_scale).round() as i32;
             let mut tag = |x: i32, w: i32, copy: &str, on: bool| {
                 fill(
                     canvas,
@@ -4487,13 +4505,13 @@ fn draw_slot_furniture(
                     PSX_SHELL,
                     Rect::new(x + 1, l2y + 1, w as u32 - 2, sh as u32 - 2),
                 );
-                let copy_w = copy.chars().count() as i32 * GLYPH_W as i32;
+                let copy_w = copy.chars().count() as i32 * (GLYPH_W as f32 * copy_scale).round() as i32;
                 draw_text_bold(
                     canvas,
                     font,
-                    x + (w - copy_w - 16) / 2,
-                    l2y + (sh - GLYPH_H as i32) / 2,
-                    TextStyle::new(1.0, (40, 38, 35)),
+                    x + (w - copy_w - 14) / 2,
+                    l2y + (sh - copy_h) / 2,
+                    TextStyle::new(copy_scale, (40, 38, 35)),
                     copy,
                     usize::MAX,
                 );
