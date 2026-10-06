@@ -42,26 +42,29 @@ fn main() -> anyhow::Result<()> {
     // direto (o menu não volta).
     let ok = core.set_eject_state(false);
     println!("fecha tampa (antes do load): {ok:?}");
-    match core.load_disc(&game) {
-        Ok(()) => println!("load_disc: ok"),
-        Err(e) => println!("load_disc: {e}"),
+    // ===== REPRODUÇÃO EXATA DO BOOTFRESH DO APP =====
+    // 1. o velho sai PRIMEIRO: drop → dlclose → refcount 0 → a lib
+    //    DESCARREGA e os globals morrem com ela (criar o novo antes
+    //    mantinha a lib viva com estado sujo = tela preta eterna)
+    drop(core);
+    // 2. core novo: dlopen limpo
+    let mut fresh = polystnx_emulation::Core::load(&core_path)?;
+    // 3. dirs + opções NA MESA antes do init
+    fresh.set_directories(&bios_dir, &PathBuf::from("/tmp/biosinsert-saves"));
+    fresh.set_variable("pcsx_rearmed_show_bios_bootlogo", "disabled");
+    fresh.set_variable("pcsx_rearmed_memcard2", "enabled");
+    fresh.set_variable("pcsx_rearmed_nocdaudio", "disabled");
+    // 4. init + load do jogo (o skip entra direto no exe)
+    fresh.init();
+    match fresh.load_game(&game, &[]) {
+        Ok(()) => println!("boot fresh: load ok"),
+        Err(e) => println!("boot fresh: load FALHOU: {e}"),
     }
-    // Reset COM bootlogo desligado: o pl_reset do Rearmed salta a BIOS e
-    // entra direto no exe (sem animação, sem menu).
-    core.reset();
-    // O handler do app manda TrayEject{false} DEPOIS do SwitchDisc —
-    // simula: ~10 frames depois, fecha de novo.
-    for _i in 0..10 {
-        core.run();
-        let _ = core.take_frame();
-    }
-    let ok2 = core.set_eject_state(false);
-    println!("fecha tampa de novo (TrayEject redundante): {ok2:?}");
     for i in 0..1350 {
-        core.run();
-        if let Some(f) = core.take_frame() {
-            if i % 45 == 0 {
-                let p = out.join(format!("ins-{i:04}.bmp"));
+        fresh.run();
+        if let Some(f) = fresh.take_frame() {
+            if i % 90 == 0 {
+                let p = out.join(format!("bf-{i:04}.bmp"));
                 save(&f, &p);
             }
         }

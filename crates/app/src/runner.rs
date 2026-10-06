@@ -421,7 +421,7 @@ struct CoreOut {
 }
 
 /// Core bruto (handles de dlopen) atravessando uma fronteira de thread.
-struct CoreRunning(Core);
+struct CoreRunning(Option<Core>);
 unsafe impl Send for CoreRunning {}
 fn spawn_core_worker(
     core: Core,
@@ -445,11 +445,15 @@ fn spawn_core_worker(
             unsafe {
                 libc::setpriority(libc::PRIO_DARWIN_THREAD, 0, 12);
             }
-            let mut running = CoreRunning(core);
+            let mut running = CoreRunning(Some(core));
             let mut spec_state = Vec::new();
             let mut disc = current_disc;
             while let Ok(cmd) = rx.recv() {
-                let core = &mut running.0;
+                // None só DENTRO do BootFresh (a lib descarrega entre um core
+                // e outro — dlopen refcounted); fora dele, sempre Some.
+                let Some(core) = running.0.as_mut() else {
+                    break; // core morto (falha de recriação): a sessão acaba
+                };
                 match cmd {
                     CoreCmd::Run { input } => {
                         for (port, btn, held) in &input.buttons {
@@ -515,38 +519,34 @@ fn spawn_core_worker(
                         save_dir,
                         tx,
                     } => {
+                        // O velho sai DE VERDADE: o drop dlcloseta a lib
+                        // (refcount → 0 descarrega) e os globals morrem com
+                        // ela — criar o novo antes mantinha a lib viva com
+                        // estado sujo (a tela preta eterna). Com a lib
+                        // descarregada, o novo dlopen nasce limpo e o skip
+                        // (bootlogo desligado na mesa antes do init) entra
+                        // direto no exe.
+                        let old = running.0.take();
+                        drop(old);
                         match Core::load(&core_path) {
-                            // Apenas símbolos: a MESMA lib compartilha estado
-                            // global via dlopen — inicializar o novo com o
-                            // velho vivo travava (e o drop depois desmanchava
-                            // o estado que o novo montou). Ordem certa: drop
-                            // do velho PRIMEIRO (retro_deinit escreve os
-                            // cards nos arquivos e limpa os globals), então
-                            // init + load do novo com a animação desligada
-                            // (o skip do Rearmed entra direto no exe).
-                            Ok(fresh) => {
-                                let old = std::mem::replace(&mut running.0, fresh);
-                                drop(old);
-                                running.0.set_directories(&bios_dir, &save_dir);
-                                // Animação desligada NA MESA antes do init —
-                                // é o que faz o skip do Rearmed funcionar.
-                                running
-                                    .0
-                                    .set_variable("pcsx_rearmed_show_bios_bootlogo", "disabled");
-                                running.0.set_variable("pcsx_rearmed_memcard2", "enabled");
-                                running.0.set_variable("pcsx_rearmed_nocdaudio", "disabled");
-                                running.0.init();
-                                if running.0.load_game(&fresh_disc, &[]).is_ok() {
+                            Ok(mut fresh) => {
+                                fresh.set_directories(&bios_dir, &save_dir);
+                                fresh.set_variable("pcsx_rearmed_show_bios_bootlogo", "disabled");
+                                fresh.set_variable("pcsx_rearmed_memcard2", "enabled");
+                                fresh.set_variable("pcsx_rearmed_nocdaudio", "disabled");
+                                fresh.init();
+                                if fresh.load_game(&fresh_disc, &[]).is_ok() {
+                                    running.0 = Some(fresh);
                                     disc = fresh_disc;
                                     log::info!("boot fresh: jogo no core recriado (sem animação)");
                                     let _ = tx.send(true);
                                 } else {
-                                    log::warn!("boot fresh: load recusado");
+                                    log::warn!("boot fresh: load recusado — a sessão acaba");
                                     let _ = tx.send(false);
                                 }
                             }
                             Err(e) => {
-                                log::warn!("boot fresh: {e}");
+                                log::warn!("boot fresh: {e} — a sessão acaba");
                                 let _ = tx.send(false);
                             }
                         }
