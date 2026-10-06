@@ -380,6 +380,11 @@ enum CoreCmd {
     },
     SwitchDisc {
         path: PathBuf,
+        /// `true` = troca dentro do MESMO jogo (m3u): o estado da sessão
+        /// volta por cima da recarga. `false` = jogo novo / sessão de BIOS:
+        /// a BIOS re-boota o disco (restaurar snapshot antigo cobria o jogo
+        /// novo e ele nunca bootava).
+        restore: bool,
         tx: std::sync::mpsc::Sender<bool>,
     },
     /// Sem disco + Reset: reseta e boota a BIOS (o console fica ligado).
@@ -491,20 +496,37 @@ fn spawn_core_worker(
                     CoreCmd::WriteMem { id, bytes } => {
                         core.write_memory(id, &bytes);
                     }
-                    CoreCmd::SwitchDisc { path, tx } => {
-                        // Mesma coreografia do fluxo antigo: estado volta por
-                        // cima da recarga; falha, volta ao disco atual.
-                        let state = core.save_state();
-                        core.reset();
-                        if core.load_disc(&path).is_ok() {
-                            if let Some(state) = state {
-                                core.load_state(&state);
+                    CoreCmd::SwitchDisc { path, restore, tx } => {
+                        // `restore` = troca de disco DENTRO do mesmo jogo
+                        // (m3u): o estado volta por cima da recarga. Para
+                        // jogo novo (ou sessão de BIOS), restaurar era
+                        // veneno — o snapshot da BIOS/tela antiga cobria o
+                        // jogo novo e ele nunca bootava: fecha a bandeja,
+                        // troca a imagem e dá reset (a BIOS re-boota o
+                        // disco). Falha, volta ao disco atual.
+                        if restore {
+                            let state = core.save_state();
+                            core.reset();
+                            if core.load_disc(&path).is_ok() {
+                                if let Some(state) = state {
+                                    core.load_state(&state);
+                                }
+                                disc = path;
+                                let _ = tx.send(true);
+                            } else {
+                                let _ = core.load_disc(&disc);
+                                let _ = tx.send(false);
                             }
-                            disc = path;
-                            let _ = tx.send(true);
                         } else {
-                            let _ = core.load_disc(&disc);
-                            let _ = tx.send(false);
+                            let _ = core.set_eject_state(false);
+                            if core.load_disc(&path).is_ok() {
+                                core.reset();
+                                disc = path;
+                                let _ = tx.send(true);
+                            } else {
+                                let _ = core.load_disc(&disc);
+                                let _ = tx.send(false);
+                            }
                         }
                     }
                 }
@@ -3241,9 +3263,13 @@ pub fn run_game(
                         let (d_tx, d_rx) = std::sync::mpsc::channel();
                         let _ = core_tx.send(CoreCmd::SwitchDisc {
                             path: path.clone(),
+                            restore: false,
                             tx: d_tx,
                         });
                         if d_rx.recv().unwrap_or(false) {
+                            // A bandeja fecha com a troca (o worker cuida do
+                            // estado do core): o painel acompanha.
+                            lid_open = false;
                             let _ = core_tx.send(CoreCmd::TrayEject { ejected: false });
                             disc_in = true;
                             disc_glitch = None;
@@ -3335,6 +3361,7 @@ pub fn run_game(
                         let (d_tx, d_rx) = std::sync::mpsc::channel();
                         let _ = core_tx.send(CoreCmd::SwitchDisc {
                             path: path.clone(),
+                            restore: true,
                             tx: d_tx,
                         });
                         if d_rx.recv().unwrap_or(false) {
