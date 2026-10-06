@@ -1798,6 +1798,16 @@ pub fn run_game(
     // worker — a UI NÃO bloqueia no recv (recriar o core leva segundos e
     // era o travamento); o resultado é aplicado por try_recv no passe.
     let mut pending_boot: Option<(std::sync::mpsc::Receiver<bool>, PathBuf, String)> = None;
+    // O gate da segunda animação (plan revision: "deveria carregar a segunda
+    // animação do boot e o jogo"): a inserção pela BIOS bootA o jogo com a
+    // animação completa do core — a TV fica PRETA durante a fase branca
+    // (losango) e revela na transição para a tela preta do logo (a fase do
+    // losango é CLARA, a do logo é ESCURA — o brilho do frame detecta).
+    enum BootCover {
+        WaitBright(Instant),
+        WaitDark(Instant),
+    }
+    let mut bios_boot_cover: Option<BootCover> = None;
     let mut glitch_rng: u32 = 0xC0FF_EEDD;
     let commands = command_rows(
         &flash,
@@ -3847,6 +3857,9 @@ pub fn run_game(
                             current_disc = path.clone();
                             bios_session = false;
                             prev_sig = None;
+                            // A TV cobre a fase branca do boot e revela na
+                            // tela preta do logo (a segunda animação).
+                            bios_boot_cover = Some(BootCover::WaitBright(Instant::now()));
                             let assets = crate::dirs::assets_dir();
                             let rom_str = path.to_string_lossy();
                             let logo = crate::shelf::find_local_art(
@@ -3904,18 +3917,70 @@ pub fn run_game(
                     Err(std::sync::mpsc::TryRecvError::Empty) => {}
                 }
             }
+            // O gate da segunda animação: mede o brilho do frame real — a
+            // fase do losango é CLARA, a do logo é ESCURA. Cobre a TV de
+            // preto durante a clara e revela na escura (timeout de
+            // segurança: 6s esperando a clara, 10s até revelar).
+            if let Some(cover) = bios_boot_cover.as_ref() {
+                let bright = if last_frame.is_empty() {
+                    0.0_f32
+                } else {
+                    let mut sum = 0.0_f32;
+                    let mut n = 0usize;
+                    for px in last_frame.as_chunks::<4>().0.iter().step_by(251) {
+                        sum += (px[0] as f32 + px[1] as f32 + px[2] as f32) / 3.0;
+                        n += 1;
+                    }
+                    if n > 0 {
+                        sum / n as f32
+                    } else {
+                        0.0
+                    }
+                };
+                bios_boot_cover = match cover {
+                    BootCover::WaitBright(t0) => {
+                        if bright > 150.0 || t0.elapsed() > Duration::from_secs(6) {
+                            Some(BootCover::WaitDark(*t0))
+                        } else {
+                            Some(BootCover::WaitBright(*t0))
+                        }
+                    }
+                    BootCover::WaitDark(t0) => {
+                        if bright < 90.0 || t0.elapsed() > Duration::from_secs(10) {
+                            None // revela: a tela preta do logo
+                        } else {
+                            Some(BootCover::WaitDark(*t0))
+                        }
+                    }
+                };
+            }
+            let boot_covered = bios_boot_cover.is_some();
             // Sem quadro novo (worker ocupado no boot/FMV), reapresenta o
             // último: o gabinete segue vivo e o disco continua girando.
             if let Some((w, h)) = last_frame_dims {
-                let fref = FrameRef {
-                    width: w,
-                    height: h,
-                    pitch: w as usize * 4,
-                    format: PlatFormat::Xrgb8888,
-                    pixels: &last_frame,
-                };
-                cab.set_session_time(live_session_time(powered_elapsed, powered_since));
-                cab.present_frame(&fref, last_aspect);
+                if boot_covered {
+                    // TV preta durante a fase branca do boot
+                    let black = vec![0u8; w as usize * h as usize * 4];
+                    let fref = FrameRef {
+                        width: w,
+                        height: h,
+                        pitch: w as usize * 4,
+                        format: PlatFormat::Xrgb8888,
+                        pixels: &black,
+                    };
+                    cab.set_session_time(live_session_time(powered_elapsed, powered_since));
+                    cab.present_frame(&fref, last_aspect);
+                } else {
+                    let fref = FrameRef {
+                        width: w,
+                        height: h,
+                        pitch: w as usize * 4,
+                        format: PlatFormat::Xrgb8888,
+                        pixels: &last_frame,
+                    };
+                    cab.set_session_time(live_session_time(powered_elapsed, powered_since));
+                    cab.present_frame(&fref, last_aspect);
+                }
             }
             // O rasgo do "disco arranhado" durante a janela de erro.
             if let Some(t0) = disc_glitch {
