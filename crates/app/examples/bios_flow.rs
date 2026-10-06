@@ -10,7 +10,6 @@ use std::path::PathBuf;
 
 use polystnx_app::{
     config::Config,
-    dirs,
     runner::{run_game, GameSpec},
 };
 use polystnx_platform::Platform;
