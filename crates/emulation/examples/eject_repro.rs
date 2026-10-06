@@ -19,7 +19,6 @@ fn main() -> anyhow::Result<()> {
     let mut rom = None;
     let mut pre = 300u32;
     let mut post = 1200u32;
-    let mut cpu = None;
     let mut dump = false;
     let mut close_too = false;
     while let Some(a) = it.next() {
@@ -47,9 +46,7 @@ fn main() -> anyhow::Result<()> {
     core.set_directories(&bios_dir, &save_dir);
     core.init();
     core.set_variable("pcsx_rearmed_nocdaudio", "disabled");
-    if let Some(cpu) = &cpu {
-        core.set_variable("pcsx_rearmed_frameskip_type", "disabled");
-    }
+
     core.load_game(&rom, &[])?;
     eprintln!("carregado: {}", rom.display());
     if dump {
