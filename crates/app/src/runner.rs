@@ -516,19 +516,26 @@ fn spawn_core_worker(
                         tx,
                     } => {
                         match Core::load(&core_path) {
-                            Ok(mut fresh) => {
-                                fresh.set_directories(&bios_dir, &save_dir);
-                                // Animação desligada NA MESA antes do init —
-                                // é o que faz o skip do Rearmed funcionar.
-                                fresh.set_variable("pcsx_rearmed_show_bios_bootlogo", "disabled");
-                                fresh.set_variable("pcsx_rearmed_memcard2", "enabled");
-                                fresh.set_variable("pcsx_rearmed_nocdaudio", "disabled");
-                                fresh.init();
-                                // O core VELHO sai primeiro: é no drop que ele
-                                // escreve os cards nos arquivos — o novo lê o
-                                // estado final, não o do boot.
+                            // Apenas símbolos: a MESMA lib compartilha estado
+                            // global via dlopen — inicializar o novo com o
+                            // velho vivo travava (e o drop depois desmanchava
+                            // o estado que o novo montou). Ordem certa: drop
+                            // do velho PRIMEIRO (retro_deinit escreve os
+                            // cards nos arquivos e limpa os globals), então
+                            // init + load do novo com a animação desligada
+                            // (o skip do Rearmed entra direto no exe).
+                            Ok(fresh) => {
                                 let old = std::mem::replace(&mut running.0, fresh);
                                 drop(old);
+                                running.0.set_directories(&bios_dir, &save_dir);
+                                // Animação desligada NA MESA antes do init —
+                                // é o que faz o skip do Rearmed funcionar.
+                                running
+                                    .0
+                                    .set_variable("pcsx_rearmed_show_bios_bootlogo", "disabled");
+                                running.0.set_variable("pcsx_rearmed_memcard2", "enabled");
+                                running.0.set_variable("pcsx_rearmed_nocdaudio", "disabled");
+                                running.0.init();
                                 if running.0.load_game(&fresh_disc, &[]).is_ok() {
                                     disc = fresh_disc;
                                     log::info!("boot fresh: jogo no core recriado (sem animação)");
@@ -1787,6 +1794,10 @@ pub fn run_game(
     // (inserção, `false`): (início, direção), animado no passe do jogo —
     // o drive desenhado segue `cartridge_motion`, não o estado lógico.
     let mut disc_motion: Option<(Instant, bool)> = None;
+    // Inserção pela tampa em andamento (sessão de BIOS): o BootFresh roda no
+    // worker — a UI NÃO bloqueia no recv (recriar o core leva segundos e
+    // era o travamento); o resultado é aplicado por try_recv no passe.
+    let mut pending_boot: Option<(std::sync::mpsc::Receiver<bool>, PathBuf, String)> = None;
     let mut glitch_rng: u32 = 0xC0FF_EEDD;
     let commands = command_rows(
         &flash,
@@ -3343,6 +3354,9 @@ pub fn run_game(
                             // Sessão de BIOS: REcria o core com a animação
                             // desligada — o skip entra direto no exe (o
                             // load no core vivo replaya a BIOS inteira).
+                            // SEM recv bloqueante: a UI continua viva (o
+                            // travamento era o recv segurando o passe por
+                            // segundos de recriação de core).
                             let _ = core_tx.send(CoreCmd::BootFresh {
                                 core_path: spec.core.clone(),
                                 disc: path.clone(),
@@ -3350,13 +3364,24 @@ pub fn run_game(
                                 save_dir: spec.save_dir.clone(),
                                 tx: d_tx,
                             });
-                        } else {
-                            let _ = core_tx.send(CoreCmd::SwitchDisc {
-                                path: path.clone(),
-                                restore: false,
-                                tx: d_tx,
-                            });
+                            let title = spec
+                                .library
+                                .get(i as usize)
+                                .map(|(t, _)| t.clone())
+                                .unwrap_or_default();
+                            pending_boot = Some((d_rx, path.clone(), title));
+                            lid_open = false;
+                            disc_in = true;
+                            cab.set_drive(lid_open, disc_in);
+                            disc_motion = Some((Instant::now(), false));
+                            cab.push_osd(&["LENDO O DISCO..."], None, Duration::from_secs(2));
+                            continue;
                         }
+                        let _ = core_tx.send(CoreCmd::SwitchDisc {
+                            path: path.clone(),
+                            restore: false,
+                            tx: d_tx,
+                        });
                         if d_rx.recv().unwrap_or(false) {
                             // A bandeja fecha com a troca (o worker cuida do
                             // estado do core): o painel acompanha.
@@ -3809,6 +3834,74 @@ pub fn run_game(
                         cab.set_cartridge_motion(None); // assentado de volta
                     } // totalmente fora fica em (1.0, true): p=0, não desenha
                     disc_motion = None;
+                }
+            }
+            // BootFresh concluiu? Aplica o resultado SEM bloquear (o worker
+            // recriou o core e carregou o jogo — o painel acompanha agora).
+            if let Some((rx, _, _)) = pending_boot.as_ref() {
+                match rx.try_recv() {
+                    Ok(ok) => {
+                        let (_, path, new_title) = pending_boot.take().unwrap();
+                        if ok {
+                            disc_glitch = None;
+                            current_disc = path.clone();
+                            bios_session = false;
+                            prev_sig = None;
+                            let assets = crate::dirs::assets_dir();
+                            let rom_str = path.to_string_lossy();
+                            let logo = crate::shelf::find_local_art(
+                                &assets.join("logo"),
+                                &rom_str,
+                                Some(&new_title),
+                            );
+                            // A arte do disco vive em assets/disc; cartridge
+                            // fica como fallback pela convenção antiga.
+                            let cart = crate::shelf::find_local_art(
+                                &assets.join("disc"),
+                                &rom_str,
+                                Some(&new_title),
+                            )
+                            .or_else(|| {
+                                crate::shelf::find_local_art(
+                                    &assets.join("cartridge"),
+                                    &rom_str,
+                                    Some(&new_title),
+                                )
+                            });
+                            let logo_img = decode_panel_art(&logo, "logo");
+                            let cart_img = decode_panel_art(&cart, "disco");
+                            let rows = command_rows(
+                                &flash,
+                                !cheat_defs.is_empty(),
+                                ra_session.is_some(),
+                                discs.is_some(),
+                                all_slots_pinned(&notes_meta),
+                                lid_open,
+                                true,
+                                !spec.library.is_empty(),
+                                false,
+                            );
+                            cab.set_panel(
+                                logo_img.as_ref().map(|(w, h, d)| (*w, *h, d.as_slice())),
+                                cart_img.as_ref().map(|(w, h, d)| (*w, *h, d.as_slice())),
+                                &new_title,
+                                &rows,
+                            );
+                            cab.set_card_labels(
+                                crate::memcard::card_name(current_card.as_deref()).as_deref(),
+                                crate::memcard::card_name(current_card2.as_deref()).as_deref(),
+                            );
+                            cab.set_powered(powered);
+                            cab.push_osd(&["DISCO INSERIDO"], None, Duration::from_secs(2));
+                        } else {
+                            cab.push_osd(&["FALHA AO INSERIR"], None, Duration::from_secs(2));
+                        }
+                    }
+                    Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                        pending_boot = None;
+                        cab.push_osd(&["FALHA AO INSERIR"], None, Duration::from_secs(2));
+                    }
+                    Err(std::sync::mpsc::TryRecvError::Empty) => {}
                 }
             }
             // Sem quadro novo (worker ocupado no boot/FMV), reapresenta o
