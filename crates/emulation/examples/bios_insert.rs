@@ -43,6 +43,14 @@ fn main() -> anyhow::Result<()> {
     }
     let ok = core.set_eject_state(false);
     println!("fecha tampa: {ok:?}");
+    // O handler do app manda TrayEject{false} DEPOIS do SwitchDisc —
+    // simula: ~10 frames depois, fecha de novo.
+    for _i in 0..10 {
+        core.run();
+        let _ = core.take_frame();
+    }
+    let ok2 = core.set_eject_state(false);
+    println!("fecha tampa de novo (TrayEject redundante): {ok2:?}");
     for i in 0..1800 {
         core.run();
         if let Some(f) = core.take_frame() {

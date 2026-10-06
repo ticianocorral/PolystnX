@@ -2287,8 +2287,33 @@ pub fn run_game(
         // exist at all. Which set of buttons a click can land on depends on
         // `paused`: the pause book replaces the whole window (no side panel
         // drawn alongside it), so it has its own hit-test.
-        let events: Vec<UiEvent> = plat
-            .poll(&mut input, &cfg.keymap)
+        let mut polled = plat.poll(&mut input, &cfg.keymap);
+        // DEBUG-AUTOINSERT (diagnóstico headless do fluxo BIOS→jogo):
+        // PSX_XPERIENCE_DEBUG_AUTOINSERT=N frames → dispara o InsertDisc e
+        // escolhe a linha N da lista, exatamente pelo caminho de eventos.
+        static AUTOINSERT: std::sync::OnceLock<Option<u16>> = std::sync::OnceLock::new();
+        let autoinsert = AUTOINSERT.get_or_init(|| {
+            std::env::var("PSX_XPERIENCE_DEBUG_AUTOINSERT")
+                .ok()
+                .and_then(|n| n.parse::<u16>().ok())
+        });
+        if let Some(pick) = autoinsert.as_ref() {
+            thread_local! {
+                static AUTOINSERT_STEP: std::cell::Cell<u8> = const { std::cell::Cell::new(0) };
+            }
+            AUTOINSERT_STEP.with(|st| match st.get() {
+                0 if spec.bios && modal == Modal::None && frames >= 400 => {
+                    st.set(1);
+                    polled.push(UiEvent::InsertDisc);
+                }
+                1 if modal == Modal::Inserir && frames >= 500 => {
+                    st.set(2);
+                    polled.push(UiEvent::ModalPick(*pick));
+                }
+                _ => {}
+            });
+        }
+        let events: Vec<UiEvent> = polled
             .into_iter()
             .filter_map(|ev| match ev {
                 UiEvent::MouseUp(x, y) => {
