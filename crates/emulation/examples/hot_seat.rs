@@ -1,5 +1,5 @@
-//! Diagnóstico: WriteMem no SAVE_RAM com o jogo rodando gruda no card?
-//!   cargo run -p polystnx-emulation --example hot_seat -- <core> <bios-dir> <rom>
+//! Diagnóstico — WriteMem no SAVE_RAM com o jogo rodando gruda no card?
+//! (rode: cargo run -p polystnx-emulation --example hot_seat -- <core> <bios-dir> <rom>)
 
 use polystnx_emulation::Core;
 use std::path::PathBuf;

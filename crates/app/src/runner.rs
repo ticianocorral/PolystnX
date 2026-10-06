@@ -4065,42 +4065,45 @@ pub fn run_game(
         pace_frame(&mut next, frame_time);
     };
 
-    // O core desliga AGORA: ao cair, ele escreve os cards nos ARQUIVOS
-    // (memcards/) e a sincronia com a biblioteca espera essa escrita
-    // terminar — não há flush por SAVE_RAM (é espelho de saída).
+    // ÚLTIMA leitura do SRAM — ANTES de derrubar o core. O Rearmed NÃO
+    // escreve os arquivos pcsx-card*.mcd depois do boot (provado em probe:
+    // o deinit deixa o arquivo com o conteúdo semeado) — o save vive no
+    // card interno, cuja única via de leitura é o SAVE_RAM. O arquivo é só
+    // INPUT de boot; a persistência é do frontend (o mesmo esquema do
+    // auto-save do RetroArch).
+    {
+        drain_core!();
+        let (tx, rx) = std::sync::mpsc::channel();
+        let _ = core_tx.send(CoreCmd::Sram { tx });
+        if let Ok(Some(sram)) = rx.recv() {
+            if let Some(dest) = &current_card {
+                if std::fs::write(dest, &sram).is_ok() {
+                    log::info!(
+                        "card 1: {} sincronizado no fim da sessão ({} bytes)",
+                        dest.display(),
+                        sram.len()
+                    );
+                }
+            }
+        }
+    }
+    // (o drain acima é o último uso destes estados — consome-os pro lint)
+    let _ = (frames, in_flight, last_aspect, last_frame_dims);
     drop(core_tx);
     let _ = worker_handle.join();
-    // O card 1 também mora no ARQUIVO do core: o que o jogo salvou na
-    // sessão volta para o card encaixado (biblioteca) ou para o sram.srm —
-    // desde que o encaixe não tenha mudado na sessão (troca quente troca o
-    // destino; o conteúdo do core pertence ao card que estava no boot).
+    // O ARQUIVO do core é stale por definição (o core não o escreve) —
+    // nada de copiá-lo para a biblioteca (era destrutivo: sobrescrevia o
+    // card com o seed do boot). Sem card encaixado, some (slot vazio).
     let core_card1 = crate::dirs::memcards_dir().join(MC1_SHARED_FILE);
-    // A sincronia de volta pertence ao card ENCAIXADO AGORA (a troca quente
-    // troca o dono do estado: o seat re-semeou o arquivo com o card novo, e
-    // tudo que o jogo salvou na sessão pertence a ele). Sem card encaixado,
-    // o arquivo do core é efêmero: apaga (nada do que foi "salvo" num slot
-    // vazio persiste).
-    if let Some(dest) = &current_card {
-        if core_card1.exists() && dest != &core_card1 {
-            match std::fs::copy(&core_card1, dest) {
-                Ok(_) => log::info!("card 1: {} sincronizado do arquivo do core", dest.display()),
-                Err(e) => log::warn!("card 1: sincronizando {e}"),
-            }
-        }
-    } else if core_card1.exists() {
+    if current_card.is_none() && core_card1.exists() {
         let _ = std::fs::remove_file(&core_card1);
     }
-    if current_card2.is_some() {
-        // O conteúdo que o core escreveu volta para o card da biblioteca
-        // que estava encaixado no slot 2.
-        let shared = crate::dirs::memcards_dir().join(MC2_SHARED_FILE);
-        if shared.exists() {
-            if let Some(dest) = &current_card2 {
-                let _ = std::fs::copy(&shared, dest);
-                log::info!("card 2: {} sincronizado", dest.display());
-            }
-        }
-    }
+    // CARD 2 (limitação do core): o Rearmed não expõe o segundo card via
+    // memória (id 1 = RTC = None — provado), então não há leitura em vida
+    // e o arquivo dele nunca é escrito pelo core. O card 2 persiste pelo
+    // SEED do boot (o jogo lê o que a biblioteca der); o que o JOGO salvar
+    // no slot 2 vive apenas até o fim da sessão. Nada de copiar o arquivo
+    // stale para o card da biblioteca.
     // Bank whatever powered-on stretch was still running (exiting while on,
     // e.g. window closed mid-session) and add it to the all-time total.
     if let Some(t) = powered_since.take() {
