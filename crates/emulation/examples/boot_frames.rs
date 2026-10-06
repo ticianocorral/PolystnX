@@ -26,7 +26,7 @@ fn main() -> anyhow::Result<()> {
         core.run();
         if let Some(frame) = core.take_frame() {
             frame_no += 1;
-            if frame_no % 60 == 0 && frame_no <= 600 {
+            if frame_no.is_multiple_of(60) && frame_no <= 600 {
                 let path = out.join(format!("boot-{frame_no:04}.bmp"));
                 write_bmp(
                     &path,
@@ -84,7 +84,7 @@ fn write_bmp(
     for y in 0..h as usize {
         let src = &rgba[y * row..(y + 1) * row];
         let dst = h as usize - 1 - y;
-        for (x, px) in src.chunks_exact(4).enumerate() {
+        for (x, px) in src.as_chunks::<4>().0.iter().enumerate() {
             let o = 54 + dst * row + x * 4;
             if o + 3 < size {
                 bmp[o] = px[2];
