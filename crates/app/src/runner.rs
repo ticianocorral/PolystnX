@@ -501,9 +501,9 @@ fn spawn_core_worker(
                         // (m3u): o estado volta por cima da recarga. Para
                         // jogo novo (ou sessão de BIOS), restaurar era
                         // veneno — o snapshot da BIOS/tela antiga cobria o
-                        // jogo novo e ele nunca bootava: fecha a bandeja,
-                        // troca a imagem e dá reset (a BIOS re-boota o
-                        // disco). Falha, volta ao disco atual.
+                        // jogo novo e ele nunca bootava: troca a imagem com
+                        // a BIOS viva e fecha a tampa (a BIOS lê o drive e
+                        // bootA o jogo). Falha, volta ao disco atual.
                         if restore {
                             let state = core.save_state();
                             core.reset();
@@ -518,9 +518,12 @@ fn spawn_core_worker(
                                 let _ = tx.send(false);
                             }
                         } else {
-                            let _ = core.set_eject_state(false);
+                            // BIOS viva: troca a imagem e fecha a tampa — a
+                            // própria BIOS lê o drive e bootA o jogo (sem
+                            // reset; provado em probe: menu MEMORY CARD /
+                            // CD PLAYER → logo do jogo em ~300 frames).
                             if core.load_disc(&path).is_ok() {
-                                core.reset();
+                                let _ = core.set_eject_state(false);
                                 disc = path;
                                 let _ = tx.send(true);
                             } else {
