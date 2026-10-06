@@ -181,6 +181,10 @@ pub struct Core {
     needs_fullpath: bool,
     valid_extensions: Vec<String>,
     loaded: bool,
+    /// `retro_init` já rodou — `retro_deinit` só é válido depois dele (o
+    /// PCSX Rearmed SEGFAULTA em `retro_deinit` sem `init`; o contrato
+    /// libretro manda exatamente isso).
+    inited: bool,
     #[allow(dead_code)]
     lib: Library,
 }
@@ -286,6 +290,7 @@ impl Core {
             needs_fullpath: info.need_fullpath,
             valid_extensions,
             loaded: false,
+            inited: false,
             lib,
         })
     }
@@ -353,6 +358,7 @@ impl Core {
 
     /// Register callbacks and call `retro_init`. Idempotent-unsafe: call once.
     pub fn init(&mut self) {
+        self.inited = true;
         self.enter(|api| unsafe {
             (api.retro_set_environment)(environment_cb);
             (api.retro_set_video_refresh)(video_refresh_cb);
@@ -675,7 +681,9 @@ impl Drop for Core {
         if self.loaded {
             self.enter(|api| unsafe { (api.retro_unload_game)() });
         }
-        self.enter(|api| unsafe { (api.retro_deinit)() });
+        if self.inited {
+            self.enter(|api| unsafe { (api.retro_deinit)() });
+        }
     }
 }
 
