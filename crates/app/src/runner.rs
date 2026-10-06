@@ -1444,6 +1444,11 @@ pub fn run_game(
     // ligamos o segundo card do core (plan revision: "ligando o card do
     // slot 2 aos arquivos que o core lê") e sincronizamos por arquivo.
     core.set_variable("pcsx_rearmed_memcard2", "enabled");
+    // Console de verdade: a intro do logo do PlayStation TOCA ao ligar (o
+    // Rearmed vem com ela desligada) e o áudio de CD-DA fica ligado (o
+    // Rearmed vem com `nocdaudio` ligado).
+    core.set_variable("pcsx_rearmed_show_bios_bootlogo", "enabled");
+    core.set_variable("pcsx_rearmed_nocdaudio", "disabled");
     // A ponta de injeção: o card escolhido para o slot 2 é copiado para o
     // arquivo do core ANTES do load (o core o carrega no boot do jogo).
     if let Some(card2) = &spec.card2 {
