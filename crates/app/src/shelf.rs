@@ -2194,15 +2194,6 @@ pub fn run(
             draw_history_button(d, history_rect);
             draw_refresh_button(d, refresh_rect);
 
-            // The marker itself (plan revision: "adicionar marcador de
-            // favorito nos jogos"; depois "o icone de favorito coloca uma
-            // estrela vermelha") — a red star in the tile's top-right
-            // corner, on every strip and the grid alike.
-            const FAV_RED: (u8, u8, u8) = (214, 40, 40);
-            let draw_fav_dot = |d: &mut Screen, x: i32, y: i32, tile_w: u32| {
-                d.star(x + tile_w as i32 - 16, y + 12, 9, FAV_RED);
-            };
-
             if show_fav {
                 d.text(MARGIN, MARGIN + HEADER_H, 1, DIM, FAV_TITLE);
                 for (i, entry) in favorites
@@ -2229,7 +2220,6 @@ pub fn run(
                             &entry.title().to_uppercase(),
                         );
                     }
-                    draw_fav_dot(d, x, y, RECENT_TILE_W);
                     if in_fav && i == fav_idx {
                         d.outline(
                             x - 3,
@@ -2280,7 +2270,6 @@ pub fn run(
                             &entry.title().to_uppercase(),
                         );
                     }
-                    draw_fav_dot(d, x, y, RECENT_TILE_W);
                     if in_recent && i == recent_idx {
                         d.outline(
                             x - 3,
@@ -2338,9 +2327,6 @@ pub fn run(
                             DIM,
                             &entry.title().to_uppercase(),
                         );
-                    }
-                    if entry.rom.favorite {
-                        draw_fav_dot(d, x, y, TILE_W);
                     }
                     if !in_recent && !in_fav && i == sel {
                         d.outline(x - 3, y - 3, TILE_W + 6, TILE_H + 6, 3, HILITE);
