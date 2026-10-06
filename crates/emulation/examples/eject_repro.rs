@@ -48,7 +48,7 @@ fn main() -> anyhow::Result<()> {
     core.init();
     core.set_variable("pcsx_rearmed_nocdaudio", "disabled");
     if let Some(cpu) = &cpu {
-        core.set_variable("swanstation_CPU_ExecutionMode", cpu);
+        core.set_variable("pcsx_rearmed_frameskip_type", "disabled");
     }
     core.load_game(&rom, &[])?;
     eprintln!("carregado: {}", rom.display());
