@@ -30,7 +30,6 @@ fn main() -> anyhow::Result<()> {
             "--rom" => rom = Some(it.next().ok_or(anyhow::anyhow!("falta valor"))?.into()),
             "--pre" => pre = it.next().ok_or(anyhow::anyhow!("falta valor"))?.parse()?,
             "--post" => post = it.next().ok_or(anyhow::anyhow!("falta valor"))?.parse()?,
-            "--cpu" => cpu = Some(it.next().ok_or(anyhow::anyhow!("falta valor"))?.to_string()),
             "--dump-vars" => dump = true,
             "--close-too" => close_too = true,
             o => anyhow::bail!("argumento inesperado: {o}"),
