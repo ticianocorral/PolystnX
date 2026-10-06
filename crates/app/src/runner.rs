@@ -2204,7 +2204,12 @@ pub fn run_game(
                         .chunks(128)
                         .skip(1)
                         .take(15)
-                        .filter(|e| !(e[0] == 0 && e[1] == 0) && e[0] != 0xA0 && e[0] != 0x51 && !(e[0] == 0xFF && e[1] == 0xFF))
+                        .filter(|e| {
+                            !(e[0] == 0 && e[1] == 0)
+                                && e[0] != 0xA0
+                                && e[0] != 0x51
+                                && !(e[0] == 0xFF && e[1] == 0xFF)
+                        })
                         .count();
                     if last_sram_flush.as_ref() != Some(&sram) {
                         if let Some(dest) = current_card.clone() {

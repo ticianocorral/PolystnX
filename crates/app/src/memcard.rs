@@ -45,10 +45,17 @@ pub fn inspect(path: &Path) -> Option<CardInfo> {
         // O quadro `slot` do bloco 0 é a entrada de diretório do slot.
         let dir = &bytes[slot * FRAME..(slot + 1) * FRAME];
         let (b0, b1) = (dir[0], dir[1]);
-        // Livre-fresco (00 00), formatado-vazio (A0 00 — o que a BIOS do
-        // Rearmed escreve ao formatar) e apagado (51 xx). Qualquer outro
-        // magic = slot em uso.
-        if (b0 == 0 && b1 == 0) || b0 == 0xA0 || b0 == 0x51 || (b0 == 0xFF && b1 == 0xFF) {
+        // Livre: (00 00) card fresco, (A0 00) formatado-vazio (o padrão da
+        // BIOS do Rearmed ao formatar), (51 51) apagado-fresco, (FF FF)
+        // fim-de-cadeia. QUALQUER outro magic = em uso — o Tekken 3, por
+        // exemplo, grava os saves com (51 00) e a BIOS lê normalmente (o
+        // filtro antigo tratava 0x51 como apagado universal e os saves do
+        // Tekken desapareciam do seletor).
+        if (b0 == 0 && b1 == 0)
+            || b0 == 0xA0
+            || (b0 == 0x51 && b1 == 0x51)
+            || (b0 == 0xFF && b1 == 0xFF)
+        {
             continue;
         }
         let save = &bytes[slot * BLOCK..(slot + 1) * BLOCK];
@@ -58,11 +65,19 @@ pub fn inspect(path: &Path) -> Option<CardInfo> {
         if head.iter().skip(8).all(|&b| b == 0) {
             continue;
         }
-        let code = trim_ascii(&head[0x08..0x14]);
+        // Título/produto em ASCII (jogos ocidentais) OU Shift-JIS (jogos
+        // japoneses gravam SJIS mesmo em discos US — o Tekken 3 grava até o
+        // CÓDIGO de produto em full-width: "ＥＫＫＥＮ　...").
+        let code = readable(trim_ascii(&head[0x08..0x14]));
+        let sjis_code = shift_jis_title(&head[0x08..0x14]);
+        let code = if !code.is_empty() {
+            code
+        } else if !sjis_code.is_empty() {
+            sjis_code
+        } else {
+            trim_ascii(&head[0x14..0x1C])
+        };
         let ident = trim_ascii(&head[0x14..0x1C]);
-        // O título pode vir em ASCII (jogos ocidentais) ou Shift-JIS
-        // (jogos japoneses gravam em SJIS mesmo nos discos US — o Tekken 3
-        // faz isso). readable() cobre o ASCII; o SJIS decodifica por cima.
         let ascii = readable(trim_ascii(&head[0x1C..0x38]));
         let sjis = shift_jis_title(&head[0x1C..0x38]);
         let title = if !ascii.is_empty() {
