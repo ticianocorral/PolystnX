@@ -2851,6 +2851,15 @@ impl Cabinet {
     /// resting state — the cartridge seated in the slot, which is also what
     /// `set_panel` starts with. A no-op before `set_panel`; `runner`'s two
     /// animation functions are the only callers.
+    /// Captura o backbuffer corrente (headless diagnostic): o que quer que
+    /// o último `present_*` tenha composto — modal incluído.
+    pub fn capture_screen_bmp(&mut self, path: &std::path::Path) -> Result<(), PlatformError> {
+        self.canvas
+            .read_pixels(None::<Rect>)
+            .and_then(|s| s.save_bmp(path))
+            .map_err(|e| PlatformError::Sdl(e.to_string()))
+    }
+
     pub fn set_cartridge_motion(&mut self, motion: Option<(f32, bool)>) {
         if let Some(panel) = &mut self.panel {
             panel.cartridge_motion = motion;

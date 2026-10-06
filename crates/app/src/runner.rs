@@ -3037,24 +3037,37 @@ pub fn run_game(
                             .unwrap_or_default();
                         let info = crate::memcard::inspect(path);
                         let used = info.as_ref().map(|c| c.used).unwrap_or(0);
-                        let mut rows: Vec<CardModalRow> = info
-                            .map(|c| {
-                                c.saves
-                                    .iter()
-                                    .map(|s| {
-                                        (
-                                            if s.title.is_empty() {
-                                                s.product.clone()
-                                            } else {
-                                                format!("{} — {}", s.title, s.product)
-                                            },
+                        // Os 15 SLOTS do card (plan revision: "a lista dos
+                        // 15 slots"): usados com título/produto/ícone,
+                        // livres como "(vazio)". Os n primeiros índices são
+                        // os slots em uso — `Modal::CardsAction` usa
+                        // `n_saves` como fronteira (clicar num save é
+                        // informativo; as ações ficam abaixo da lista).
+                        let mut rows: Vec<CardModalRow> = Vec::new();
+                        if let Some(c) = &info {
+                            let mut by_slot = c.saves.iter();
+                            for slot in 1..=15usize {
+                                if slot <= c.used as usize {
+                                    if let Some(sav) = by_slot.next() {
+                                        rows.push((
+                                            format!(
+                                                "slot {slot}: {} — {}",
+                                                if sav.title.is_empty() {
+                                                    sav.product.clone()
+                                                } else {
+                                                    sav.title.clone()
+                                                },
+                                                sav.product
+                                            ),
                                             false,
-                                            s.icon.clone().map(|d| (16u32, 16u32, d)),
-                                        )
-                                    })
-                                    .collect()
-                            })
-                            .unwrap_or_default();
+                                            sav.icon.clone().map(|d| (16u32, 16u32, d)),
+                                        ));
+                                        continue;
+                                    }
+                                }
+                                rows.push((format!("slot {slot}: (vazio)"), false, None));
+                            }
+                        }
                         rows.push(("Usar neste slot".to_string(), true, None));
                         rows.push(("Renomear".to_string(), true, None));
                         rows.push(("Apagar".to_string(), true, None));
@@ -3185,6 +3198,27 @@ pub fn run_game(
                                     None,
                                     Duration::from_secs(2),
                                 );
+                                // De volta ao picker com a lista REATUALIZADA
+                                // (plan revision: "ao trocar de MC durante
+                                // jogo nao atualiza automatico") — o rótulo
+                                // "no slot N" segue o card que acabou de
+                                // mudar de slot.
+                                let dir = crate::dirs::memcards_dir();
+                                let (rows, _) = card_rows_with_icons(
+                                    &dir,
+                                    current_card.as_deref(),
+                                    current_card2.as_deref(),
+                                );
+                                modal = if port == 1 { Modal::Cards2 } else { Modal::Cards };
+                                cab.set_modal_with_icons(
+                                    if port == 1 {
+                                        "Memory Cards - slot 2"
+                                    } else {
+                                        "Memory Cards - slot 1"
+                                    },
+                                    &rows,
+                                );
+                                continue;
                             }
                             1 => {
                                 // Renomear: o draft vive DENTRO de um modal —
