@@ -559,7 +559,11 @@ fn seat_card(
     };
     if let (Some(shared), Ok(bytes)) = (shared_file, fs::read(&path)) {
         if std::fs::write(&shared, &bytes).is_ok() {
-            log::info!("card {}: {} semeado no arquivo do core", mem_id + 1, path.display());
+            log::info!(
+                "card {}: {} semeado no arquivo do core",
+                mem_id + 1,
+                path.display()
+            );
         }
     }
     match fs::read(&path) {
@@ -1450,18 +1454,21 @@ pub fn run_game(
     // como fonte (SwanStation via --core).
     let core_cards_via_file = core.system_name().to_lowercase().contains("pcsx");
     core.set_directories(&spec.system_dir, &spec.save_dir);
-    core.init();
+    // Opções do core ANTES do retro_init: a declaração de opções do core
+    // (SET_VARIABLES, disparada no init) ZERA a tabela e repõe defaults —
+    // valores setados depois do init morriam nessa reposição (era o
+    // "boot não aparece").
     // O PCSX Rearmed renderiza por software nativamente — o pipeline do app
     // é 2D (framebuffer → tubo), nada de contexto de GPU.
     // O card do SLOT 2 não é exposto pelo protocolo (só o id 0 existe) —
-    // ligamos o segundo card do core (plan revision: "ligando o card do
-    // slot 2 aos arquivos que o core lê") e sincronizamos por arquivo.
-    core.set_variable("pcsx_rearmed_memcard2", "enabled");
+    // ligamos o segundo card do core e sincronizamos por arquivo.
     // Console de verdade: a intro do logo do PlayStation TOCA ao ligar (o
     // Rearmed vem com ela desligada) e o áudio de CD-DA fica ligado (o
     // Rearmed vem com `nocdaudio` ligado).
+    core.set_variable("pcsx_rearmed_memcard2", "enabled");
     core.set_variable("pcsx_rearmed_show_bios_bootlogo", "enabled");
     core.set_variable("pcsx_rearmed_nocdaudio", "disabled");
+    core.init();
     // A ponta de injeção: o card escolhido para o slot 2 é copiado para o
     // arquivo do core ANTES do load (o core o carrega no boot do jogo).
     if let Some(card2) = &spec.card2 {

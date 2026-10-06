@@ -15,6 +15,8 @@ fn main() -> anyhow::Result<()> {
     let mut core = Core::load(&core_path)?;
     core.set_directories(&bios_dir, &PathBuf::from("/tmp/bootframes-saves"));
     std::fs::create_dir_all("/tmp/bootframes-saves").ok();
+    core.set_directories(&bios_dir, &PathBuf::from("/tmp/bootframes-saves"));
+    core.set_variable("pcsx_rearmed_memcard2", "enabled");
     core.set_variable("pcsx_rearmed_show_bios_bootlogo", "enabled");
     core.set_variable("pcsx_rearmed_nocdaudio", "disabled");
     core.init();
