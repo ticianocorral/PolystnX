@@ -654,9 +654,10 @@ impl GridLayout {
             let item_w = item_h * TILE_W as i32 / TILE_H as i32;
             let cell_w = item_w + gap;
             let cell_h = item_h + gap;
-            // Sobrou largura? A grade fica centrada na área dela.
-            let used = cols * cell_w - gap;
-            let x0 = MARGIN + (grid_w as i32 - used) / 2;
+            // Alinhada à ESQUERDA (plan revision: "alinhar a estante da
+            // lista dos jogos a esquerda") — a grade nasce na margem e a
+            // sobra de largura fica toda à direita.
+            let x0 = MARGIN;
             (cell_w, cell_h, item_w, item_h, cols as usize, x0)
         };
         let vis_rows = ((scr_h as i32 - top_y - MARGIN) / cell_h).max(1) as usize;
