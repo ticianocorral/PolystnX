@@ -397,6 +397,12 @@ enum CoreCmd {
         disc: PathBuf,
         bios_dir: PathBuf,
         save_dir: PathBuf,
+        /// Os cards encaixados NO MOMENTO da inserção: o drop do core velho
+        /// reescreve os arquivos com o estado DELE (um card vazio, na sessão
+        /// de BIOS — o SAVE_RAM é espelho no Rearmed) e apagava o encaixe;
+        /// o worker re-semeia depois do drop.
+        card1: Option<PathBuf>,
+        card2: Option<PathBuf>,
         tx: std::sync::mpsc::Sender<bool>,
     },
     /// Sem disco + Reset: reseta e boota a BIOS (o console fica ligado).
@@ -517,6 +523,8 @@ fn spawn_core_worker(
                         disc: fresh_disc,
                         bios_dir,
                         save_dir,
+                        card1,
+                        card2,
                         tx,
                     } => {
                         // O velho sai DE VERDADE: o drop dlcloseta a lib
@@ -526,6 +534,35 @@ fn spawn_core_worker(
                         // nasce limpo, com a animação de boot ligada.
                         let old = running.0.take();
                         drop(old);
+                        // O drop do velho REESCREVEU os arquivos de card com
+                        // o estado dele (vazio na sessão de BIOS) — re-semeia
+                        // os encaixes antes do novo core ler.
+                        match card1 {
+                            Some(card) => {
+                                let _ = std::fs::copy(
+                                    &card,
+                                    crate::dirs::memcards_dir().join(MC1_SHARED_FILE),
+                                );
+                            }
+                            None => {
+                                let _ = std::fs::remove_file(
+                                    crate::dirs::memcards_dir().join(MC1_SHARED_FILE),
+                                );
+                            }
+                        }
+                        match card2 {
+                            Some(card) => {
+                                let _ = std::fs::copy(
+                                    &card,
+                                    crate::dirs::memcards_dir().join(MC2_SHARED_FILE),
+                                );
+                            }
+                            None => {
+                                let _ = std::fs::remove_file(
+                                    crate::dirs::memcards_dir().join(MC2_SHARED_FILE),
+                                );
+                            }
+                        }
                         match Core::load(&core_path) {
                             Ok(mut fresh) => {
                                 fresh.set_directories(&bios_dir, &save_dir);
@@ -3363,6 +3400,8 @@ pub fn run_game(
                                 disc: path.clone(),
                                 bios_dir: spec.system_dir.clone(),
                                 save_dir: spec.save_dir.clone(),
+                                card1: current_card.clone(),
+                                card2: current_card2.clone(),
                                 tx: d_tx,
                             });
                             let title = spec
