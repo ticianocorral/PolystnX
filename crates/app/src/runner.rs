@@ -2100,7 +2100,10 @@ pub fn run_game(
     // `--debug-shot-pause`, both of which already returned above) exists to
     // inspect live gameplay, so it starts powered — there's no Power click
     // to send it in headless mode.
-    let mut powered = spec.shot.is_some();
+    // A sessão de BIOS NASCE LIGADA (o usuário "ligou o console" para
+    // chegar até aqui — o Power clicado foi o que disparou o boot): o
+    // flush do card e os comandos dependentes de power funcionam.
+    let mut powered = spec.bios || spec.shot.is_some();
     cab.set_powered(powered);
     // The session clock (plan revision: "no tempo da sessao considerar o
     // tempo que o jogo esta rodando, com o power ligado") counts only while
