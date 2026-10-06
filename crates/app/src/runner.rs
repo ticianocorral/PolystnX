@@ -360,6 +360,12 @@ enum CoreCmd {
     Run {
         input: PadSnapshot,
     },
+    /// Snapshot do SAVE_RAM (o card do slot 1 vivo no core) — troca quente
+    /// salva o card que sai ANTES de mexer na memória, e o flush periódico
+    /// banker os saves contra crash.
+    Sram {
+        tx: std::sync::mpsc::Sender<Option<Vec<u8>>>,
+    },
     Reset,
     CheatReset,
     CheatSet {
@@ -498,6 +504,9 @@ fn spawn_core_worker(
                             audio,
                             ram,
                         });
+                    }
+                    CoreCmd::Sram { tx } => {
+                        let _ = tx.send(core.sram());
                     }
                     CoreCmd::Reset => core.reset(),
                     CoreCmd::TrayEject { ejected } => {
@@ -2174,6 +2183,37 @@ pub fn run_game(
         }};
     }
 
+    // Flush do CARD 1 para a biblioteca (changed-only): o snapshot do
+    // SAVE_RAM vai para o arquivo do card ENCAIXADO. Pontos de chamada:
+    // troca quente (o card que sai guarda o que o jogo salvou nele),
+    // migração de slot, e o passe periódico (crash perde no máximo 10 s).
+    // (plan revision: "deixe perfeito" — antes disso, trocar A→B no meio
+    // da sessão descartava os saves feitos no A.)
+    let mut last_sram_flush: Option<Vec<u8>> = None;
+    macro_rules! flush_card1 {
+        () => {{
+            if powered && current_card.is_some() {
+                drain_core!();
+                let (tx, rx) = std::sync::mpsc::channel();
+                let _ = core_tx.send(CoreCmd::Sram { tx });
+                if let Ok(Some(sram)) = rx.recv() {
+                    if last_sram_flush.as_ref() != Some(&sram) {
+                        if let Some(dest) = current_card.clone() {
+                            if std::fs::write(&dest, &sram).is_ok() {
+                                log::info!(
+                                    "card 1: {} atualizado ({} bytes)",
+                                    dest.display(),
+                                    sram.len()
+                                );
+                                last_sram_flush = Some(sram);
+                            }
+                        }
+                    }
+                }
+            }
+        }};
+    }
+
     let exit = 'run: loop {
         // Editing (text or a caption) is the one deliberate keyboard-typing
         // exception (plan revision) — while it's open, poll for composed
@@ -3219,6 +3259,11 @@ pub fn run_game(
                                 // (o jogo vê um card em branco se salvar).
                                 if port == 1 {
                                     if current_card.as_deref() == Some(path.as_path()) {
+                                        // Migração 1→2: o card leva o que o
+                                        // jogo salvou nele (flush ANTES de
+                                        // zerar a memória do slot 1) — o
+                                        // arquivo do slot 2 semeia dele.
+                                        flush_card1!();
                                         let _ = core_tx.send(CoreCmd::WriteMem {
                                             id: MEMORY_SAVE_RAM,
                                             bytes: vec![0; crate::memcard::CARD_SIZE],
@@ -3257,6 +3302,10 @@ pub fn run_game(
                                         });
                                         current_card2 = None;
                                     }
+                                    // O card que SAI guarda o que o jogo
+                                    // salvou nele nesta sessão (o estado
+                                    // vive no core até aqui).
+                                    flush_card1!();
                                     seat_card(
                                         &core_tx,
                                         &mut sram_path,
@@ -3874,6 +3923,12 @@ pub fn run_game(
                     } // totalmente fora fica em (1.0, true): p=0, não desenha
                     disc_motion = None;
                 }
+            }
+            // Flush periódico do card 1 (a cada ~10 s ligado): crash perde
+            // no máximo a última janela — o card da biblioteca sempre tem
+            // quase tudo (o mesmo esquema do auto-save do RetroArch).
+            if powered && frames > 0 && frames.is_multiple_of(600) {
+                flush_card1!();
             }
             // BootFresh concluiu? Aplica o resultado SEM bloquear (o worker
             // recriou o core e carregou o jogo — o painel acompanha agora).
