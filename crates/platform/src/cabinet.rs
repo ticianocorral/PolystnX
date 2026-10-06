@@ -311,7 +311,7 @@ pub struct Cabinet {
     /// before any hit-test runs.
     canvas_rect: Rect,
     /// The cabinet's own nameplate, printed into the chin by `draw_brand` on
-    /// every screen (plan revision: "mostrar versao do app e do SwanStation, onde
+    /// every screen (plan revision: "mostrar versao do app e do PCSX Rearmed, onde
     /// esta o nome do app na tv") — starts as just `BRAND`, but the app sets
     /// it once at startup (and again after a core swap) to also carry the
     /// app/core version, via `set_nameplate`.
@@ -321,10 +321,10 @@ pub struct Cabinet {
     /// block on the left. Throwaway scaffolding for `examples/ra_osd_mock.rs`;
     /// the real feature (phase 4) replaces it with a timed OSD queue.
     /// Per-nameplate-line "tem update" flags (plan revision: "quando tiver
-    /// update do app ou do SwanStation não mostrar mais a tela cheia e sim um
+    /// update do app ou do PCSX Rearmed não mostrar mais a tela cheia e sim um
     /// icone verde no nameplate do lado de cada um") — `(app, core)`. When
     /// set, `draw_brand` prints a small green dot right after that line
-    /// (line 0 = app version, line 1 = SwanStation version); the app flips them
+    /// (line 0 = app version, line 1 = PCSX Rearmed version); the app flips them
     /// via `set_nameplate_updates` once its startup check reports something.
     nameplate_updates: (bool, bool),
     /// Os rects das setas verdes de update no nameplate (app, core) —
@@ -607,7 +607,7 @@ pub enum SettingsButton {
 pub enum UpdateArrow {
     /// A seta da linha do próprio app — abre o changelog + botão atualizar.
     App,
-    /// A seta da linha do SwanStation — baixa e instala o core na hora.
+    /// A seta da linha do PCSX Rearmed — baixa e instala o core na hora.
     Core,
 }
 
@@ -1013,7 +1013,7 @@ impl Cabinet {
 
     /// Replace the cabinet's nameplate text (plan revision) — the app calls
     /// this once at startup with its own version, and again whenever the
-    /// installed SwanStation core changes (a download/update via settings).
+    /// installed PCSX Rearmed core changes (a download/update via settings).
     pub fn set_nameplate(&mut self, text: &str) {
         self.nameplate = text.to_string();
     }
@@ -4089,7 +4089,7 @@ fn draw_brand(
         return arrows;
     }
     // A '\n' in the label stacks lines (plan revision: "no nameplate colocar
-    // a versão do SwanStation abaixo do psx xperience") — the block centred in
+    // a versão do PCSX Rearmed abaixo do PolystnX") — the block centred in
     // the chin. When the chin can't fit them all, keep only the first (the
     // app's own name/version) rather than spilling over the bezel.
     let lines: Vec<&str> = label.split('\n').collect();
@@ -5212,7 +5212,7 @@ fn draw_panel(
         // botão de download"): warning line directly above the button, both
         // just above the Configurações footer (ou do Dev, quando ele existe).
         if let Some(label) = idle_core_prompt {
-            const WARN: &str = "Para jogar é necessário baixar o núcleo SwanStation.";
+            const WARN: &str = "Para jogar é necessário baixar o núcleo PCSX Rearmed.";
             let btn = Rect::new(x, btn_top - 8 - btn_h, inner_w, btn_h as u32);
             let warn_h = wrapped_height(inner_w, 1, WARN);
             let warn_y = btn.y() - 6 - warn_h;

@@ -29,7 +29,7 @@
 //!   does nothing;
 //! - one whose code is implausibly long (over 96 characters — a real one
 //!   found during development, "poke every byte in a table" encoded as a
-//!   single 602-char, 67-address combo, crashed this app's SwanStation-libretro
+//!   single 602-char, 67-address combo, crashed this app's libretro core
 //!   core build outright: a stack-buffer overflow in `retro_cheat_set`.
 //!   `for_title`'s own test suite has a regression test pinning this).
 //!
@@ -204,7 +204,7 @@ mod tests {
 
     #[test]
     fn no_cheat_code_is_long_enough_to_crash_the_core() {
-        // A real, reproduced bug: the SwanStation-libretro core build this app
+        // A real, reproduced bug: a libretro core build this app
         // ships has a stack-buffer overflow in retro_cheat_set on a long
         // enough multi-address code (confirmed SIGABRT/__stack_chk_fail at
         // 602 chars, 67 "+"-joined addresses, from one of this database's
