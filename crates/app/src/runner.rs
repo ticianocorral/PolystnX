@@ -2440,13 +2440,28 @@ pub fn run_game(
             AUTOINSERT_STEP.with(|st| match st.get() {
                 0 if spec.bios && modal == Modal::None && frames >= 400 => {
                     st.set(1);
-                    log::info!("autoinsert: disparando InsertDisc (frames {frames})");
+                    log::info!("autoinsert: InsertDisc (frames {frames})");
                     polled.push(UiEvent::InsertDisc);
                 }
                 1 if modal == Modal::Inserir && frames >= 500 => {
                     st.set(2);
-                    log::info!("autoinsert: disparando ModalPick({pick}) (frames {frames})");
+                    log::info!("autoinsert: ModalPick({pick}) — disco (frames {frames})");
                     polled.push(UiEvent::ModalPick(*pick));
+                }
+                2 if modal == Modal::None && frames >= 900 => {
+                    st.set(3);
+                    log::info!("autoinsert: OpenCards (frames {frames})");
+                    polled.push(UiEvent::OpenCards);
+                }
+                3 if modal == Modal::Cards && frames >= 1000 => {
+                    st.set(4);
+                    log::info!("autoinsert: ModalPick(1) — card (frames {frames})");
+                    polled.push(UiEvent::ModalPick(1));
+                }
+                4 if modal == Modal::CardsAction && frames >= 1100 => {
+                    st.set(5);
+                    log::info!("autoinsert: ModalPick(15) — Usar (frames {frames})");
+                    polled.push(UiEvent::ModalPick(15));
                 }
                 _ => {}
             });
@@ -3215,15 +3230,18 @@ pub fn run_game(
                         );
                     }
                     Modal::CardsAction => {
+                        // Os 15 slots do card são linhas informativas.
+                        const CARD_SLOTS_CONST: u16 = 15;
+                        if i < CARD_SLOTS_CONST {
+                            // Slot informativo (os 15 do card): o picker segue
+                            // aberto — clicar num slot não fecha nada.
+                            continue;
+                        }
                         modal = Modal::None;
                         cab.clear_modal();
                         let Some((path, port)) = card_action.take() else {
                             continue;
                         };
-                        let n_saves = crate::memcard::inspect(&path)
-                            .map(|c| c.saves.len())
-                            .unwrap_or(0);
-                        let n_saves = n_saves as u16;
                         let name = crate::memcard::card_name(Some(path.as_path()))
                             .unwrap_or_default();
                         let seated = if port == 1 {
@@ -3231,13 +3249,12 @@ pub fn run_game(
                         } else {
                             current_card.as_deref() == Some(path.as_path())
                         };
-                        if i < n_saves {
-                            // Linha informativa (um save do card) — clicar não
-                            // faz nada; as ações ficam logo abaixo.
-                            card_action = Some((path, port));
-                            continue;
-                        }
-                        match i - n_saves {
+                        // As ações vêm depois dos 15 slots: 15 = Usar,
+                        // 16 = Renomear, 17 = Apagar. (A fronteira é o SLOT
+                        // COUNT, não a contagem de saves — ver o gate no
+                        // topo do braço.)
+                        const CARD_SLOTS: u16 = 15;
+                        match i - CARD_SLOTS {
                             // Usar: encaixa no slot e imprime o nome no
                             // adesivo da porta. Na troca quente (ligado), o
                             // SRAM do card que sai é descarregado no arquivo
