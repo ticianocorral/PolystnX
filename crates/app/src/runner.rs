@@ -1591,7 +1591,6 @@ pub fn run_game(
         .card1
         .clone()
         .unwrap_or_else(|| crate::dirs::memcards_dir().join(MC1_SHARED_FILE));
-    let initial_sram_path = sram_path.clone();
     // Slot 2: vazio até o jogador escolher um card no botão "MC slot 2" —
     // sem card, nada é lido nem gravado (o core formata o dele em memória).
     let mut current_card2 = spec.card2.clone();
@@ -4004,21 +4003,20 @@ pub fn run_game(
     // desde que o encaixe não tenha mudado na sessão (troca quente troca o
     // destino; o conteúdo do core pertence ao card que estava no boot).
     let core_card1 = crate::dirs::memcards_dir().join(MC1_SHARED_FILE);
-    // A sincronia de volta só existe COM card encaixado. Sem card, o
-    // arquivo do core é efêmero: apaga (o jogo avisou que não havia card —
-    // nada do que ele "salvou" num card inexistente persiste).
-    if spec.card1.is_none() {
-        if core_card1.exists() {
-            let _ = std::fs::remove_file(&core_card1);
+    // A sincronia de volta pertence ao card ENCAIXADO AGORA (a troca quente
+    // troca o dono do estado: o seat re-semeou o arquivo com o card novo, e
+    // tudo que o jogo salvou na sessão pertence a ele). Sem card encaixado,
+    // o arquivo do core é efêmero: apaga (nada do que foi "salvo" num slot
+    // vazio persiste).
+    if let Some(dest) = &current_card {
+        if core_card1.exists() && dest != &core_card1 {
+            match std::fs::copy(&core_card1, dest) {
+                Ok(_) => log::info!("card 1: {} sincronizado do arquivo do core", dest.display()),
+                Err(e) => log::warn!("card 1: sincronizando {e}"),
+            }
         }
-    } else if sram_path == initial_sram_path && core_card1.exists() && sram_path != core_card1 {
-        match std::fs::copy(&core_card1, &sram_path) {
-            Ok(_) => log::info!(
-                "card 1: {} sincronizado do arquivo do core",
-                sram_path.display()
-            ),
-            Err(e) => log::warn!("card 1: sincronizando {e}"),
-        }
+    } else if core_card1.exists() {
+        let _ = std::fs::remove_file(&core_card1);
     }
     if current_card2.is_some() {
         // O conteúdo que o core escreveu volta para o card da biblioteca
