@@ -313,7 +313,7 @@ impl Core {
             CString::new(save.to_string_lossy().into_owned()).unwrap_or_default();
     }
 
-    /// Override a core option by key (e.g. `swanstation_Renderer` =
+    /// Override a core option by key (e.g. `pcsx_rearmed_nocdaudio` =
     /// `Software`). Upserts into the variable table and flags it dirty so the
     /// core re-reads it on the next `run()`. Call after `init()` — the option
     /// definitions the core pushes at init populate the table with defaults,
@@ -371,28 +371,7 @@ impl Core {
     }
 
     /// Load a ROM. `data` is the ROM bytes; `path` is its on-disk location,
-    /// Carrega SEM disco: `retro_load_game` com conteúdo nulo — o
-    /// SwanStation boota a BIOS (menu do console).
-    pub fn load_bios(&mut self) -> Result<(), CoreError> {
-        let info = retro_game_info {
-            path: ptr::null(),
-            data: ptr::null(),
-            size: 0,
-            meta: ptr::null(),
-        };
-        let ok = self.enter(|api| unsafe { (api.retro_load_game)(&info) });
-        if !ok {
-            return Err(CoreError::LoadRejected);
-        }
-        self.loaded = true;
-        self.enter(|api| unsafe {
-            (api.retro_set_controller_port_device)(0, RETRO_DEVICE_JOYPAD);
-            (api.retro_set_controller_port_device)(1, RETRO_DEVICE_JOYPAD);
-        });
-        self.refresh_av_info();
-        Ok(())
-    }
-
+    /// which the core keeps reading from (discs are need_fullpath).
     pub fn load_game(&mut self, path: &Path, data: &[u8]) -> Result<(), CoreError> {
         let c_path = CString::new(path.to_string_lossy().into_owned()).unwrap_or_default();
         let info = if self.needs_fullpath {
@@ -838,7 +817,7 @@ unsafe extern "C" fn environment_cb(cmd: c_uint, data: *mut c_void) -> bool {
         }
         RETRO_ENVIRONMENT_GET_PREFERRED_HW_RENDER => {
             // Software-only: sem preferência de HW, o core fica no padrão
-            // (e o app fixa `swanstation_GPU_Renderer = Software` por cima).
+            // (o app fixa `pcsx_rearmed_nocdaudio`/`show_bios_bootlogo` por cima).
             false
         }
         RETRO_ENVIRONMENT_GET_DISK_CONTROL_INTERFACE_VERSION => {
@@ -919,7 +898,7 @@ unsafe fn take_options_v1(s: &mut CallbackState, defs: *const sys::retro_core_op
     s.variables_dirty = true;
 }
 
-/// Same for the v2 shape (`SET_CORE_OPTIONS_V2` — SwanStation's path).
+/// Same for the v2 shape (`SET_CORE_OPTIONS_V2` — PCSX Rearmed's path).
 unsafe fn take_options_v2(
     s: &mut CallbackState,
     defs: *const sys::retro_core_option_v2_definition,

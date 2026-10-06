@@ -269,7 +269,7 @@ pub type retro_get_image_path_t = unsafe extern "C" fn(index: c_uint) -> *const 
 pub type retro_get_image_label_t = unsafe extern "C" fn(index: c_uint) -> *const c_char;
 
 /// `RETRO_ENVIRONMENT_SET_DISK_CONTROL_EXT_INTERFACE` (56): a bandeja que o
-/// SwanStation registra — ejetar/insertar por aqui é o que faz os jogos
+/// O core registra — ejetar/insertar por aqui é o que faz os jogos
 /// VEREM a bandeja abrir (as telas de erro de leitura deles são reais).
 #[repr(C)]
 #[derive(Clone, Copy)]

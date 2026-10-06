@@ -13,7 +13,7 @@ fn main() -> anyhow::Result<()> {
     let mut cab = plat
         .create_cabinet("PolystnX", 1280, 800, false)
         .map_err(|e| anyhow::anyhow!(e.to_string()))?;
-    cab.set_nameplate("PolystnX v0.14.0\nSwanStation 1.63 TaC2rea");
+    cab.set_nameplate("PolystnX v0.14.0\nPCSX Rearmed r26");
     cab.set_nameplate_updates(true, true);
     idle::capture_preview(
         &mut cab,

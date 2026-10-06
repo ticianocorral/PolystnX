@@ -19,7 +19,6 @@ use polystnx_platform::{
 use crate::config::Config;
 
 /// How often to flush battery SRAM to disk while playing (frames ≈ 10 s).
-const SRAM_FLUSH_FRAMES: u32 = 600;
 /// Save-state slots, `0`..`9`.
 const SLOTS: u8 = 10;
 /// Max characters a pause-book free-text note may hold (plan revision) —
@@ -374,13 +373,7 @@ enum CoreCmd {
     LoadState {
         bytes: Vec<u8>,
     },
-    Sram {
-        tx: std::sync::mpsc::Sender<Option<Vec<u8>>>,
-    },
-    SramAt {
-        id: u32,
-        tx: std::sync::mpsc::Sender<Option<Vec<u8>>>,
-    },
+
     WriteMem {
         id: u32,
         bytes: Vec<u8>,
@@ -390,7 +383,6 @@ enum CoreCmd {
         tx: std::sync::mpsc::Sender<bool>,
     },
     /// Sem disco + Reset: reseta e boota a BIOS (o console fica ligado).
-    BootBios,
     /// Abre (`true`)/fecha (`false`) a BANDEJA pela disk control interface —
     /// o jogo emulado VÊ a tampa abrir (telas de erro reais dele).
     TrayEject {
@@ -486,12 +478,6 @@ fn spawn_core_worker(
                             log::warn!("worker: core sem disk control interface");
                         }
                     }
-                    CoreCmd::BootBios => {
-                        core.reset();
-                        if core.load_bios().is_err() {
-                            log::warn!("worker: boot pela BIOS recusado");
-                        }
-                    }
                     CoreCmd::CheatReset => core.cheat_reset(),
                     CoreCmd::CheatSet { i, on, code } => {
                         core.cheat_set(i, on, &code);
@@ -501,12 +487,6 @@ fn spawn_core_worker(
                     }
                     CoreCmd::LoadState { bytes } => {
                         core.load_state(&bytes);
-                    }
-                    CoreCmd::Sram { tx } => {
-                        let _ = tx.send(core.sram());
-                    }
-                    CoreCmd::SramAt { id, tx } => {
-                        let _ = tx.send(core.memory(id));
                     }
                     CoreCmd::WriteMem { id, bytes } => {
                         core.write_memory(id, &bytes);
@@ -732,18 +712,6 @@ fn command_rows(
 }
 
 /// Write battery SRAM to `path` if it changed since the last flush.
-fn flush_sram(path: &Path, last: &mut Option<Vec<u8>>, cur: Option<Vec<u8>>) {
-    if let Some(cur) = cur {
-        if last.as_ref() != Some(&cur) {
-            match fs::write(path, &cur) {
-                Ok(_) => log::info!("SRAM flushed -> {}", path.display()),
-                Err(e) => log::warn!("SRAM flush failed: {e}"),
-            }
-            *last = Some(cur);
-        }
-    }
-}
-
 /// Desligar (plan §3.3): a short burst of RF snow through the tube with a
 /// decaying buzz, settling to a dim near-still hiss — never a full-screen
 /// flash, and the noise cuts rather than lingers.
@@ -1443,11 +1411,6 @@ pub fn run_game(
     let mut core =
         Core::load(&spec.core).with_context(|| format!("loading core {}", spec.core.display()))?;
     log::info!("core: {} {}", core.system_name(), core.system_version());
-    // O PCSX Rearmed persiste os cards em ARQUIVOS próprios (pcsx-cardN.mcd
-    // no save dir) e usa o SAVE_RAM só como espelho de saída — escrever nele
-    // perde conteúdo. Os flushes por SAVE_RAM ficam para cores que o usam
-    // como fonte (SwanStation via --core).
-    let core_cards_via_file = core.system_name().to_lowercase().contains("pcsx");
     core.set_directories(&spec.system_dir, &spec.save_dir);
     // Opções do core ANTES do retro_init: a declaração de opções do core
     // (SET_VARIABLES, disparada no init) ZERA a tabela e repõe defaults —
@@ -1514,8 +1477,6 @@ pub fn run_game(
     // Slot 2: vazio até o jogador escolher um card no botão "MC slot 2" —
     // sem card, nada é lido nem gravado (o core formata o dele em memória).
     let mut current_card2 = spec.card2.clone();
-    let mut sram2_path = spec.card2.clone().unwrap_or_default();
-    let mut last_sram2: Option<Vec<u8>> = None;
 
     // CARD 1 vai para o core pelo ARQUIVO dele (pcsx-card1.mcd na pasta
     // memcards), semeado ANTES do load — o Rearmed lê o card do arquivo no
@@ -1558,38 +1519,30 @@ pub fn run_game(
         }
     }
 
-    // Boot "sem disco" (botão Ligar sem disco / executar BIOS):
+    // Boot "sem disco" (botão Ligar sem disco / executar BIOS): o PCSX
+    // Rearmed rejeita `retro_load_game(null)` — mas a BIOS dele roda com um
+    // disco real EJETADO: dá boot no primeiro jogo da estante com a tampa já
+    // aberta (o disco sai antes de o jogo carregar) — a tela que sobe é a da
+    // BIOS, o mesmo que abrir a tampa no carregamento, agora automático.
     let mut bios_lid_open = false;
     if spec.bios {
-        if core.load_bios().is_ok() {
-            // O core aceita boot sem disco (SwanStation): menu da BIOS direto.
-            log::info!("BIOS: boot sem disco (retro_load_game null)");
+        let boot_disc = spec.library.first().map(|(_, p)| p.clone());
+        let ejected = boot_disc
+            .map(|d| core.load_game(&d, &[]).is_ok() && core.set_eject_state(true) == Some(true))
+            .unwrap_or(false);
+        if ejected {
+            bios_lid_open = true;
+            log::info!("BIOS: boot com disco ejetado");
         } else {
-            // O PCSX Rearmed rejeita `retro_load_game(null)` — mas a BIOS
-            // dele roda com um disco real EJETADO: dá boot no primeiro jogo
-            // da estante com a tampa já aberta (o disco sai antes de o jogo
-            // carregar) — a tela que sobe é a da BIOS, o mesmo que abrir a
-            // tampa no carregamento, agora automático (plan revision).
-            let boot_disc = spec.library.first().map(|(_, p)| p.clone());
-            let ejected = boot_disc
-                .map(|d| {
-                    core.load_game(&d, &[]).is_ok() && core.set_eject_state(true) == Some(true)
-                })
-                .unwrap_or(false);
-            if ejected {
-                bios_lid_open = true;
-                log::info!("BIOS: boot com disco ejetado (o core não sobe sem disco)");
-            } else {
-                log::info!("core não inicia a BIOS sem disco (e sem jogo na estante)");
-                cab.push_osd(
-                    &["SEM JOGO NA ESTANTE NÃO DÁ", "PARA SUBIR A BIOS NESTE CORE"],
-                    None,
-                    Duration::from_secs(4),
-                );
-                return Ok(GameExit::Ejected {
-                    static_level: OFF_STATIC_LEVEL,
-                });
-            }
+            log::info!("BIOS: sem jogo na estante para dar boot ejetado");
+            cab.push_osd(
+                &["SEM JOGO NA ESTANTE NÃO DÁ", "PARA SUBIR A BIOS NESTE CORE"],
+                None,
+                Duration::from_secs(4),
+            );
+            return Ok(GameExit::Ejected {
+                static_level: OFF_STATIC_LEVEL,
+            });
         }
     } else {
         core.load_game(&spec.rom, &[])
@@ -2002,7 +1955,6 @@ pub fn run_game(
         log::warn!("core has no save state — run-ahead disabled");
         runahead = 0;
     }
-    let mut last_sram = core.sram();
     // Which note slot to save into once the next frame is ready — set at
     // click time, consumed after `core.run()` produces a real frame.
     let mut note_request: Option<u8> = None;
@@ -2229,7 +2181,6 @@ pub fn run_game(
                                     }
                                     if current_card2.as_deref() == Some(path.as_path()) {
                                         current_card2 = Some(new_path.clone());
-                                        sram2_path = new_path.clone();
                                     }
                                     cab.set_card_labels(
                                         crate::memcard::card_name(current_card.as_deref())
@@ -2562,22 +2513,10 @@ pub fn run_game(
                         // Desligar (plan §3.3): flush the cart, then the
                         // signal-off ritual. A second click while already off
                         // does nothing on purpose — it's Ligar (below) now.
+                        // Cards persistem pelos ARQUIVOS do core (o
+                        // SAVE_RAM é espelho de saída — escrever nele perde
+                        // conteúdo); nada a descarregar aqui.
                         drain_core!();
-                        if !core_cards_via_file {
-                            let (sram_tx, sram_rx) = std::sync::mpsc::channel();
-                            let _ = core_tx.send(CoreCmd::Sram { tx: sram_tx });
-                            let sram = sram_rx.recv().ok().flatten();
-                            flush_sram(&sram_path, &mut last_sram, sram);
-                            if current_card2.is_some() {
-                                let (t2, r2) = std::sync::mpsc::channel();
-                                let _ = core_tx.send(CoreCmd::SramAt {
-                                    id: MEMORY_SAVE_RAM + 1,
-                                    tx: t2,
-                                });
-                                let s2 = r2.recv().ok().flatten();
-                                flush_sram(&sram2_path, &mut last_sram2, s2);
-                            }
-                        }
                         if let Some(t) = powered_since.take() {
                             powered_elapsed += t.elapsed();
                         }
@@ -2664,17 +2603,9 @@ pub fn run_game(
                 UiEvent::Reset => {
                     if powered {
                         drain_core!();
-                        if disc_in {
-                            let _ = core_tx.send(CoreCmd::Reset);
-                        } else {
-                            // Sem disco + Reset: o console boota a BIOS.
-                            let _ = core_tx.send(CoreCmd::BootBios);
-                            cab.push_osd(
-                                &["SEM DISCO — BOOT PELA BIOS"],
-                                None,
-                                Duration::from_secs(3),
-                            );
-                        }
+                        // Sem disco (sessão de BIOS), o reset re-boota a
+                        // BIOS — a bandeja segue ejetada.
+                        let _ = core_tx.send(CoreCmd::Reset);
                         crate::sfx::play(cab, crate::sfx::Sfx::Reset);
                         // Momentary rocker (plan revision) — springs back on
                         // its own next frame via `reset_pressed`/`RESET_SPRING`,
@@ -3130,25 +3061,8 @@ pub fn run_game(
                                 // slots antes de mexer (o card que sai de
                                 // cada posição guarda o que tem — flush é
                                 // only-if-changed, então é de graça).
-                                if powered && !core_cards_via_file {
+                                if powered {
                                     drain_core!();
-                                    let (f1_tx, f1_rx) = std::sync::mpsc::channel();
-                                    let _ = core_tx.send(CoreCmd::Sram { tx: f1_tx });
-                                    flush_sram(
-                                        &sram_path,
-                                        &mut last_sram,
-                                        f1_rx.recv().ok().flatten(),
-                                    );
-                                    let (f2_tx, f2_rx) = std::sync::mpsc::channel();
-                                    let _ = core_tx.send(CoreCmd::SramAt {
-                                        id: MEMORY_SAVE_RAM + 1,
-                                        tx: f2_tx,
-                                    });
-                                    flush_sram(
-                                        &sram2_path,
-                                        &mut last_sram2,
-                                        f2_rx.recv().ok().flatten(),
-                                    );
                                 }
                                 // Um card, um slot (o alvo é o PICKER que
                                 // abriu: port 0 -> slot 1, port 1 -> slot 2).
@@ -3181,7 +3095,6 @@ pub fn run_game(
                                         .join(MC2_SHARED_FILE);
                                     match std::fs::copy(&path, &shared) {
                                         Ok(_) => {
-                                            sram2_path = shared;
                                             current_card2 = Some(path.clone());
                                         }
                                         Err(e) => {
@@ -3195,7 +3108,6 @@ pub fn run_game(
                                             bytes: vec![0; crate::memcard::CARD_SIZE],
                                         });
                                         current_card2 = None;
-                                        sram2_path = PathBuf::new();
                                     }
                                     seat_card(
                                         &core_tx,
@@ -3731,28 +3643,6 @@ pub fn run_game(
                             }
                         }
                     }
-
-                    // Flush periódico do SRAM quando mudou (via comando, o
-                    // core vive na thread do worker) — só para cores cuja
-                    // fonte de card é o SAVE_RAM; o Rearmed persiste por
-                    // arquivo e o espelho dele não é confiável para isso.
-                    if !core_cards_via_file && frames.is_multiple_of(SRAM_FLUSH_FRAMES) {
-                        let (tx, rx) = std::sync::mpsc::channel();
-                        let _ = core_tx.send(CoreCmd::Sram { tx });
-                        if let Ok(s) = rx.recv() {
-                            flush_sram(&sram_path, &mut last_sram, s);
-                        }
-                        if current_card2.is_some() {
-                            let (tx, rx) = std::sync::mpsc::channel();
-                            let _ = core_tx.send(CoreCmd::SramAt {
-                                id: MEMORY_SAVE_RAM + 1,
-                                tx,
-                            });
-                            if let Ok(s) = rx.recv() {
-                                flush_sram(&sram2_path, &mut last_sram2, s);
-                            }
-                        }
-                    }
                 }
             }
             // Mantém o worker alimentado: um Run em voo por vez. No FIM do
@@ -3853,14 +3743,9 @@ pub fn run_game(
         pace_frame(&mut next, frame_time);
     };
 
-    // Final SRAM flush on the way out (either exit path) — o worker é
-    // desligado depois dos flushes (Quit derruba a thread).
-    let (f_tx, f_rx) = std::sync::mpsc::channel();
-    let _ = core_tx.send(CoreCmd::Sram { tx: f_tx });
-    flush_sram(&sram_path, &mut last_sram, f_rx.recv().ok().flatten());
-    // O core desliga AGORA: ao cair, ele escreve os cards nos arquivos
-    // (o card 2 mora no ARQUIVO dele). A sincronia do card 2 com a
-    // biblioteca espera essa escrita terminar.
+    // O core desliga AGORA: ao cair, ele escreve os cards nos ARQUIVOS
+    // (memcards/) e a sincronia com a biblioteca espera essa escrita
+    // terminar — não há flush por SAVE_RAM (é espelho de saída).
     drop(core_tx);
     let _ = worker_handle.join();
     // O card 1 também mora no ARQUIVO do core: o que o jogo salvou na
