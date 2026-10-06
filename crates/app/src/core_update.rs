@@ -1,4 +1,4 @@
-//! Download/update the SwanStation libretro core from the official libretro
+//! Download/update the PCSX Rearmed libretro core from the official libretro
 //! buildbot (`buildbot.libretro.com`) — a settings-screen action. The core is
 //! still never bundled with the app itself (GPL — see the license text,
 //! see `THIRD-PARTY-NOTICES.md`); this just automates what used to be "drop
@@ -13,11 +13,11 @@ use std::time::Duration;
 /// `core/` at launch, and what a download is saved as.
 pub fn core_file_name() -> &'static str {
     if cfg!(target_os = "macos") {
-        "swanstation_libretro.dylib"
+        "pcsx_rearmed_libretro.dylib"
     } else if cfg!(target_os = "windows") {
-        "swanstation_libretro.dll"
+        "pcsx_rearmed_libretro.dll"
     } else {
-        "swanstation_libretro.so"
+        "pcsx_rearmed_libretro.so"
     }
 }
 
@@ -31,16 +31,16 @@ pub fn core_download_url() -> Option<&'static str> {
     };
     match (std::env::consts::OS, arch) {
         ("macos", "arm64") => Some(
-            "https://buildbot.libretro.com/nightly/apple/osx/arm64/latest/swanstation_libretro.dylib.zip",
+            "https://buildbot.libretro.com/nightly/apple/osx/arm64/latest/pcsx_rearmed_libretro.dylib.zip",
         ),
         ("macos", "x86_64") => Some(
-            "https://buildbot.libretro.com/nightly/apple/osx/x86_64/latest/swanstation_libretro.dylib.zip",
+            "https://buildbot.libretro.com/nightly/apple/osx/x86_64/latest/pcsx_rearmed_libretro.dylib.zip",
         ),
         ("windows", "x86_64") => Some(
-            "https://buildbot.libretro.com/nightly/windows/x86_64/latest/swanstation_libretro.dll.zip",
+            "https://buildbot.libretro.com/nightly/windows/x86_64/latest/pcsx_rearmed_libretro.dll.zip",
         ),
         ("linux", "x86_64") => Some(
-            "https://buildbot.libretro.com/nightly/linux/x86_64/latest/swanstation_libretro.so.zip",
+            "https://buildbot.libretro.com/nightly/linux/x86_64/latest/pcsx_rearmed_libretro.so.zip",
         ),
         _ => None,
     }
@@ -54,12 +54,12 @@ pub enum CoreUpdateMsg {
 }
 
 /// The cabinet's nameplate text (plan revision: "mostrar versao do app e
-/// versao do SwanStation, onde esta o nome do app na tv") — the app's own
+/// versao do PCSX Rearmed, onde esta o nome do app na tv") — the app's own
 /// version on the first line and, if a core is installed, the core's
 /// version on a second line below it (`draw_brand` splits on '\n'). Lives
 /// here rather than in the app crate so the idle screen can rebuild it the
 /// moment a setup-screen download finishes — the nameplate used to stay
-/// without the SwanStation line until the player left the screen.
+/// without the PCSX Rearmed line until the player left the screen.
 /// `Core::load` only resolves symbols and reads that info (no `retro_
 /// init`), so peeking at it here and dropping the `Core` right after is
 /// cheap and side-effect-free.
@@ -71,7 +71,7 @@ pub fn nameplate_text(core_path: Option<&std::path::Path>) -> String {
         .filter(|v| !v.is_empty());
     match core_version {
         Some(v) => format!(
-            "{} v{app_version}\nSwanStation {v}",
+            "{} v{app_version}\nPCSX Rearmed {v}",
             polystnx_platform::BRAND
         ),
         None => format!("{} v{app_version}", polystnx_platform::BRAND),

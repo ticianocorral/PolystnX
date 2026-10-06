@@ -278,9 +278,9 @@ fn load_slot_rows(save_dir: &Path, title: &str) -> Vec<(String, bool)> {
         .collect()
 }
 
-/// O arquivo que o SwanStation usa para o card do SLOT 2 (o core o cria
-/// no save dir com Card2Type = Shared e o escreve ao sair).
-const MC2_SHARED_FILE: &str = "duckstation_shared_card_2.mcd";
+/// O arquivo que o PCSX Rearmed usa para o card do SLOT 2 (o core o cria
+/// no save dir com memcard2 habilitado e o escreve ao sair).
+const MC2_SHARED_FILE: &str = "pcsx-card2.mcd";
 
 /// Os `.mcr` da pasta, ordenados — a fonte das duas vistas da biblioteca.
 fn list_cards(dir: &Path) -> Vec<PathBuf> {
@@ -345,7 +345,7 @@ fn card_rows_with_icons(
 
 // --- core em thread própria (plano revision: "faca tudo") ------------------
 //
-// O SwanStation bloqueia: boot, troca BIOS→jogo e FMV pesada seguram
+// O core bloqueia: boot, troca BIOS→jogo e FMV pesada seguram
 // `core.run()` por centenas de ms — e com o loop sequencial, nada era
 // redesenhado (quadro congelado, disco parado). O worker dono do core
 // responde a comandos; a interface continua desenhando a 60 fps o último
@@ -428,7 +428,7 @@ fn spawn_core_worker(
     let (tx, rx) = std::sync::mpsc::channel::<CoreCmd>();
     let (otx, orx) = std::sync::mpsc::channel::<CoreOut>();
     let handle = std::thread::Builder::new()
-        .name("swanstation".into())
+        .name("core-psx".into())
         .spawn(move || {
             // Prioridade baixa para a thread do core (macOS: nice afeta só a
             // thread): nas FMVs o software renderer satura as CPUs e a thread
@@ -1430,18 +1430,12 @@ pub fn run_game(
     log::info!("core: {} {}", core.system_name(), core.system_version());
     core.set_directories(&spec.system_dir, &spec.save_dir);
     core.init();
-    // Renderer de software, SEMPRE: o pipeline do app é 2D (framebuffer →
-    // tubo), e sem esta opção o SwanStation pede contexto de GPU que o
-    // frontend não dá — e cospe frames de lixo (o "quadrado colorido").
-    // A opção já se chamou `swanstation_Renderer`; cores novos usam
-    // `swanstation_GPU_Renderer` — setamos as duas, a desconhecida é só
-    // ignorada pelo core.
-    core.set_variable("swanstation_GPU_Renderer", "Software");
-    core.set_variable("swanstation_Renderer", "Software");
+    // O PCSX Rearmed renderiza por software nativamente — o pipeline do app
+    // é 2D (framebuffer → tubo), nada de contexto de GPU.
     // O card do SLOT 2 não é exposto pelo protocolo (só o id 0 existe) —
-    // o core gerencia o segundo card num ARQUIVO próprio (plan revision:
-    // "ligando o card do slot 2 aos arquivos que o SwanStation lê").
-    core.set_variable("swanstation_MemoryCards_Card2Type", "Shared");
+    // ligamos o segundo card do core (plan revision: "ligando o card do
+    // slot 2 aos arquivos que o core lê") e sincronizamos por arquivo.
+    core.set_variable("pcsx_rearmed_memcard2", "enabled");
     // A ponta de injeção: o card escolhido para o slot 2 é copiado para o
     // arquivo do core ANTES do load (o core o carrega no boot do jogo).
     if let Some(card2) = &spec.card2 {
@@ -1985,7 +1979,7 @@ pub fn run_game(
     let mut print_capture: Option<EmuFrame> = None;
     log::info!("running: rf ntsc + crt tube, run-ahead {runahead}");
     // O core mora na thread dele; a interface continua a 60 fps com o
-    // último quadro enquanto o SwanStation bloqueia (boot, FMV).
+    // último quadro enquanto o PCSX Rearmed bloqueia (boot, FMV).
     let (core_tx, core_rx, worker_handle) = spawn_core_worker(
         core,
         runahead as usize,

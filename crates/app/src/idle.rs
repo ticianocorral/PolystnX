@@ -8,11 +8,11 @@
 //! ends the app (plan revision: mouse/gamepad only, no keyboard shortcuts).
 //!
 //! First-run setup (plan revision: "ao abrir pela primeira vez e não ter o
-//! DAT, o SwanStation — abrir dentro da tv o aviso para baixar os dois arquivos,
-//! com o botão para baixar"): when either the SwanStation core or the
+//! DAT, o PCSX Rearmed — abrir dentro da tv o aviso para baixar os dois arquivos,
+//! com o botão para baixar"): when either the PCSX Rearmed core or the
 //! `nointro.dat` is missing, the TV shows a full setup screen with a
 //! download button for each, before the usual idle panel. Updates (plan
-//! revision: "quando tiver update do app ou do SwanStation não mostrar mais a
+//! revision: "quando tiver update do app ou do PCSX Rearmed não mostrar mais a
 //! tela cheia e sim um icone verde no nameplate do lado de cada um") are no
 //! longer a modal — the startup check's result lights a green dot in the
 //! chin, next to the app's and the core's version lines.
@@ -184,7 +184,7 @@ pub fn run(
     // the plain idle panel takes over (with the old core prompt if the
     // core is still missing).
     let mut setup = core_missing_at_start(core_installed, dat_installed);
-    let mut core = Download::idle("baixar núcleo SwanStation");
+    let mut core = Download::idle("baixar núcleo PCSX Rearmed");
     if core_installed {
         core.done = true;
         core.label = "instalado".to_string();
@@ -217,7 +217,7 @@ pub fn run(
         core.pump();
         dat.pump();
         // A core download just finished (setup screen or panel button) —
-        // rebuild the nameplate right away, so the SwanStation line appears
+        // rebuild the nameplate right away, so the PCSX Rearmed line appears
         // without waiting for the player to leave this screen.
         if core.done && !core_was_done {
             let p = core_update::default_core_path();
@@ -374,12 +374,12 @@ pub fn run(
             // Just dismissed: the same click/Confirm that dismissed the
             // setup screen must not also land on the idle panel below —
             // give it a frame of its own.
-            cab.set_idle_core_prompt(core_missing.then_some("Baixar núcleo SwanStation"));
+            cab.set_idle_core_prompt(core_missing.then_some("Baixar núcleo PCSX Rearmed"));
             crate::runner::pace_frame(&mut next, frame);
             continue;
         }
 
-        cab.set_idle_core_prompt(core_missing.then_some("Baixar núcleo SwanStation"));
+        cab.set_idle_core_prompt(core_missing.then_some("Baixar núcleo PCSX Rearmed"));
 
         // Tela de update do app aberta: dona do tubo (changelog + botão).
         if update_view.is_some() {
@@ -475,9 +475,9 @@ pub fn run(
                 _ => {}
             }
             match cab.hit_panel_button(ox, oy) {
-                // Sem o SwanStation instalado (plan revision: "só desative o
+                // Sem o PCSX Rearmed instalado (plan revision: "só desative o
                 // botão de config e de inserir cartucho se o usuário não
-                // baixou o SwanStation") — os dois ficam inertes; o painel
+                // baixou o PCSX Rearmed") — os dois ficam inertes; o painel
                 // oferece o download do core no lugar.
                 Some(PanelButton::Insert) if !core_missing => return Ok(IdleExit::OpenShelf),
                 Some(PanelButton::BootBios) if !core_missing => return Ok(IdleExit::BootBios),
@@ -642,7 +642,7 @@ fn draw_update_view(
 }
 
 /// Whether the setup screen should come up — either file the player needs
-/// is missing (plan revision: "não tiver o DAT, o SwanStation").
+/// is missing (plan revision: "não tiver o DAT, o PCSX Rearmed").
 fn core_missing_at_start(core_installed: bool, dat_installed: bool) -> bool {
     !core_installed || !dat_installed
 }
@@ -753,7 +753,7 @@ pub fn capture_preview(
                 if core_installed {
                     "instalado"
                 } else {
-                    "baixar núcleo SwanStation"
+                    "baixar núcleo PCSX Rearmed"
                 },
                 core_installed,
                 false,

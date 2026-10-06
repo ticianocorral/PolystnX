@@ -20,7 +20,7 @@ pub struct Config {
     pub runahead: u32,
     pub fullscreen: bool,
     /// Check GitHub for a newer app release, and the buildbot for a fresher
-    /// SwanStation core, once at startup (plan revision) — a settings-screen
+    /// PCSX Rearmed core, once at startup (plan revision) — a settings-screen
     /// toggle, on by default. Either check that finds something newer shows
     /// a one-time notice on the idle screen; a network failure just means no
     /// notice, never an error.
@@ -230,7 +230,7 @@ impl Config {
              # survive a save, but comments outside a value don't.\n\
              # runahead: speculative frames to hide input lag (0 disables).\n\
              # fullscreen: start in fullscreen.\n\
-             # check_updates_on_start: look for a newer release/SwanStation core at launch.\n\
+             # check_updates_on_start: look for a newer release/PCSX Rearmed core at launch.\n\
              # RetroAchievements: ra_user/ra_token from retroachievements.org\n\
              # (Settings -> Web API); empty = the whole feature stays off.\n\
              # ra_hardcore: no cheats/savestates while earning achievements.\n\

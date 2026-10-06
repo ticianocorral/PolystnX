@@ -3,7 +3,7 @@
 //! Presentation is fixed: RF NTSC + CRT-tube warp.
 //!
 //! Usage:
-//!   emu-run --core <path/to/swanstation_libretro.{dylib,so,dll}> --rom <game.sfc>
+//!   emu-run --core <path/to/pcsx_rearmed_libretro.{dylib,so,dll}> --rom <game.sfc>
 //!           [--system-dir DIR] [--save-dir DIR] [--runahead N]
 //!
 //! The core path also reads from $PSX_XPERIENCE_CORE. See docs/fase-0.md for where

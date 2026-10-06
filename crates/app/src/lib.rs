@@ -1,7 +1,7 @@
 //! Shared bits for the `polystnx-app` binaries.
 //!
 //! - [`config`] — `polystnx.cfg` (run-ahead, fullscreen, key binds).
-//! - [`core_update`] — download/update the SwanStation core from the libretro buildbot.
+//! - [`core_update`] — download/update the PCSX Rearmed core from the libretro buildbot.
 //! - [`dirs`] — the portable app layout (one root: next to the executable
 //!   on Windows/Linux, `~/Documents/PSX PolystnX` on macOS).
 //! - [`devmenu`] — the dev-mode menu (Konami-code secret; blank for now).
@@ -11,7 +11,7 @@
 //! - [`settings`] — the settings screen (`polystnx` only, opened with `O` on the shelf).
 //! - [`sfx`] — the console's embedded foley sounds (insert/eject/power/reset).
 //! - [`shelf`] — the selector grid (`selector`, and `polystnx` between games).
-//! - [`update_check`] — startup checks for a newer release/SwanStation core.
+//! - [`update_check`] — startup checks for a newer release/PCSX Rearmed core.
 
 pub mod bios;
 pub mod config;

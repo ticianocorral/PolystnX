@@ -1,5 +1,5 @@
 //! Startup update checks (plan revision: "verificar se tem update para nova
-//! versao" / "verificar se o SwanStation esta atualizado") — both best-effort and
+//! versao" / "verificar se o PCSX Rearmed esta atualizado") — both best-effort and
 //! silent on any network hiccup, gated by `Config::check_updates_on_start`.
 //! Meant to run on a background thread (`std::thread::spawn`), reporting
 //! back through an `mpsc::Sender` the same shape `core_update`'s download
@@ -22,7 +22,7 @@ pub struct UpdateNotice {
     /// revision: "quando for update do app mostrar o changelog e o botão
     /// de atualizar").
     pub app_update: Option<AppUpdate>,
-    /// Whether the installed SwanStation core is older than what the buildbot
+    /// Whether the installed PCSX Rearmed core is older than what the buildbot
     /// currently serves — only ever `true` for a core this app downloaded
     /// itself (see `CoreInstallMeta`); a hand-placed core has no baseline to
     /// compare against and is never flagged.

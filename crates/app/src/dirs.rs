@@ -1,5 +1,5 @@
 //! Portable app layout: every folder the app uses lives in one root — no
-//! database. `roms/` (drop ROMs here), `core/` (the SwanStation core), `assets/`
+//! database. `roms/` (drop ROMs here), `core/` (the PCSX Rearmed core), `assets/`
 //! (local cover/logo art), `saves/`, `notes/`, plus `polystnx.cfg` and
 //! `library.json` at the root.
 //!
