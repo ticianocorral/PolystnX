@@ -1,7 +1,4 @@
-//! Diagnóstico: BIOS viva na tela "insira um disco" + load_disc de um jogo
-//! + fechar a tampa — o jogo bootA sem reset?
-//!   cargo run -p polystnx-emulation --example bios_insert -- <core> <bios-dir> <boot.chd> <jogo.chd> <dir>
-
+//! Controle: show_bios_bootlogo=disabled pula a animação no load inicial?
 use polystnx_emulation::{Core, PixelFormat};
 use std::path::PathBuf;
 
@@ -9,61 +6,31 @@ fn main() -> anyhow::Result<()> {
     let mut it = std::env::args().skip(1);
     let core_path = PathBuf::from(it.next().ok_or_else(|| anyhow::anyhow!("core"))?);
     let bios_dir = PathBuf::from(it.next().ok_or_else(|| anyhow::anyhow!("bios"))?);
-    let boot = PathBuf::from(it.next().ok_or_else(|| anyhow::anyhow!("boot"))?);
-    let game = PathBuf::from(it.next().ok_or_else(|| anyhow::anyhow!("game"))?);
+    let rom = PathBuf::from(it.next().ok_or_else(|| anyhow::anyhow!("rom"))?);
     let out = PathBuf::from(it.next().ok_or_else(|| anyhow::anyhow!("dir"))?);
     std::fs::create_dir_all(&out)?;
 
     let mut core = Core::load(&core_path)?;
-    std::fs::create_dir_all("/tmp/biosinsert-saves").ok();
-    core.set_directories(&bios_dir, &PathBuf::from("/tmp/biosinsert-saves"));
-    core.set_variable("pcsx_rearmed_show_bios_bootlogo", "enabled");
-    core.set_variable("pcsx_rearmed_nocdaudio", "disabled");
-    core.set_variable("pcsx_rearmed_memcard2", "enabled");
+    std::fs::create_dir_all("/tmp/bltest-saves").ok();
+    core.set_directories(&bios_dir, &PathBuf::from("/tmp/bltest-saves"));
+    core.set_variable("pcsx_rearmed_show_bios_bootlogo", "disabled");
     core.init();
-
-    // boot com disco real ejetado (igual ao runner)
-    core.load_game(&boot, &[])?;
-    let ok = core.set_eject_state(true);
-    println!("eject no boot: {ok:?}");
-    for i in 0..900 {
+    core.load_game(&rom, &[])?;
+    let mut real = 0usize;
+    let mut dupes = 0usize;
+    for i in 0..1200 {
         core.run();
         if let Some(f) = core.take_frame() {
-            if i == 899 {
-                save(&f, &out.join("a-bios.bmp"));
-            }
-        }
-    }
-    println!("tela da BIOS após 900 frames");
-
-    // inserção: carrega OUTRO disco e fecha a tampa — SEM reset
-    // Fecha a tampa ANTES do load: o reset interno do load_disc bootA a
-    // BIOS com a tampa fechada e o jogo dentro — a BIOS lê e bootA o jogo
-    // direto (o menu não volta).
-    let ok = core.set_eject_state(false);
-    println!("fecha tampa (antes do load): {ok:?}");
-    match core.load_disc(&game) {
-        Ok(()) => println!("load_disc: ok"),
-        Err(e) => println!("load_disc: {e}"),
-    }
-    // Reset COM bootlogo desligado: o pl_reset do Rearmed salta a BIOS e
-    // entra direto no exe (sem animação, sem menu).
-    core.reset();
-    // O handler do app manda TrayEject{false} DEPOIS do SwitchDisc —
-    // simula: ~10 frames depois, fecha de novo.
-    for _i in 0..10 {
-        core.run();
-        let _ = core.take_frame();
-    }
-    let ok2 = core.set_eject_state(false);
-    println!("fecha tampa de novo (TrayEject redundante): {ok2:?}");
-    for i in 0..1350 {
-        core.run();
-        if let Some(f) = core.take_frame() {
-            if i % 45 == 0 {
-                let p = out.join(format!("ins-{i:04}.bmp"));
+            real += 1;
+            if real == 1 || real == 60 || real == 300 || real == 600 {
+                let p = out.join(format!("bl-{real:03}.bmp"));
                 save(&f, &p);
             }
+        } else if core.frame_duped() {
+            dupes += 1;
+        }
+        if i == 1199 {
+            println!("frames reais: {real}, dupes: {dupes}");
         }
     }
     println!("fim");

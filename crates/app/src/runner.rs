@@ -387,6 +387,18 @@ enum CoreCmd {
         restore: bool,
         tx: std::sync::mpsc::Sender<bool>,
     },
+    /// Inserção a partir da sessão de BIOS: REcria o core com a animação de
+    /// boot desligada e carrega o jogo — o skip do Rearmed (`show_bios_
+    /// bootlogo=disabled` na mesa antes do init) entra direto no exe, sem
+    /// replay da BIOS (no core vivo, o load_disc interno re-boota a BIOS:
+    /// animação + menu de novo — provado em probe).
+    BootFresh {
+        core_path: PathBuf,
+        disc: PathBuf,
+        bios_dir: PathBuf,
+        save_dir: PathBuf,
+        tx: std::sync::mpsc::Sender<bool>,
+    },
     /// Sem disco + Reset: reseta e boota a BIOS (o console fica ligado).
     /// Abre (`true`)/fecha (`false`) a BANDEJA pela disk control interface —
     /// o jogo emulado VÊ a tampa abrir (telas de erro reais dele).
@@ -495,6 +507,42 @@ fn spawn_core_worker(
                     }
                     CoreCmd::WriteMem { id, bytes } => {
                         core.write_memory(id, &bytes);
+                    }
+                    CoreCmd::BootFresh {
+                        core_path,
+                        disc: fresh_disc,
+                        bios_dir,
+                        save_dir,
+                        tx,
+                    } => {
+                        match Core::load(&core_path) {
+                            Ok(mut fresh) => {
+                                fresh.set_directories(&bios_dir, &save_dir);
+                                // Animação desligada NA MESA antes do init —
+                                // é o que faz o skip do Rearmed funcionar.
+                                fresh.set_variable("pcsx_rearmed_show_bios_bootlogo", "disabled");
+                                fresh.set_variable("pcsx_rearmed_memcard2", "enabled");
+                                fresh.set_variable("pcsx_rearmed_nocdaudio", "disabled");
+                                fresh.init();
+                                // O core VELHO sai primeiro: é no drop que ele
+                                // escreve os cards nos arquivos — o novo lê o
+                                // estado final, não o do boot.
+                                let old = std::mem::replace(&mut running.0, fresh);
+                                drop(old);
+                                if running.0.load_game(&fresh_disc, &[]).is_ok() {
+                                    disc = fresh_disc;
+                                    log::info!("boot fresh: jogo no core recriado (sem animação)");
+                                    let _ = tx.send(true);
+                                } else {
+                                    log::warn!("boot fresh: load recusado");
+                                    let _ = tx.send(false);
+                                }
+                            }
+                            Err(e) => {
+                                log::warn!("boot fresh: {e}");
+                                let _ = tx.send(false);
+                            }
+                        }
                     }
                     CoreCmd::SwitchDisc { path, restore, tx } => {
                         // `restore` = troca de disco DENTRO do mesmo jogo
@@ -2304,10 +2352,12 @@ pub fn run_game(
             AUTOINSERT_STEP.with(|st| match st.get() {
                 0 if spec.bios && modal == Modal::None && frames >= 400 => {
                     st.set(1);
+                    log::info!("autoinsert: disparando InsertDisc (frames {frames})");
                     polled.push(UiEvent::InsertDisc);
                 }
                 1 if modal == Modal::Inserir && frames >= 500 => {
                     st.set(2);
+                    log::info!("autoinsert: disparando ModalPick({pick}) (frames {frames})");
                     polled.push(UiEvent::ModalPick(*pick));
                 }
                 _ => {}
@@ -3289,11 +3339,24 @@ pub fn run_game(
                             continue;
                         }
                         let (d_tx, d_rx) = std::sync::mpsc::channel();
-                        let _ = core_tx.send(CoreCmd::SwitchDisc {
-                            path: path.clone(),
-                            restore: false,
-                            tx: d_tx,
-                        });
+                        if bios_session {
+                            // Sessão de BIOS: REcria o core com a animação
+                            // desligada — o skip entra direto no exe (o
+                            // load no core vivo replaya a BIOS inteira).
+                            let _ = core_tx.send(CoreCmd::BootFresh {
+                                core_path: spec.core.clone(),
+                                disc: path.clone(),
+                                bios_dir: spec.system_dir.clone(),
+                                save_dir: spec.save_dir.clone(),
+                                tx: d_tx,
+                            });
+                        } else {
+                            let _ = core_tx.send(CoreCmd::SwitchDisc {
+                                path: path.clone(),
+                                restore: false,
+                                tx: d_tx,
+                            });
+                        }
                         if d_rx.recv().unwrap_or(false) {
                             // A bandeja fecha com a troca (o worker cuida do
                             // estado do core): o painel acompanha.
