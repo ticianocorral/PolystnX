@@ -548,7 +548,20 @@ fn seat_card(
     current: &mut Option<PathBuf>,
     mem_id: u32,
     path: PathBuf,
+    save_dir: &Path,
 ) {
+    // O PCSX Rearmed carrega o card do ARQUIVO dele no boot — o encaixe
+    // também semeia o arquivo (vale a partir do próximo boot do jogo; na
+    // sessão corrente o WriteMem abaixo é melhor-esforço).
+    let shared_file = match mem_id {
+        0 => Some(save_dir.join(MC1_SHARED_FILE)),
+        _ => Some(save_dir.join(MC2_SHARED_FILE)),
+    };
+    if let (Some(shared), Ok(bytes)) = (shared_file, fs::read(&path)) {
+        if std::fs::write(&shared, &bytes).is_ok() {
+            log::info!("card {}: {} semeado no arquivo do core", mem_id + 1, path.display());
+        }
+    }
     match fs::read(&path) {
         Ok(bytes) => {
             let n = bytes.len();
@@ -3134,6 +3147,7 @@ pub fn run_game(
                                         &mut current_card,
                                         0,
                                         path.clone(),
+                                        &spec.save_dir,
                                     );
                                 }
                                 cab.set_card_labels(
