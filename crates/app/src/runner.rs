@@ -1558,20 +1558,38 @@ pub fn run_game(
         }
     }
 
+    // Boot "sem disco" (botão Ligar sem disco / executar BIOS):
+    let mut bios_lid_open = false;
     if spec.bios {
-        if core.load_bios().is_err() {
-            // Nem todo core aceita boot sem disco (o PCSX Rearmed rejeita
-            // `retro_load_game(null)`): explica na TV e volta à idle, em vez
-            // de morrer numa tela morta.
-            log::info!("core não inicia a BIOS sem disco");
-            cab.push_osd(
-                &["ESTE CORE NÃO INICIA A BIOS", "INSIRA UM DISCO (OPEN)"],
-                None,
-                Duration::from_secs(4),
-            );
-            return Ok(GameExit::Ejected {
-                static_level: OFF_STATIC_LEVEL,
-            });
+        if core.load_bios().is_ok() {
+            // O core aceita boot sem disco (SwanStation): menu da BIOS direto.
+            log::info!("BIOS: boot sem disco (retro_load_game null)");
+        } else {
+            // O PCSX Rearmed rejeita `retro_load_game(null)` — mas a BIOS
+            // dele roda com um disco real EJETADO: dá boot no primeiro jogo
+            // da estante com a tampa já aberta (o disco sai antes de o jogo
+            // carregar) — a tela que sobe é a da BIOS, o mesmo que abrir a
+            // tampa no carregamento, agora automático (plan revision).
+            let boot_disc = spec.library.first().map(|(_, p)| p.clone());
+            let ejected = boot_disc
+                .map(|d| {
+                    core.load_game(&d, &[]).is_ok() && core.set_eject_state(true) == Some(true)
+                })
+                .unwrap_or(false);
+            if ejected {
+                bios_lid_open = true;
+                log::info!("BIOS: boot com disco ejetado (o core não sobe sem disco)");
+            } else {
+                log::info!("core não inicia a BIOS sem disco (e sem jogo na estante)");
+                cab.push_osd(
+                    &["SEM JOGO NA ESTANTE NÃO DÁ", "PARA SUBIR A BIOS NESTE CORE"],
+                    None,
+                    Duration::from_secs(4),
+                );
+                return Ok(GameExit::Ejected {
+                    static_level: OFF_STATIC_LEVEL,
+                });
+            }
         }
     } else {
         core.load_game(&spec.rom, &[])
@@ -1716,7 +1734,7 @@ pub fn run_game(
     // Drive: tampa translúcida (OPEN abre/fecha sem desligar) e disco
     // presente (removível só com a tampa aberta). Boot pela BIOS: o drive
     // começa VAZIO — o jogo entra pelo botão "Estante de games" do painel.
-    let mut lid_open = false;
+    let mut lid_open = bios_lid_open;
     let mut disc_in = !spec.bios;
     // A sessão nasceu no boot da BIOS ("Ligar sem disco")? Inserir um jogo
     // pela tampa encerra o modo — o painel passa a se comportar como o de

@@ -52,7 +52,11 @@ fn main() -> anyhow::Result<()> {
     // 15 slots: 3 com save, o resto (vazio) — como o novo CardsAction monta
     for slot in 1..=15usize {
         if slot <= 3 {
-            rows.push((format!("slot {slot}: Tekken 3 — SLUS-00402"), false, icon.clone()));
+            rows.push((
+                format!("slot {slot}: Tekken 3 — SLUS-00402"),
+                false,
+                icon.clone(),
+            ));
         } else {
             rows.push((format!("slot {slot}: (vazio)"), false, None));
         }
