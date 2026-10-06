@@ -548,14 +548,13 @@ fn seat_card(
     current: &mut Option<PathBuf>,
     mem_id: u32,
     path: PathBuf,
-    save_dir: &Path,
 ) {
     // O PCSX Rearmed carrega o card do ARQUIVO dele no boot — o encaixe
     // também semeia o arquivo (vale a partir do próximo boot do jogo; na
     // sessão corrente o WriteMem abaixo é melhor-esforço).
     let shared_file = match mem_id {
-        0 => Some(save_dir.join(MC1_SHARED_FILE)),
-        _ => Some(save_dir.join(MC2_SHARED_FILE)),
+        0 => Some(crate::dirs::memcards_dir().join(MC1_SHARED_FILE)),
+        _ => Some(crate::dirs::memcards_dir().join(MC2_SHARED_FILE)),
     };
     if let (Some(shared), Ok(bytes)) = (shared_file, fs::read(&path)) {
         if std::fs::write(&shared, &bytes).is_ok() {
@@ -1470,9 +1469,11 @@ pub fn run_game(
     core.set_variable("pcsx_rearmed_nocdaudio", "disabled");
     core.init();
     // A ponta de injeção: o card escolhido para o slot 2 é copiado para o
-    // arquivo do core ANTES do load (o core o carrega no boot do jogo).
+    // arquivo do core ANTES do load (o core o carrega no boot do jogo). Os
+    // arquivos de trabalho do core moram na pasta memcards (plan revision:
+    // "sempre usar a pasta memcards" — nada de card na pasta de saves).
     if let Some(card2) = &spec.card2 {
-        let shared = std::path::Path::new(&spec.save_dir).join(MC2_SHARED_FILE);
+        let shared = crate::dirs::memcards_dir().join(MC2_SHARED_FILE);
         if std::fs::copy(card2, &shared).is_ok() {
             log::info!("card 2: {} no arquivo do core", card2.display());
         }
@@ -1506,10 +1507,13 @@ pub fn run_game(
     // insert, flush e tudo mais passam a apontar para o arquivo do card.
     // Mutável: a biblioteca de cards troca o encaixado com o console off.
     let mut current_card = spec.card1.clone();
+    // Sem card encaixado, o card do CONSOLE é o arquivo de trabalho do core
+    // na pasta memcards — persiste entre sessões e nunca cria sram.srm no
+    // save dir (plan revision).
     let mut sram_path = spec
         .card1
         .clone()
-        .unwrap_or_else(|| sram_file(&spec.save_dir, &title));
+        .unwrap_or_else(|| crate::dirs::memcards_dir().join(MC1_SHARED_FILE));
     let initial_sram_path = sram_path.clone();
     // Slot 2: vazio até o jogador escolher um card no botão "MC slot 2" —
     // sem card, nada é lido nem gravado (o core formata o dele em memória).
@@ -1517,17 +1521,44 @@ pub fn run_game(
     let mut sram2_path = spec.card2.clone().unwrap_or_default();
     let mut last_sram2: Option<Vec<u8>> = None;
 
-    // CARD 1 vai para o core pelo ARQUIVO dele (pcsx-card1.mcd no save
-    // dir), semeado ANTES do load — o Rearmed lê o card do arquivo no boot
-    // e descarrega de volta nele ao desligar. O SAVE_RAM desse core é só
-    // um espelho de saída: escrever nele (antes OU depois do load) perde o
-    // conteúdo — o core empurra o próprio estado por cima (provado em
-    // probe: 122 KB sobrescritos numa sessão de 60 s).
-    if !spec.bios && sram_path.exists() {
-        let seed = std::path::Path::new(&spec.save_dir).join(MC1_SHARED_FILE);
-        match std::fs::copy(&sram_path, &seed) {
-            Ok(_) => log::info!("card 1: {} semeado no arquivo do core", sram_path.display()),
-            Err(e) => log::warn!("card 1: semeando {e}"),
+    // CARD 1 vai para o core pelo ARQUIVO dele (pcsx-card1.mcd na pasta
+    // memcards), semeado ANTES do load — o Rearmed lê o card do arquivo no
+    // boot e descarrega de volta nele ao desligar. O SAVE_RAM desse core é
+    // só um espelho de saída: escrever nele (antes OU depois do load) perde
+    // o conteúdo — o core empurra o próprio estado por cima (provado em
+    // probe: 122 KB sobrescritos numa sessão de 60 s). Fonte do conteúdo,
+    // nesta ordem: card encaixado → card do console (memcards) → sram.srm
+    // legado do jogo (migração, o arquivo legado fica intocado).
+    if !spec.bios {
+        // Migração: builds antigos deixavam os arquivos do core na pasta de
+        // saves — o conteúdo de quem já jogava vem junto para a memcards.
+        for name in [MC1_SHARED_FILE, MC2_SHARED_FILE] {
+            let legacy = std::path::Path::new(&spec.save_dir).join(name);
+            let dest = crate::dirs::memcards_dir().join(name);
+            if legacy.exists() && !dest.exists() {
+                std::fs::create_dir_all(crate::dirs::memcards_dir()).ok();
+                if std::fs::rename(&legacy, &dest).is_ok() {
+                    log::info!("card: {} migrado para memcards", name);
+                }
+            }
+        }
+        let console_card = crate::dirs::memcards_dir().join(MC1_SHARED_FILE);
+        let legacy = sram_file(&spec.save_dir, &title);
+        let source = if sram_path.exists() {
+            Some(sram_path.clone())
+        } else if legacy.exists() {
+            Some(legacy)
+        } else {
+            None
+        };
+        if let Some(src) = source {
+            std::fs::create_dir_all(crate::dirs::memcards_dir()).ok();
+            if console_card != src {
+                match std::fs::copy(&src, &console_card) {
+                    Ok(_) => log::info!("card 1: {} semeado no arquivo do core", src.display()),
+                    Err(e) => log::warn!("card 1: semeando {e}"),
+                }
+            }
         }
     }
 
@@ -1563,23 +1594,6 @@ pub fn run_game(
     // paging through prints never moves which text slot is shown, or the
     // other way around.
     let mut text_slot: u8 = 1;
-
-    // Card novo (sem arquivo ainda): o que o core formata vira arquivo na
-    // biblioteca já — o cartão existe antes de o jogo salvar nele (o flush
-    // de changed-only nunca dispararia para um card intocado).
-    if spec.card1.is_some() && !sram_path.exists() {
-        match core.sram() {
-            Some(bytes) => match fs::write(&sram_path, &bytes) {
-                Ok(_) => log::info!(
-                    "card 1: {} criado ({} bytes, formatado pelo core)",
-                    sram_path.display(),
-                    bytes.len()
-                ),
-                Err(e) => log::warn!("card 1: criando {}: {e}", sram_path.display()),
-            },
-            None => log::warn!("card 1: core não expõe SAVE_RAM; card novo fica em memória"),
-        }
-    }
 
     // Sem filtro composto no PSX (plano §2): o frame do core vai direto
     // para a tubo; o filtro do blargg é do irmão de SNES.
@@ -3128,7 +3142,7 @@ pub fn run_game(
                                     // escolhido para o arquivo que o core
                                     // carrega/gerencia. Vale a partir do
                                     // próximo boot do jogo.
-                                    let shared = std::path::Path::new(&spec.save_dir)
+                                    let shared = crate::dirs::memcards_dir()
                                         .join(MC2_SHARED_FILE);
                                     match std::fs::copy(&path, &shared) {
                                         Ok(_) => {
@@ -3154,7 +3168,6 @@ pub fn run_game(
                                         &mut current_card,
                                         0,
                                         path.clone(),
-                                        &spec.save_dir,
                                     );
                                 }
                                 cab.set_card_labels(
@@ -3798,7 +3811,7 @@ pub fn run_game(
     // sessão volta para o card encaixado (biblioteca) ou para o sram.srm —
     // desde que o encaixe não tenha mudado na sessão (troca quente troca o
     // destino; o conteúdo do core pertence ao card que estava no boot).
-    let core_card1 = std::path::Path::new(&spec.save_dir).join(MC1_SHARED_FILE);
+    let core_card1 = crate::dirs::memcards_dir().join(MC1_SHARED_FILE);
     if sram_path == initial_sram_path && core_card1.exists() && sram_path != core_card1 {
         match std::fs::copy(&core_card1, &sram_path) {
             Ok(_) => log::info!(
@@ -3811,7 +3824,7 @@ pub fn run_game(
     if current_card2.is_some() {
         // O conteúdo que o core escreveu volta para o card da biblioteca
         // que estava encaixado no slot 2.
-        let shared = std::path::Path::new(&spec.save_dir).join(MC2_SHARED_FILE);
+        let shared = crate::dirs::memcards_dir().join(MC2_SHARED_FILE);
         if shared.exists() {
             if let Some(dest) = &current_card2 {
                 let _ = std::fs::copy(&shared, dest);
