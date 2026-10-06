@@ -193,10 +193,6 @@ fn disc_name(rom: &Path) -> String {
 
 /// `save_dir/<title>/sram.srm` — battery SRAM, one file per game (plan
 /// revision — used to be `<hash>.srm` directly under `save_dir`).
-fn sram_file(save_dir: &Path, title: &str) -> PathBuf {
-    game_dir(save_dir, title).join("sram.srm")
-}
-
 /// `save_dir/<title>/cheats.txt` — plain text either way, so the extension
 /// might as well say so (plan revision — used to be `<hash>.cheats`).
 fn cheat_state_path(save_dir: &Path, title: &str) -> PathBuf {
@@ -1543,22 +1539,22 @@ pub fn run_game(
             }
         }
         let console_card = crate::dirs::memcards_dir().join(MC1_SHARED_FILE);
-        let legacy = sram_file(&spec.save_dir, &title);
-        let source = if sram_path.exists() {
-            Some(sram_path.clone())
-        } else if legacy.exists() {
-            Some(legacy)
-        } else {
-            None
-        };
-        if let Some(src) = source {
+        if let Some(card1) = &spec.card1 {
+            // Card encaixado: semeia o conteúdo dele no arquivo do core.
             std::fs::create_dir_all(crate::dirs::memcards_dir()).ok();
-            if console_card != src {
-                match std::fs::copy(&src, &console_card) {
-                    Ok(_) => log::info!("card 1: {} semeado no arquivo do core", src.display()),
+            if console_card != card1.as_path() {
+                match std::fs::copy(card1, &console_card) {
+                    Ok(_) => log::info!("card 1: {} semeado no arquivo do core", card1.display()),
                     Err(e) => log::warn!("card 1: semeando {e}"),
                 }
             }
+        } else {
+            // SEM card encaixado o console não tem card: o jogo vê slot
+            // vazio e avisa sozinho ("no memory card") — nada persiste.
+            if console_card.exists() {
+                let _ = std::fs::remove_file(&console_card);
+            }
+            log::info!("card 1: slot vazio — sem card pra salvar");
         }
     }
 
@@ -3136,6 +3132,14 @@ pub fn run_game(
                                         });
                                         current_card = None;
                                         sram_path = PathBuf::new();
+                                        // O arquivo do core também sai: o
+                                        // slot fica vazio de verdade (vale
+                                        // a partir do próximo boot).
+                                        let core_card1 =
+                                            crate::dirs::memcards_dir().join(MC1_SHARED_FILE);
+                                        if core_card1.exists() {
+                                            let _ = std::fs::remove_file(&core_card1);
+                                        }
                                     }
                                     // SLOT 2 = ARQUIVO do core (o protocolo
                                     // só expõe o card 1): copia o card
@@ -3812,7 +3816,14 @@ pub fn run_game(
     // desde que o encaixe não tenha mudado na sessão (troca quente troca o
     // destino; o conteúdo do core pertence ao card que estava no boot).
     let core_card1 = crate::dirs::memcards_dir().join(MC1_SHARED_FILE);
-    if sram_path == initial_sram_path && core_card1.exists() && sram_path != core_card1 {
+    // A sincronia de volta só existe COM card encaixado. Sem card, o
+    // arquivo do core é efêmero: apaga (o jogo avisou que não havia card —
+    // nada do que ele "salvou" num card inexistente persiste).
+    if spec.card1.is_none() {
+        if core_card1.exists() {
+            let _ = std::fs::remove_file(&core_card1);
+        }
+    } else if sram_path == initial_sram_path && core_card1.exists() && sram_path != core_card1 {
         match std::fs::copy(&core_card1, &sram_path) {
             Ok(_) => log::info!(
                 "card 1: {} sincronizado do arquivo do core",
@@ -3853,7 +3864,7 @@ mod tests {
         add_playtime, cheat_state_path, delete_text_slot, frame_to_rgb8, game_dir,
         legacy_note_text_path, load_cheat_state, migrate_legacy_text_notes, note_dir,
         note_slot_path, note_text_slot_path, read_text_slot, rom_title, save_cheat_state,
-        save_note_image, save_text_slot, sram_file, state_file, total_playtime_secs, EmuFrame,
+        save_note_image, save_text_slot, state_file, total_playtime_secs, EmuFrame,
     };
     use polystnx_emulation::PixelFormat as EmuFormat;
 
@@ -4114,10 +4125,6 @@ mod tests {
         assert_eq!(
             state_file(&dir, title, 3),
             game_dir(&dir, title).join("3.state")
-        );
-        assert_eq!(
-            sram_file(&dir, title),
-            game_dir(&dir, title).join("sram.srm")
         );
         assert_eq!(
             cheat_state_path(&dir, title),
