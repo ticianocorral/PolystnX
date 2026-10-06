@@ -53,7 +53,7 @@ fn main() -> anyhow::Result<()> {
         debug_cart_anim: None,
     };
     let _ = dirs::migrate_legacy_data_root();
-    let exit = run_game(&mut plat, &mut cab, &spec, &cfg)?;
+    run_game(&mut plat, &mut cab, &spec, &cfg)?;
     println!("exit ok");
     Ok(())
 }
