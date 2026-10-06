@@ -20,6 +20,7 @@ name = "selector"
 path = "src/bin/selector.rs"
 
 [dependencies]
+encoding_rs = "0.8"
 libc = "0.2"
 polystnx-emulation = { path = "../emulation" }
 polystnx-platform = { path = "../platform" }
