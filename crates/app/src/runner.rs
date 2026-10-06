@@ -1524,7 +1524,7 @@ pub fn run_game(
     plat: &mut Platform,
     cab: &mut Cabinet,
     spec: &GameSpec,
-    cfg: &Config,
+    cfg: &mut Config,
 ) -> Result<GameExit> {
     let runahead_cfg = spec.runahead.unwrap_or(cfg.runahead);
 
@@ -3295,6 +3295,8 @@ pub fn run_game(
                                         if core_card1.exists() {
                                             let _ = std::fs::remove_file(&core_card1);
                                         }
+                                        cfg.card_slot1 = None;
+                                        let _ = cfg.save();
                                     }
                                     // SLOT 2 = ARQUIVO do core (o protocolo
                                     // só expõe o card 1): copia o card
@@ -3337,6 +3339,17 @@ pub fn run_game(
                                     crate::memcard::card_name(current_card2.as_deref())
                                         .as_deref(),
                                 );
+                                // Persiste o encaixe (plan revision: "deve
+                                // sempre utilizar o card que está inserido
+                                // no console") — o console lembra quais
+                                // cards estão nos slots entre sessões.
+                                cfg.card_slot1 = current_card
+                                    .as_ref()
+                                    .map(|p| p.to_string_lossy().into_owned());
+                                cfg.card_slot2 = current_card2
+                                    .as_ref()
+                                    .map(|p| p.to_string_lossy().into_owned());
+                                let _ = cfg.save();
                                 cab.push_osd(
                                     &[&format!("CARD: {name}")],
                                     None,

@@ -214,6 +214,11 @@ fn main() -> Result<()> {
     migrate_old_data();
 
     let mut cfg = Config::load(args.config.as_deref())?;
+    // Os cards encaixados no console (persistidos na config) — o mesmo
+    // card acompanha o console entre sessões (plan revision: "deve sempre
+    // utilizar o card que está inserido no console").
+    let card_slot1 = cfg.card_slot1.clone().map(PathBuf::from);
+    let card_slot2 = cfg.card_slot2.clone().map(PathBuf::from);
     if let Some(p) = &cfg.source {
         log::info!("config: {}", p.display());
     }
@@ -279,8 +284,8 @@ fn main() -> Result<()> {
             runahead: None,
             shot: None,
             logo: None,
-            card1: None,
-            card2: None,
+            card1: card_slot1.clone(),
+            card2: card_slot2.clone(),
             display_title: None,
             bios: false,
             library: library.clone(),
@@ -291,7 +296,7 @@ fn main() -> Result<()> {
             debug_shot_modal: None,
             debug_cart_anim: None,
         };
-        match run_game(&mut plat, &mut cab, &spec, &cfg) {
+        match run_game(&mut plat, &mut cab, &spec, &mut cfg) {
             Ok(GameExit::Ejected { .. }) | Ok(GameExit::Quit) | Err(_) => {}
         }
         return Ok(());
@@ -407,8 +412,8 @@ fn main() -> Result<()> {
                     runahead: None,
                     shot: None,
                     logo: None,
-                    card1: None,
-                    card2: None,
+                    card1: card_slot1.clone(),
+                    card2: card_slot2.clone(),
                     display_title: None,
                     bios: true,
                     library: library.clone(),
@@ -419,7 +424,7 @@ fn main() -> Result<()> {
                     debug_shot_modal: None,
                     debug_cart_anim: None,
                 };
-                match run_game(&mut plat, &mut cab, &spec, &cfg)? {
+                match run_game(&mut plat, &mut cab, &spec, &mut cfg)? {
                     GameExit::Ejected { static_level } => {
                         idle_static = static_level;
                     }
@@ -534,8 +539,8 @@ fn main() -> Result<()> {
                 runahead: args.runahead,
                 shot: None,
                 logo,
-                card1: None,
-                card2: None,
+                card1: card_slot1.clone(),
+                card2: card_slot2.clone(),
                 display_title,
                 bios: false,
                 library: library.clone(),
@@ -546,7 +551,7 @@ fn main() -> Result<()> {
                 debug_shot_modal: None,
                 debug_cart_anim: None,
             };
-            match run_game(&mut plat, &mut cab, &spec, &cfg)? {
+            match run_game(&mut plat, &mut cab, &spec, &mut cfg)? {
                 GameExit::Ejected { static_level } => {
                     idle_static = static_level;
                     break 'shelf;

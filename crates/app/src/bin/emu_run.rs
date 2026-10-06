@@ -261,7 +261,7 @@ fn main() -> Result<()> {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
     let args = parse_args()?;
 
-    let cfg = Config::load(args.config.as_deref())?;
+    let mut cfg = Config::load(args.config.as_deref())?;
     if let Some(p) = &cfg.source {
         log::info!("config: {}", p.display());
     }
@@ -283,8 +283,12 @@ fn main() -> Result<()> {
         runahead: args.runahead,
         shot: args.shot.map(|p| (p, args.shot_frame)),
         logo: args.logo,
-        card1: args.card1,
-        card2: args.card2,
+        card1: args
+            .card1
+            .or_else(|| cfg.card_slot1.clone().map(PathBuf::from)),
+        card2: args
+            .card2
+            .or_else(|| cfg.card_slot2.clone().map(PathBuf::from)),
         display_title: None,
         bios: args.bios,
         library: Vec::new(),
@@ -296,7 +300,7 @@ fn main() -> Result<()> {
         debug_cart_anim: args.debug_cart_anim,
     };
     // Standalone: "back" and "close" both just end the process.
-    run_game(&mut platform, &mut cabinet, &spec, &cfg)?;
+    run_game(&mut platform, &mut cabinet, &spec, &mut cfg)?;
     log::info!("bye");
     Ok(())
 }

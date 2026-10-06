@@ -29,7 +29,7 @@ fn main() -> anyhow::Result<()> {
         .create_cabinet("PolystnX", 1280, 800, false)
         .map_err(|e| anyhow::anyhow!(e.to_string()))?;
 
-    let cfg = Config::load(None)?;
+    let mut cfg = Config::load(None)?;
     let spec = GameSpec {
         core,
         rom: PathBuf::new(),
@@ -51,7 +51,7 @@ fn main() -> anyhow::Result<()> {
         debug_shot_modal: None,
         debug_cart_anim: None,
     };
-    run_game(&mut plat, &mut cab, &spec, &cfg)?;
+    run_game(&mut plat, &mut cab, &spec, &mut cfg)?;
     println!("exit ok");
     Ok(())
 }
