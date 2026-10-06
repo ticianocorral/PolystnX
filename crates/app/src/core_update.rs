@@ -86,6 +86,25 @@ pub fn default_core_path() -> Option<std::path::PathBuf> {
     p.is_file().then_some(p)
 }
 
+/// O commit embutido no `library_version` do core — o PCSX Rearmed se
+/// apresenta como `r26 c881679` (upstream + commit). `None` se o core não
+/// reportar um sha.
+pub fn commit_from_version(version: &str) -> Option<String> {
+    let last = version.split_whitespace().next_back()?;
+    let looks_like_sha =
+        (7..=40).contains(&last.len()) && last.chars().all(|c| c.is_ascii_hexdigit());
+    looks_like_sha.then(|| last.to_ascii_lowercase())
+}
+
+/// The commit the core at `core_path` was built from — `None` if it doesn't
+/// load or doesn't report one. Like `nameplate_text`, this `Core::load`s
+/// (no `retro_init`), so it's read-only and cheap; safe to call from a
+/// background thread (`update_check` does).
+pub fn core_commit(core_path: &std::path::Path) -> Option<String> {
+    let core = polystnx_emulation::Core::load(core_path).ok()?;
+    commit_from_version(core.system_version())
+}
+
 /// Download `url` and unzip the core into `dest_dir/core_file_name()`,
 /// reporting progress on `tx`. Meant to run on a background thread (the app's
 /// standard spawn + `mpsc` + per-frame `try_recv()` pattern) — a
@@ -104,7 +123,6 @@ fn try_download(url: &str, dest_dir: &Path, tx: &Sender<CoreUpdateMsg>) -> Resul
         .timeout(Duration::from_secs(120))
         .build();
     let resp = agent.get(url).call().map_err(|e| e.to_string())?;
-    let etag = resp.header("ETag").map(str::to_string);
     let total = resp
         .header("Content-Length")
         .and_then(|s| s.parse::<u64>().ok());
@@ -150,16 +168,5 @@ fn try_download(url: &str, dest_dir: &Path, tx: &Sender<CoreUpdateMsg>) -> Resul
 
     std::fs::create_dir_all(dest_dir).map_err(|e| e.to_string())?;
     std::fs::write(dest_dir.join(core_file_name()), out).map_err(|e| e.to_string())?;
-    // Record what was just installed (plan revision) — the only baseline a
-    // later startup check has for "is this core stale" without
-    // re-downloading the whole zip just to find out.
-    crate::update_check::save_core_meta(
-        dest_dir,
-        &crate::update_check::CoreInstallMeta {
-            url: url.to_string(),
-            etag,
-            content_length: total,
-        },
-    );
     Ok(())
 }

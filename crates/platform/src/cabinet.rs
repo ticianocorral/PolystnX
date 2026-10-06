@@ -1864,6 +1864,16 @@ impl Cabinet {
             rect.width(),
             rect.height(),
         );
+        // O nameplate (app + core) nas outras telas do chin, também aqui —
+        // (plan revision: "a versão do app e a do pcsx em todas as telas").
+        self.update_arrows = draw_brand(
+            &mut self.canvas,
+            &mut self.font,
+            rect,
+            real_h,
+            self.nameplate.as_str(),
+            self.nameplate_updates,
+        );
         self.canvas.set_viewport(None);
         self.present_and_time();
     }

@@ -281,6 +281,9 @@ fn load_slot_rows(save_dir: &Path, title: &str) -> Vec<(String, bool)> {
 /// O arquivo que o PCSX Rearmed usa para o card do SLOT 2 (o core o cria
 /// no save dir com memcard2 habilitado e o escreve ao sair).
 const MC2_SHARED_FILE: &str = "pcsx-card2.mcd";
+/// O arquivo do card do SLOT 1 no PCSX Rearmed — a fonte de verdade do
+/// core no boot; o SAVE_RAM é espelho e NÃO sobrevive à sessão.
+const MC1_SHARED_FILE: &str = "pcsx-card1.mcd";
 
 /// Os `.mcr` da pasta, ordenados — a fonte das duas vistas da biblioteca.
 fn list_cards(dir: &Path) -> Vec<PathBuf> {
@@ -1428,6 +1431,11 @@ pub fn run_game(
     let mut core =
         Core::load(&spec.core).with_context(|| format!("loading core {}", spec.core.display()))?;
     log::info!("core: {} {}", core.system_name(), core.system_version());
+    // O PCSX Rearmed persiste os cards em ARQUIVOS próprios (pcsx-cardN.mcd
+    // no save dir) e usa o SAVE_RAM só como espelho de saída — escrever nele
+    // perde conteúdo. Os flushes por SAVE_RAM ficam para cores que o usam
+    // como fonte (SwanStation via --core).
+    let core_cards_via_file = core.system_name().to_lowercase().contains("pcsx");
     core.set_directories(&spec.system_dir, &spec.save_dir);
     core.init();
     // O PCSX Rearmed renderiza por software nativamente — o pipeline do app
@@ -1459,26 +1467,15 @@ pub fn run_game(
     // Discos não cabem em RAM: o core recebe o caminho (need_fullpath) e
     // lê o CHD por conta própria.
     // Sem disco: boot direto na BIOS (menu do console).
-    if spec.bios {
-        core.load_bios().context("core rejected the BIOS boot")?;
-    } else {
-        core.load_game(&spec.rom, &[])
-            .context("core rejected the disc")?;
-    }
-
+    // Per-game persistence — one folder per game, named for the title like
+    // notes already are (plan revision — used to be a flat file per kind,
+    // keyed by ROM hash: unreadable next to a folder a player might actually
+    // open, and the hash bought rename-proofing nobody asked for here).
     let title = if spec.bios {
         "BIOS".to_string()
     } else {
         rom_title(&spec.rom)
     };
-    // Painel: o nome canônico do DAT quando há — os arquivos continuam
-    // chaveados pelo stem.
-    let panel_title = spec.display_title.clone().unwrap_or_else(|| title.clone());
-
-    // Per-game persistence — one folder per game, named for the title like
-    // notes already are (plan revision — used to be a flat file per kind,
-    // keyed by ROM hash: unreadable next to a folder a player might actually
-    // open, and the hash bought rename-proofing nobody asked for here).
     fs::create_dir_all(game_dir(&spec.save_dir, &title)).ok();
     // O save mora no card físico quando há um card no slot 1 (plano §3) —
     // insert, flush e tudo mais passam a apontar para o arquivo do card.
@@ -1488,23 +1485,49 @@ pub fn run_game(
         .card1
         .clone()
         .unwrap_or_else(|| sram_file(&spec.save_dir, &title));
+    let initial_sram_path = sram_path.clone();
     // Slot 2: vazio até o jogador escolher um card no botão "MC slot 2" —
     // sem card, nada é lido nem gravado (o core formata o dele em memória).
     let mut current_card2 = spec.card2.clone();
     let mut sram2_path = spec.card2.clone().unwrap_or_default();
     let mut last_sram2: Option<Vec<u8>> = None;
-    if let Some(card2) = spec.card2.clone() {
-        match fs::read(&card2) {
-            Ok(bytes) => {
-                let n = core.write_memory(MEMORY_SAVE_RAM + 1, &bytes);
-                log::info!(
-                    "card 2: conteúdo do {} no SAVE_RAM ({n} bytes)",
-                    card2.display()
-                );
-            }
-            Err(e) => log::info!("card 2: {e} — o core formata"),
+
+    // CARD 1 vai para o core pelo ARQUIVO dele (pcsx-card1.mcd no save
+    // dir), semeado ANTES do load — o Rearmed lê o card do arquivo no boot
+    // e descarrega de volta nele ao desligar. O SAVE_RAM desse core é só
+    // um espelho de saída: escrever nele (antes OU depois do load) perde o
+    // conteúdo — o core empurra o próprio estado por cima (provado em
+    // probe: 122 KB sobrescritos numa sessão de 60 s).
+    if !spec.bios && sram_path.exists() {
+        let seed = std::path::Path::new(&spec.save_dir).join(MC1_SHARED_FILE);
+        match std::fs::copy(&sram_path, &seed) {
+            Ok(_) => log::info!("card 1: {} semeado no arquivo do core", sram_path.display()),
+            Err(e) => log::warn!("card 1: semeando {e}"),
         }
     }
+
+    if spec.bios {
+        if core.load_bios().is_err() {
+            // Nem todo core aceita boot sem disco (o PCSX Rearmed rejeita
+            // `retro_load_game(null)`): explica na TV e volta à idle, em vez
+            // de morrer numa tela morta.
+            log::info!("core não inicia a BIOS sem disco");
+            cab.push_osd(
+                &["ESTE CORE NÃO INICIA A BIOS", "INSIRA UM DISCO (OPEN)"],
+                None,
+                Duration::from_secs(4),
+            );
+            return Ok(GameExit::Ejected {
+                static_level: OFF_STATIC_LEVEL,
+            });
+        }
+    } else {
+        core.load_game(&spec.rom, &[])
+            .context("core rejected the disc")?;
+    }
+    // Painel: o nome canônico do DAT quando há — os arquivos continuam
+    // chaveados pelo stem.
+    let panel_title = spec.display_title.clone().unwrap_or_else(|| title.clone());
     // Note slot (fixed 1..=15, not save-state's 0..=9) — which of the 15
     // the notebook's right page shows; Prev/Next move it while paused
     // there, and picking a print's destination in the Printscreen modal
@@ -1516,16 +1539,10 @@ pub fn run_game(
     // other way around.
     let mut text_slot: u8 = 1;
 
-    if let Ok(bytes) = fs::read(&sram_path) {
-        let n = core.load_sram(&bytes);
-        log::info!(
-            "card 1: conteúdo do {} no SAVE_RAM ({n} bytes)",
-            sram_path.display()
-        );
-    } else if spec.card1.is_some() {
-        // Primeira inserção: o card novo que o core formata vira arquivo na
-        // biblioteca já — o cartão existe, mesmo antes de o jogo salvar nele
-        // (o flush de changed-only nunca dispararia para um card intocado).
+    // Card novo (sem arquivo ainda): o que o core formata vira arquivo na
+    // biblioteca já — o cartão existe antes de o jogo salvar nele (o flush
+    // de changed-only nunca dispararia para um card intocado).
+    if spec.card1.is_some() && !sram_path.exists() {
         match core.sram() {
             Some(bytes) => match fs::write(&sram_path, &bytes) {
                 Ok(_) => log::info!(
@@ -2493,18 +2510,20 @@ pub fn run_game(
                         // signal-off ritual. A second click while already off
                         // does nothing on purpose — it's Ligar (below) now.
                         drain_core!();
-                        let (sram_tx, sram_rx) = std::sync::mpsc::channel();
-                        let _ = core_tx.send(CoreCmd::Sram { tx: sram_tx });
-                        let sram = sram_rx.recv().ok().flatten();
-                        flush_sram(&sram_path, &mut last_sram, sram);
-                        if current_card2.is_some() {
-                            let (t2, r2) = std::sync::mpsc::channel();
-                            let _ = core_tx.send(CoreCmd::SramAt {
-                                id: MEMORY_SAVE_RAM + 1,
-                                tx: t2,
-                            });
-                            let s2 = r2.recv().ok().flatten();
-                            flush_sram(&sram2_path, &mut last_sram2, s2);
+                        if !core_cards_via_file {
+                            let (sram_tx, sram_rx) = std::sync::mpsc::channel();
+                            let _ = core_tx.send(CoreCmd::Sram { tx: sram_tx });
+                            let sram = sram_rx.recv().ok().flatten();
+                            flush_sram(&sram_path, &mut last_sram, sram);
+                            if current_card2.is_some() {
+                                let (t2, r2) = std::sync::mpsc::channel();
+                                let _ = core_tx.send(CoreCmd::SramAt {
+                                    id: MEMORY_SAVE_RAM + 1,
+                                    tx: t2,
+                                });
+                                let s2 = r2.recv().ok().flatten();
+                                flush_sram(&sram2_path, &mut last_sram2, s2);
+                            }
                         }
                         if let Some(t) = powered_since.take() {
                             powered_elapsed += t.elapsed();
@@ -3045,7 +3064,7 @@ pub fn run_game(
                                 // slots antes de mexer (o card que sai de
                                 // cada posição guarda o que tem — flush é
                                 // only-if-changed, então é de graça).
-                                if powered {
+                                if powered && !core_cards_via_file {
                                     drain_core!();
                                     let (f1_tx, f1_rx) = std::sync::mpsc::channel();
                                     let _ = core_tx.send(CoreCmd::Sram { tx: f1_tx });
@@ -3619,8 +3638,10 @@ pub fn run_game(
                     }
 
                     // Flush periódico do SRAM quando mudou (via comando, o
-                    // core vive na thread do worker).
-                    if frames.is_multiple_of(SRAM_FLUSH_FRAMES) {
+                    // core vive na thread do worker) — só para cores cuja
+                    // fonte de card é o SAVE_RAM; o Rearmed persiste por
+                    // arquivo e o espelho dele não é confiável para isso.
+                    if !core_cards_via_file && frames.is_multiple_of(SRAM_FLUSH_FRAMES) {
                         let (tx, rx) = std::sync::mpsc::channel();
                         let _ = core_tx.send(CoreCmd::Sram { tx });
                         if let Ok(s) = rx.recv() {
@@ -3747,6 +3768,20 @@ pub fn run_game(
     // biblioteca espera essa escrita terminar.
     drop(core_tx);
     let _ = worker_handle.join();
+    // O card 1 também mora no ARQUIVO do core: o que o jogo salvou na
+    // sessão volta para o card encaixado (biblioteca) ou para o sram.srm —
+    // desde que o encaixe não tenha mudado na sessão (troca quente troca o
+    // destino; o conteúdo do core pertence ao card que estava no boot).
+    let core_card1 = std::path::Path::new(&spec.save_dir).join(MC1_SHARED_FILE);
+    if sram_path == initial_sram_path && core_card1.exists() && sram_path != core_card1 {
+        match std::fs::copy(&core_card1, &sram_path) {
+            Ok(_) => log::info!(
+                "card 1: {} sincronizado do arquivo do core",
+                sram_path.display()
+            ),
+            Err(e) => log::warn!("card 1: sincronizando {e}"),
+        }
+    }
     if current_card2.is_some() {
         // O conteúdo que o core escreveu volta para o card da biblioteca
         // que estava encaixado no slot 2.
