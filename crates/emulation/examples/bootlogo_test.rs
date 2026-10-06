@@ -13,16 +13,16 @@ fn main() -> anyhow::Result<()> {
     let mut core = Core::load(&core_path)?;
     std::fs::create_dir_all("/tmp/bltest-saves").ok();
     core.set_directories(&bios_dir, &PathBuf::from("/tmp/bltest-saves"));
-    core.set_variable("pcsx_rearmed_show_bios_bootlogo", "disabled");
+    core.set_variable("pcsx_rearmed_show_bios_bootlogo", "enabled");
     core.init();
     core.load_game(&rom, &[])?;
     let mut real = 0usize;
     let mut dupes = 0usize;
-    for i in 0..1200 {
+    for i in 0..2100 {
         core.run();
         if let Some(f) = core.take_frame() {
             real += 1;
-            if real == 1 || real == 60 || real == 300 || real == 600 {
+            if real.is_multiple_of(30) {
                 let p = out.join(format!("bl-{real:03}.bmp"));
                 save(&f, &p);
             }

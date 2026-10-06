@@ -522,16 +522,17 @@ fn spawn_core_worker(
                         // O velho sai DE VERDADE: o drop dlcloseta a lib
                         // (refcount → 0 descarrega) e os globals morrem com
                         // ela — criar o novo antes mantinha a lib viva com
-                        // estado sujo (a tela preta eterna). Com a lib
-                        // descarregada, o novo dlopen nasce limpo e o skip
-                        // (bootlogo desligado na mesa antes do init) entra
-                        // direto no exe.
+                        // estado sujo (a tela preta eterna). O novo dlopen
+                        // nasce limpo, com a animação de boot ligada.
                         let old = running.0.take();
                         drop(old);
                         match Core::load(&core_path) {
                             Ok(mut fresh) => {
                                 fresh.set_directories(&bios_dir, &save_dir);
-                                fresh.set_variable("pcsx_rearmed_show_bios_bootlogo", "disabled");
+                                // Animação LIGADA: a BIOS toca as duas fases
+                                // (branca/losango + preta/logo) — o gate do
+                                // passe cobre a branca e revela na preta.
+                                fresh.set_variable("pcsx_rearmed_show_bios_bootlogo", "enabled");
                                 fresh.set_variable("pcsx_rearmed_memcard2", "enabled");
                                 fresh.set_variable("pcsx_rearmed_nocdaudio", "disabled");
                                 fresh.init();
