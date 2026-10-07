@@ -11,12 +11,12 @@ fn main() -> anyhow::Result<()> {
     log::info!("setup_click: iniciando (clique no continuar em 800ms)");
     let mut plat = Platform::new().map_err(|e| anyhow::anyhow!(e.to_string()))?;
     let mut cab = plat
-        .create_cabinet("PolystnX", 1280, 800, false)
+        .create_cabinet("PolystnX", 1920, 1080, true)
         .map_err(|e| anyhow::anyhow!(e.to_string()))?;
 
     log::info!("agendando cliques no 'continuar' (640,745) em 800ms e 1800ms");
-    plat.push_synthetic_click_later(640, 612, Duration::from_millis(800));
-    plat.push_synthetic_click_later(640, 612, Duration::from_millis(1800));
+    plat.push_synthetic_click_later(394, 534, Duration::from_millis(800));
+    plat.push_synthetic_click_later(394, 534, Duration::from_millis(1800));
     // sem mais cliques — o primeiro deve fechar o setup
 
     let (ntx, notice_rx) = mpsc::channel::<UpdateNotice>();

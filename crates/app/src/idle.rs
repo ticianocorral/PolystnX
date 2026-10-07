@@ -302,7 +302,10 @@ pub fn run(
             if frames_log.is_multiple_of(120) {
                 log::info!("setup ativo (frames {frames_log})");
             }
-            let (w, h) = cab.screen_size();
+            // O MESMO (w, h) do draw_setup: o buffer do paint_shelf
+            // (canvas − painel − bezel), não o screen_size (canvas cheio).
+            // Em ultrawide a diferença era ~230px e o "continuar" morria.
+            let (w, h) = cab.shelf_buffer_size();
             let mut dismiss = false;
             if let Some((x, y)) = m.click {
                 // The close/minimize pair lives in cabinet-canvas space; the

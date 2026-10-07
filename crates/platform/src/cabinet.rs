@@ -1929,6 +1929,20 @@ impl Cabinet {
         self.images.contains_key(&id)
     }
 
+    /// O tamanho do buffer 2D que o `paint_shelf` usa (canvas − painel −
+    /// bezel) — o MESMO espaço que a tela de setup desenha e hit-testa.
+    /// Diferente do [`Self::screen_size`] (canvas cheio): em ultrawide o
+    /// painel estreita o buffer e os rects divergem se um lado usar um.
+    pub fn shelf_buffer_size(&self) -> (u32, u32) {
+        let (real_w, real_h) = self.canvas.output_size().unwrap_or((1280, 720));
+        let rect = cabinet_canvas_rect(real_w, real_h);
+        let cab_w = rect
+            .width()
+            .saturating_sub(panel_rect(rect.width(), rect.height()).width());
+        let s = screen_area(cab_w, rect.height());
+        (s.width(), s.height())
+    }
+
     /// Size of the recessed screen area — what the selector lays itself out in.
     pub fn screen_size(&self) -> (u32, u32) {
         let (real_w, real_h) = self.canvas.output_size().unwrap_or((1280, 720));
