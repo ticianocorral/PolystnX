@@ -178,6 +178,7 @@ pub fn run(
     // (it used to spin unthrottled, redrawing 60fps+ of static forever).
     let frame = Duration::from_millis(16);
     let mut next = Instant::now() + frame;
+    let mut frames_log = 0u64;
 
     // First-run setup (plan revision: see module docs): the TV shows the
     // two download buttons until the player hits "continuar". After that
@@ -283,6 +284,7 @@ pub fn run(
         }
 
         let m = plat.poll_menu(MenuMode::Nav);
+        frames_log += 1;
         if m.quit {
             return Ok(IdleExit::Quit);
         }
@@ -297,6 +299,9 @@ pub fn run(
         }
 
         if setup {
+            if frames_log % 120 == 0 {
+                log::info!("setup ativo (frames {frames_log})");
+            }
             let (w, h) = cab.screen_size();
             let mut dismiss = false;
             if let Some((x, y)) = m.click {
@@ -312,6 +317,9 @@ pub fn run(
                     continue;
                 }
                 let (sx, sy) = cab.window_to_screen(x, y);
+                log::info!(
+                    "setup: clique em janela ({x},{y}) → screen ({sx},{sy})"
+                );
                 match hit_setup_button(w, h, sx, sy) {
                     Some(SetupButton::Core) if core.rx.is_none() && !core.done => {
                         if let Some(url) = core_update::core_download_url() {
@@ -334,7 +342,10 @@ pub fn run(
                         });
                         dat.rx = Some(rx);
                     }
-                    Some(SetupButton::Continue) => dismiss = true,
+                    Some(SetupButton::Continue) => {
+                        log::info!("setup: continuar clicado — dismiss");
+                        dismiss = true;
+                    }
                     _ => {}
                 }
             }

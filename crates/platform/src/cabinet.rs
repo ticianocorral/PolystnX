@@ -1753,6 +1753,20 @@ impl Cabinet {
     /// it apart from a slow app loop is the whole point of the trace.
     fn present_and_time(&mut self) {
         let _span = super::TraceSpan::new("present");
+        // DEBUG-CI: dump do composto em frames marcados (diagnóstico headless).
+        if let Ok(path) = std::env::var("PSX_XPERIENCE_DEBUG_COMPOSITE") {
+            use std::sync::atomic::{AtomicU32, Ordering};
+            static N: AtomicU32 = AtomicU32::new(0);
+            let n = N.fetch_add(1, Ordering::Relaxed);
+            if n == 60 || n == 240 || n == 600 || n == 1200 {
+                let named = format!("{path}.{n}.bmp");
+                let _ = self
+                    .canvas
+                    .read_pixels(None::<Rect>)
+                    .and_then(|s| s.save_bmp(std::path::Path::new(&named)));
+                log::info!("debug composite: frame {n} -> {named}");
+            }
+        }
         self.canvas.present();
     }
 
