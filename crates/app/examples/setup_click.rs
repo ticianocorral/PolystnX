@@ -1,6 +1,6 @@
 //! Clica no "continuar" da tela de setup (headless) e captura o frame
 //! seguinte: se o setup sumiu, o fluxo funciona.
-use polystnx_app::idle::{self, IdleExit};
+use polystnx_app::idle;
 use polystnx_app::update_check::UpdateNotice;
 use polystnx_platform::Platform;
 use std::sync::mpsc;
@@ -22,7 +22,7 @@ fn main() -> anyhow::Result<()> {
     let (ntx, notice_rx) = mpsc::channel::<UpdateNotice>();
     drop(ntx);
     let mut notice_rx = Some(notice_rx);
-    let exit = idle::run(&mut plat, &mut cab, 0.0, &mut notice_rx, false, false)?;
+    idle::run(&mut plat, &mut cab, 0.0, &mut notice_rx, false, false)?;
     log::info!("idle::run saiu");
     Ok(())
 }
