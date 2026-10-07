@@ -1,0 +1,46 @@
+# Flatpak manifest do PolystnX.
+#
+# O build Empacota o binário JÁ COMPILADO pela CI do release (o job linux
+# usa o feature vendored-sdl, então o binário é autossuficiente em SDL —
+# o runtime só fornece o base e as fontes).
+#
+# Build local:
+#   1. cargo build --release --bin polystnx --features polystnx-platform/vendored-sdl
+#      (em Linux, com o target x86_64)
+#   2. copie o binário para packaging/flatpak/polystnx-bin
+#   3. flatpak-builder --force-clean --repo=repo flatpak-build dev.ticianocorral.PolystnX.yml
+#   4. flatpak build-bundle repo PolystnX.flatpak dev.ticianocorral.PolystnX
+app-id: dev.ticianocorral.PolystnX
+runtime: org.kde.Platform
+runtime-version: "6.8"
+sdk: org.kde.Sdk
+command: polystnx
+separate-locales: false
+finish-args:
+  # X11 + Wayland (a janela do gabinete)
+  - --share=ipc
+  - --socket=fallback-x11
+  - --socket=wayland
+  # Áudio
+  - --device=all
+  # GPU (o tubo CRT renderiza via GPU)
+  - --device=dri
+  # A pasta de dados vive em ~/Documents/PolystnX (roms/bios/saves/cards)
+  - --filesystem=home
+modules:
+  - name: polystnx
+    buildsystem: simple
+    build-commands:
+      - install -Dm755 polystnx-bin /app/bin/polystnx
+      - install -Dm644 dev.ticianocorral.PolystnX.desktop -t /app/share/applications/ || install -Dm644 dev.ticianocorral.PolystnX.desktop /app/share/applications/dev.ticianocorral.PolystnX.desktop
+      - install -Dm644 polystnx.png /app/share/icons/hicolor/1024x1024/apps/dev.ticianocorral.PolystnX.png
+      - install -Dm644 dev.ticianocorral.PolystnX.metainfo.xml /app/share/metainfo/dev.ticianocorral.PolystnX.metainfo.xml
+    sources:
+      - type: file
+        path: polystnx-bin
+      - type: file
+        path: dev.ticianocorral.PolystnX.desktop
+      - type: file
+        path: polystnx.png
+      - type: file
+        path: dev.ticianocorral.PolystnX.metainfo.xml

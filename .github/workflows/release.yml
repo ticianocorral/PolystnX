@@ -99,10 +99,27 @@ jobs:
         run: |
           ./packaging/linux/build-appimage.sh target/release/polystnx "${{ steps.ver.outputs.v }}" \
             "PolystnX-${{ steps.ver.outputs.v }}-linux-x86_64.AppImage"
+      - name: Package Flatpak
+        run: |
+          sudo apt-get install -y --no-install-recommends flatpak flatpak-builder
+          flatpak remote-add --user --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
+          flatpak install --user --noninteractive --assumeyes \
+            org.kde.Platform//6.8 org.kde.Sdk//6.8
+          mkdir -p packaging/flatpak
+          cp target/release/polystnx packaging/flatpak/polystnx-bin
+          flatpak-builder --force-clean --repo=flatpak-repo flatpak-build \
+            packaging/flatpak/dev.ticianocorral.PolystnX.yml
+          flatpak build-bundle flatpak-repo \
+            "PolystnX-${{ steps.ver.outputs.v }}-linux-x86_64.flatpak" \
+            dev.ticianocorral.PolystnX
       - uses: actions/upload-artifact@v4
         with:
           name: linux-appimage
           path: PolystnX-*.AppImage
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-flatpak
+          path: PolystnX-*.flatpak
 
   publish:
     needs: [macos, windows, linux]
@@ -119,5 +136,5 @@ jobs:
           TAG="${{ github.event.inputs.tag || github.ref_name }}"
           gh release view "$TAG" --repo "${{ github.repository }}" >/dev/null 2>&1 \
             || gh release create "$TAG" --repo "${{ github.repository }}" --title "$TAG" --generate-notes
-          gh release upload "$TAG" macos-dmg/*.dmg windows-zip/*.zip linux-appimage/*.AppImage \
+          gh release upload "$TAG" macos-dmg/*.dmg windows-zip/*.zip linux-appimage/*.AppImage linux-flatpak/*.flatpak \
             --repo "${{ github.repository }}" --clobber

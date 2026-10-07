@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>dev.ticianocorral.PolystnX</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>MIT</project_license>
+  <name>PolystnX</name>
+  <summary>Emulador de PlayStation com o console inteiro na tela</summary>
+  <description>
+    <p>Um console PSX portátil: a TV com tubo CRT, o gabinete com as portas
+    de memory card reais, a estante de jogos com capas — tudo dentro da
+    janela, como uma TV de tubo com o console ligado. Roda os jogos por
+    PCSX Rearmed (core libretro, baixado pelo próprio app) com BIOS
+    fornecida pelo usuário.</p>
+  </description>
+  <launchable type="desktop-id">dev.ticianocorral.PolystnX.desktop</launchable>
+  <url type="homepage">https://github.com/ticianocorral/PolystnX</url>
+  <content_rating type="oars-1.1" />
+  <provides>
+    <binary>polystnx</binary>
+  </provides>
+  <releases>
+    <release version="1.0.0-beta" date="2026-10-07">
+      <description>
+        <p>Primeira beta pública: PCSX Rearmed como core, setup de primeiro
+        uso com validação de BIOS, memory cards por arquivo com troca
+        quente, BIOS funcional por disco ejetado.</p>
+      </description>
+    </release>
+  </releases>
+</component>
