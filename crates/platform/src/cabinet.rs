@@ -311,7 +311,7 @@ pub struct Cabinet {
     /// before any hit-test runs.
     canvas_rect: Rect,
     /// The cabinet's own nameplate, printed into the chin by `draw_brand` on
-    /// every screen (plan revision: "mostrar versao do app e do SwanStation, onde
+    /// every screen (plan revision: "mostrar versao do app e do PCSX Rearmed, onde
     /// esta o nome do app na tv") — starts as just `BRAND`, but the app sets
     /// it once at startup (and again after a core swap) to also carry the
     /// app/core version, via `set_nameplate`.
@@ -321,10 +321,10 @@ pub struct Cabinet {
     /// block on the left. Throwaway scaffolding for `examples/ra_osd_mock.rs`;
     /// the real feature (phase 4) replaces it with a timed OSD queue.
     /// Per-nameplate-line "tem update" flags (plan revision: "quando tiver
-    /// update do app ou do SwanStation não mostrar mais a tela cheia e sim um
+    /// update do app ou do PCSX Rearmed não mostrar mais a tela cheia e sim um
     /// icone verde no nameplate do lado de cada um") — `(app, core)`. When
     /// set, `draw_brand` prints a small green dot right after that line
-    /// (line 0 = app version, line 1 = SwanStation version); the app flips them
+    /// (line 0 = app version, line 1 = PCSX Rearmed version); the app flips them
     /// via `set_nameplate_updates` once its startup check reports something.
     nameplate_updates: (bool, bool),
     /// Os rects das setas verdes de update no nameplate (app, core) —
@@ -607,7 +607,7 @@ pub enum SettingsButton {
 pub enum UpdateArrow {
     /// A seta da linha do próprio app — abre o changelog + botão atualizar.
     App,
-    /// A seta da linha do SwanStation — baixa e instala o core na hora.
+    /// A seta da linha do PCSX Rearmed — baixa e instala o core na hora.
     Core,
 }
 
@@ -1013,7 +1013,7 @@ impl Cabinet {
 
     /// Replace the cabinet's nameplate text (plan revision) — the app calls
     /// this once at startup with its own version, and again whenever the
-    /// installed SwanStation core changes (a download/update via settings).
+    /// installed PCSX Rearmed core changes (a download/update via settings).
     pub fn set_nameplate(&mut self, text: &str) {
         self.nameplate = text.to_string();
     }
@@ -1753,6 +1753,20 @@ impl Cabinet {
     /// it apart from a slow app loop is the whole point of the trace.
     fn present_and_time(&mut self) {
         let _span = super::TraceSpan::new("present");
+        // DEBUG-CI: dump do composto em frames marcados (diagnóstico headless).
+        if let Ok(path) = std::env::var("PSX_XPERIENCE_DEBUG_COMPOSITE") {
+            use std::sync::atomic::{AtomicU32, Ordering};
+            static N: AtomicU32 = AtomicU32::new(0);
+            let n = N.fetch_add(1, Ordering::Relaxed);
+            if n == 60 || n == 240 || n == 600 || n == 1200 {
+                let named = format!("{path}.{n}.bmp");
+                let _ = self
+                    .canvas
+                    .read_pixels(None::<Rect>)
+                    .and_then(|s| s.save_bmp(std::path::Path::new(&named)));
+                log::info!("debug composite: frame {n} -> {named}");
+            }
+        }
         self.canvas.present();
     }
 
@@ -1864,6 +1878,16 @@ impl Cabinet {
             rect.width(),
             rect.height(),
         );
+        // O nameplate (app + core) nas outras telas do chin, também aqui —
+        // (plan revision: "a versão do app e a do pcsx em todas as telas").
+        self.update_arrows = draw_brand(
+            &mut self.canvas,
+            &mut self.font,
+            rect,
+            real_h,
+            self.nameplate.as_str(),
+            self.nameplate_updates,
+        );
         self.canvas.set_viewport(None);
         self.present_and_time();
     }
@@ -1903,6 +1927,20 @@ impl Cabinet {
     /// need the answer *before* they can build that closure.
     pub fn has_image(&self, id: u64) -> bool {
         self.images.contains_key(&id)
+    }
+
+    /// O tamanho do buffer 2D que o `paint_shelf` usa (canvas − painel −
+    /// bezel) — o MESMO espaço que a tela de setup desenha e hit-testa.
+    /// Diferente do [`Self::screen_size`] (canvas cheio): em ultrawide o
+    /// painel estreita o buffer e os rects divergem se um lado usar um.
+    pub fn shelf_buffer_size(&self) -> (u32, u32) {
+        let (real_w, real_h) = self.canvas.output_size().unwrap_or((1280, 720));
+        let rect = cabinet_canvas_rect(real_w, real_h);
+        let cab_w = rect
+            .width()
+            .saturating_sub(panel_rect(rect.width(), rect.height()).width());
+        let s = screen_area(cab_w, rect.height());
+        (s.width(), s.height())
     }
 
     /// Size of the recessed screen area — what the selector lays itself out in.
@@ -2841,6 +2879,15 @@ impl Cabinet {
     /// resting state — the cartridge seated in the slot, which is also what
     /// `set_panel` starts with. A no-op before `set_panel`; `runner`'s two
     /// animation functions are the only callers.
+    /// Captura o backbuffer corrente (headless diagnostic): o que quer que
+    /// o último `present_*` tenha composto — modal incluído.
+    pub fn capture_screen_bmp(&mut self, path: &std::path::Path) -> Result<(), PlatformError> {
+        self.canvas
+            .read_pixels(None::<Rect>)
+            .and_then(|s| s.save_bmp(path))
+            .map_err(|e| PlatformError::Sdl(e.to_string()))
+    }
+
     pub fn set_cartridge_motion(&mut self, motion: Option<(f32, bool)>) {
         if let Some(panel) = &mut self.panel {
             panel.cartridge_motion = motion;
@@ -4070,7 +4117,7 @@ fn draw_brand(
         return arrows;
     }
     // A '\n' in the label stacks lines (plan revision: "no nameplate colocar
-    // a versão do SwanStation abaixo do psx xperience") — the block centred in
+    // a versão do PCSX Rearmed abaixo do PolystnX") — the block centred in
     // the chin. When the chin can't fit them all, keep only the first (the
     // app's own name/version) rather than spilling over the bezel.
     let lines: Vec<&str> = label.split('\n').collect();
@@ -5193,7 +5240,7 @@ fn draw_panel(
         // botão de download"): warning line directly above the button, both
         // just above the Configurações footer (ou do Dev, quando ele existe).
         if let Some(label) = idle_core_prompt {
-            const WARN: &str = "Para jogar é necessário baixar o núcleo SwanStation.";
+            const WARN: &str = "Para jogar é necessário baixar o núcleo PCSX Rearmed.";
             let btn = Rect::new(x, btn_top - 8 - btn_h, inner_w, btn_h as u32);
             let warn_h = wrapped_height(inner_w, 1, WARN);
             let warn_y = btn.y() - 6 - warn_h;

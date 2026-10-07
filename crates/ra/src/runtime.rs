@@ -70,7 +70,7 @@ impl Session {
         }
     }
 
-    /// Evaluate one frame against `mem` (the SwanStation work RAM). Returns the
+    /// Evaluate one frame against `mem` (the emulator work RAM). Returns the
     /// ids that triggered this frame.
     pub fn tick(&mut self, mem: &[u8]) -> Vec<u32> {
         // The do_frame callbacks carry no ud that reaches the event handler

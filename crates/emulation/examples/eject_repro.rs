@@ -4,7 +4,7 @@
 //! continua rodando — depois fecha a bandeja de volta.
 //!
 //!   cargo run -p polystnx-emulation --example eject_repro -- \
-//!       --core core/swanstation_libretro.dylib \
+//!       --core core/pcsx_rearmed_libretro.dylib \
 //!       --bios-dir .../bios --rom "....chd" [--pre N] [--post N]
 
 use std::path::PathBuf;
@@ -19,7 +19,6 @@ fn main() -> anyhow::Result<()> {
     let mut rom = None;
     let mut pre = 300u32;
     let mut post = 1200u32;
-    let mut cpu = None;
     let mut dump = false;
     let mut close_too = false;
     while let Some(a) = it.next() {
@@ -31,7 +30,6 @@ fn main() -> anyhow::Result<()> {
             "--rom" => rom = Some(it.next().ok_or(anyhow::anyhow!("falta valor"))?.into()),
             "--pre" => pre = it.next().ok_or(anyhow::anyhow!("falta valor"))?.parse()?,
             "--post" => post = it.next().ok_or(anyhow::anyhow!("falta valor"))?.parse()?,
-            "--cpu" => cpu = Some(it.next().ok_or(anyhow::anyhow!("falta valor"))?.to_string()),
             "--dump-vars" => dump = true,
             "--close-too" => close_too = true,
             o => anyhow::bail!("argumento inesperado: {o}"),
@@ -46,10 +44,8 @@ fn main() -> anyhow::Result<()> {
     let mut core = Core::load(&core_path)?;
     core.set_directories(&bios_dir, &save_dir);
     core.init();
-    core.set_variable("swanstation_Renderer", "Software");
-    if let Some(cpu) = &cpu {
-        core.set_variable("swanstation_CPU_ExecutionMode", cpu);
-    }
+    core.set_variable("pcsx_rearmed_nocdaudio", "disabled");
+
     core.load_game(&rom, &[])?;
     eprintln!("carregado: {}", rom.display());
     if dump {

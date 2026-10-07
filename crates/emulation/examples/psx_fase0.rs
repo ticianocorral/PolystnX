@@ -1,13 +1,13 @@
 //! Fase 0, items 2 and 4 (`docs/fase-0.md`): the real boot, headless.
 //!
-//! Loads the SwanStation core with a real BIOS (`--bios-dir`) and a real CHD
+//! Loads the PCSX Rearmed core with a real BIOS (`--bios-dir`) and a real CHD
 //! (`--rom`), runs N frames, dumps the last one as a BMP and reports what the
 //! core exposes through `retro_get_memory_data` — the memory card question:
 //! does `RETRO_MEMORY_SAVE_RAM` carry it, or does the plan B (core options)
 //! decide?
 //!
 //!   cargo run -p polystnx-emulation --example psx_fase0 -- \
-//!       --core core/swanstation_libretro.dylib \
+//!       --core core/pcsx_rearmed_libretro.dylib \
 //!       --bios-dir "…" /bios --rom jogo.chd --save-dir "…" /saves \
 //!       [--frames N] [--shot out.bmp]
 
@@ -139,11 +139,11 @@ fn main() -> anyhow::Result<()> {
     let mut core = Core::load(&args.core)?;
     core.init();
     core.set_directories(&args.bios_dir, &args.save_dir);
-    // The renderer option — the one setting a headless run cannot live
-    // without if the core's default wants a GPU context. SwanStation still
-    // *reads* legacy GET_VARIABLE per key even though it exposes options via
-    // the v2 protocol, so a pre-seeded table reaches it.
-    core.set_variable("swanstation_Renderer", "Software");
+    // Options BEFORE init (the core's SET_VARIABLES resets the table — see
+    // the runner): bootlogo on, CD-DA on, second card on.
+    core.set_variable("pcsx_rearmed_show_bios_bootlogo", "enabled");
+    core.set_variable("pcsx_rearmed_nocdaudio", "disabled");
+    core.set_variable("pcsx_rearmed_memcard2", "enabled");
     core.load_game(&args.rom, &[])?;
     let av = core.av_info();
     println!(

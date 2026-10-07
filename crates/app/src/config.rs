@@ -20,7 +20,7 @@ pub struct Config {
     pub runahead: u32,
     pub fullscreen: bool,
     /// Check GitHub for a newer app release, and the buildbot for a fresher
-    /// SwanStation core, once at startup (plan revision) — a settings-screen
+    /// PCSX Rearmed core, once at startup (plan revision) — a settings-screen
     /// toggle, on by default. Either check that finds something newer shows
     /// a one-time notice on the idle screen; a network failure just means no
     /// notice, never an error.
@@ -48,6 +48,12 @@ pub struct Config {
     /// cheats/savestates/run-ahead lock during play. Meaningful from fase 3
     /// on; persisted now so the setting doesn't move later.
     pub ra_hardcore: bool,
+    /// O card encaixado em cada slot do console (plan revision: "deve sempre
+    /// utilizar o card que está inserido no console") — caminhos para os
+    /// `.mcr` da pasta memcards, persistidos para sobreviver ao app. `None`
+    /// = slot vazio (o jogo vê um card vazio efêmero e não salva em nada).
+    pub card_slot1: Option<String>,
+    pub card_slot2: Option<String>,
     /// Connect login token (plan revision — a web API key não serve mais a
     /// lógica das conquistas: o campo `MemAddr` da rota velha chega
     /// hashado). Nasce do `r=login2` com usuário+senha na tela de
@@ -77,6 +83,8 @@ struct Raw {
     hiss_on_static: Option<bool>,
     mute_game: Option<bool>,
     pad2: Option<bool>,
+    card_slot1: Option<String>,
+    card_slot2: Option<String>,
     bios_default: Option<String>,
     #[serde(default)]
     ra_user: Option<String>,
@@ -115,6 +123,8 @@ impl Config {
             hiss_on_static: false,
             mute_game: false,
             pad2: false,
+            card_slot1: None,
+            card_slot2: None,
             bios_default: None,
             ra_user: String::new(),
             ra_token: String::new(),
@@ -169,6 +179,12 @@ impl Config {
         }
         if let Some(m) = raw.pad2 {
             self.pad2 = m;
+        }
+        if let Some(c) = raw.card_slot1 {
+            self.card_slot1 = if c.is_empty() { None } else { Some(c) };
+        }
+        if let Some(c) = raw.card_slot2 {
+            self.card_slot2 = if c.is_empty() { None } else { Some(c) };
         }
         if let Some(b) = raw.bios_default.clone() {
             self.bios_default = Some(b);
@@ -230,10 +246,13 @@ impl Config {
              # survive a save, but comments outside a value don't.\n\
              # runahead: speculative frames to hide input lag (0 disables).\n\
              # fullscreen: start in fullscreen.\n\
-             # check_updates_on_start: look for a newer release/SwanStation core at launch.\n\
+             # check_updates_on_start: look for a newer release/PCSX Rearmed core at launch.\n\
              # RetroAchievements: ra_user/ra_token from retroachievements.org\n\
              # (Settings -> Web API); empty = the whole feature stays off.\n\
              # ra_hardcore: no cheats/savestates while earning achievements.\n\
+             # card_slot1/card_slot2: o card `.mcr` (da pasta memcards)\n\
+             # encaixado em cada slot do console — persiste entre sessões.\n\
+             # vazio = slot sem card (o jogo não salva em nada).\n\
              # pad2: habilita o CONTROLE 2 (a segunda entrada do console).\n\
              # [keyboard]: action = \"SDL key name\" (e.g. \"Left Shift\", \"F2\", \"]\").\n\
              # [gamepad]: action = \"SDL gamepad button name\" (e.g. \"south\",\n\
@@ -248,6 +267,11 @@ impl Config {
         s.push_str(&format!(
             "# pad2: habilita o CONTROLE 2 (a segunda entrada do console).\npad2 = {}\n\n",
             self.pad2
+        ));
+        s.push_str(&format!(
+            "# card_slot1/card_slot2: o card .mcr (da pasta memcards) encaixado\n# em cada slot do console; vazio (\"\" ) = slot sem card.\ncard_slot1 = \"{}\"\ncard_slot2 = \"{}\"\n\n",
+            self.card_slot1.as_deref().unwrap_or(""),
+            self.card_slot2.as_deref().unwrap_or("")
         ));
         s.push_str(&format!(
             "# mute_game: silencia o áudio do jogo (fica só o som ambiente do leitor).\nmute_game = {}\n\n",
@@ -303,6 +327,8 @@ mod tests {
             hiss_on_static: false,
             mute_game: false,
             pad2: false,
+            card_slot1: None,
+            card_slot2: None,
             bios_default: None,
             ra_user: String::new(),
             ra_token: String::new(),

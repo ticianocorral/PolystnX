@@ -4,14 +4,14 @@ Este projeto **não distribui** nenhum core de emulação, ROM, BIOS ou arte. As
 notas abaixo se aplicam quando você monta um binário que carrega esses
 componentes.
 
-## SwanStation (core libretro)
+## PCSX Rearmed (core libretro)
 
-O caminho de emulação usa o core `swanstation_libretro`
-([SwanStation](https://github.com/libretro/swanstation), herdeiro do
-DuckStation), licenciado sob **GPL v2+** (confirme a variante no repositório
-do core na hora de publicar). O app **não distribui** o core — baixa-o do
-buildbot oficial do libretro pelo próprio menu de configurações; ao publicar
-um binário que baixe o core, inclua o texto da GPL junto.
+O caminho de emulação usa o core `pcsx_rearmed_libretro`
+([PCSX Rearmed](https://github.com/libretro/pcsx_rearmed)), licenciado sob
+**GPL v3+** (confirme a variante no repositório do core na hora de
+publicar). O app **não distribui** o core — baixa-o do buildbot oficial do
+libretro pelo próprio menu de configurações; ao publicar um binário que
+baixe o core, inclua o texto da GPL junto.
 
 O app também **não distribui BIOS de console** — o arquivo `SCPH*.BIN` é
 fornecido por quem roda, em `bios/`, e nunca é baixado nem embarcado.

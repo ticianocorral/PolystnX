@@ -12,17 +12,17 @@
 //! mouse/gamepad only) — in a game, the panel's Power button powers off
 //! (state, saves, TV to snow) and back on again, and Eject only takes once
 //! off, landing back on the idle screen (plan §3.3). "Configurações" (idle
-//! screen or shelf) opens settings (controls, run-ahead, fullscreen, SwanStation
+//! screen or shelf) opens settings (controls, run-ahead, fullscreen, PCSX Rearmed
 //! core download/update) — see `polystnx_app::settings`.
 //!
 //! Usage:
-//!   polystnx [--core path/to/swanstation_libretro.{dylib,so,dll}]
+//!   polystnx [--core path/to/pcsx_rearmed_libretro.{dylib,so,dll}]
 //!             [--config polystnx.cfg] [--save-dir DIR] [--system-dir DIR]
 //!             [--order shelf|name] [--runahead N]
 //!
 //! No `--core`/`$PSX_XPERIENCE_CORE`? Looks for one already downloaded into
 //! `core/` (see the settings screen, "Núcleo") — not included in the app
-//! itself, non-commercial SwanStation license (see THIRD-PARTY-NOTICES.md).
+//! itself, non-commercial PCSX Rearmed license (see THIRD-PARTY-NOTICES.md).
 
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, Receiver};
@@ -163,23 +163,23 @@ startup, after backing out of the shelf, and after ejecting a game. In a\n\
 game, the panel's Power button powers off (saves, TV to snow) and back on\n\
 again; Eject only takes once off, back to idle.\n\
 \"Configurações\" (idle screen or shelf) opens settings (controls, núcleo\n\
-SwanStation, run-ahead, fullscreen, checar atualizações ao abrir) — saved\n\
+PCSX Rearmed, run-ahead, fullscreen, checar atualizações ao abrir) — saved\n\
 straight to polystnx.cfg. Window-close on the idle screen, or closing a\n\
 game window, ends the app — no ceremony there.\n\
 \n\
 The cabinet's nameplate shows the app's own version and, once a core is\n\
-loaded, SwanStation's. Unless turned off in settings, startup also checks\n\
-GitHub for a newer release and the buildbot for a fresher SwanStation core —\n\
+loaded, PCSX Rearmed's. Unless turned off in settings, startup also checks\n\
+GitHub for a newer release and the buildbot for a fresher PCSX Rearmed core —\n\
 when either finds something, a green dot lights up in the nameplate next\n\
 to that version (silently skipped on any network hiccup, never a hard\n\
-failure). First run without the SwanStation core or nointro.dat? The idle\n\
+failure). First run without the PCSX Rearmed core or nointro.dat? The idle\n\
 screen opens on a setup page inside the TV, one download button each.\n\
 \n\
 Portable: roms/, core/, assets/ (cover/logo art, matched by ROM file name),\n\
 saves/, notes/, polystnx.cfg, library.json all live in one root — next to\n\
 this executable on Windows/Linux, ~/Documents/PSX Xperience on macOS.\n\
 Drop ROMs into roms/ and go; no --core/$PSX_XPERIENCE_CORE? Use\n\
-the settings screen's \"Núcleo\" to download SwanStation automatically, or drop\n\
+the settings screen's \"Núcleo\" to download PCSX Rearmed automatically, or drop\n\
 it into core/ by hand (not included — non-commercial license, see\n\
 THIRD-PARTY-NOTICES.md). An optional nointro.dat at the root gives games\n\
 their canonical No-Intro name.";
@@ -214,6 +214,11 @@ fn main() -> Result<()> {
     migrate_old_data();
 
     let mut cfg = Config::load(args.config.as_deref())?;
+    // Os cards encaixados no console (persistidos na config) — o mesmo
+    // card acompanha o console entre sessões (plan revision: "deve sempre
+    // utilizar o card que está inserido no console").
+    let card_slot1 = cfg.card_slot1.clone().map(PathBuf::from);
+    let card_slot2 = cfg.card_slot2.clone().map(PathBuf::from);
     if let Some(p) = &cfg.source {
         log::info!("config: {}", p.display());
     }
@@ -279,8 +284,8 @@ fn main() -> Result<()> {
             runahead: None,
             shot: None,
             logo: None,
-            card1: None,
-            card2: None,
+            card1: card_slot1.clone(),
+            card2: card_slot2.clone(),
             display_title: None,
             bios: false,
             library: library.clone(),
@@ -291,7 +296,7 @@ fn main() -> Result<()> {
             debug_shot_modal: None,
             debug_cart_anim: None,
         };
-        match run_game(&mut plat, &mut cab, &spec, &cfg) {
+        match run_game(&mut plat, &mut cab, &spec, &mut cfg) {
             Ok(GameExit::Ejected { .. }) | Ok(GameExit::Quit) | Err(_) => {}
         }
         return Ok(());
@@ -338,6 +343,7 @@ fn main() -> Result<()> {
             idle::RESTING_STATIC,
             core_path.is_some(),
             polystnx_app::dat_update::dat_installed(),
+            polystnx_app::bios::any_installed(&effective_system_dir),
             path,
         )?;
         log::info!("wrote {} (idle preview)", path.display());
@@ -349,7 +355,7 @@ fn main() -> Result<()> {
     cab.set_nameplate(&core_update::nameplate_text(core_path.as_deref()));
 
     // Startup update checks (plan revision: "verificar se tem update... e se
-    // o SwanStation esta atualizado" — later revision: not a modal anymore, the
+    // o PCSX Rearmed esta atualizado" — later revision: not a modal anymore, the
     // result lights the green dots in the nameplate), opt-out in settings —
     // network calls, so they run on their own thread; `idle::run` drains
     // the result whenever it's ready.
@@ -382,6 +388,7 @@ fn main() -> Result<()> {
                 &mut update_rx,
                 core_path.is_some(),
                 polystnx_app::dat_update::dat_installed(),
+                polystnx_app::bios::any_installed(&effective_system_dir),
             )?
         };
         plat.set_konami_watch(false);
@@ -407,8 +414,8 @@ fn main() -> Result<()> {
                     runahead: None,
                     shot: None,
                     logo: None,
-                    card1: None,
-                    card2: None,
+                    card1: card_slot1.clone(),
+                    card2: card_slot2.clone(),
                     display_title: None,
                     bios: true,
                     library: library.clone(),
@@ -419,7 +426,7 @@ fn main() -> Result<()> {
                     debug_shot_modal: None,
                     debug_cart_anim: None,
                 };
-                match run_game(&mut plat, &mut cab, &spec, &cfg)? {
+                match run_game(&mut plat, &mut cab, &spec, &mut cfg)? {
                     GameExit::Ejected { static_level } => {
                         idle_static = static_level;
                     }
@@ -534,8 +541,8 @@ fn main() -> Result<()> {
                 runahead: args.runahead,
                 shot: None,
                 logo,
-                card1: None,
-                card2: None,
+                card1: card_slot1.clone(),
+                card2: card_slot2.clone(),
                 display_title,
                 bios: false,
                 library: library.clone(),
@@ -546,7 +553,7 @@ fn main() -> Result<()> {
                 debug_shot_modal: None,
                 debug_cart_anim: None,
             };
-            match run_game(&mut plat, &mut cab, &spec, &cfg)? {
+            match run_game(&mut plat, &mut cab, &spec, &mut cfg)? {
                 GameExit::Ejected { static_level } => {
                     idle_static = static_level;
                     break 'shelf;
@@ -602,8 +609,8 @@ fn no_core_screen(plat: &mut Platform, cab: &mut Cabinet) -> Result<bool> {
                 700,
                 1,
                 (150, 150, 158),
-                "para jogar é necessário o núcleo SwanStation: volte à tela inicial e \
-                 clique em \"Baixar núcleo SwanStation\", baixe pelo menu de configurações \
+                "para jogar é necessário o núcleo PCSX Rearmed: volte à tela inicial e \
+                 clique em \"Baixar núcleo PCSX Rearmed\", baixe pelo menu de configurações \
                  ou coloque o arquivo em core/ à mão.",
             );
             d.text(

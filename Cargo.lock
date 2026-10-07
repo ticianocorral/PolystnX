@@ -1016,9 +1016,10 @@ dependencies = [
 
 [[package]]
 name = "polystnx-app"
-version = "0.2.0"
+version = "1.0.0-beta"
 dependencies = [
  "anyhow",
+ "encoding_rs",
  "env_logger",
  "image",
  "libc",
@@ -1040,7 +1041,7 @@ dependencies = [
 
 [[package]]
 name = "polystnx-domain"
-version = "0.2.0"
+version = "1.0.0-beta"
 dependencies = [
  "crc32fast",
  "log",
@@ -1055,7 +1056,7 @@ dependencies = [
 
 [[package]]
 name = "polystnx-emulation"
-version = "0.2.0"
+version = "1.0.0-beta"
 dependencies = [
  "anyhow",
  "libloading",
@@ -1065,14 +1066,14 @@ dependencies = [
 
 [[package]]
 name = "polystnx-ntsc"
-version = "0.2.0"
+version = "1.0.0-beta"
 dependencies = [
  "cc",
 ]
 
 [[package]]
 name = "polystnx-platform"
-version = "0.2.0"
+version = "1.0.0-beta"
 dependencies = [
  "log",
  "noto-sans-mono-bitmap",
@@ -1082,7 +1083,7 @@ dependencies = [
 
 [[package]]
 name = "polystnx-ra"
-version = "0.2.0"
+version = "1.0.0-beta"
 dependencies = [
  "cc",
  "chd",

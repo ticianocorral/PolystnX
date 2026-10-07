@@ -28,7 +28,7 @@ fn main() -> anyhow::Result<()> {
     let mut cab = plat
         .create_cabinet("PolystnX", 1280, 800, false)
         .map_err(|e| anyhow::anyhow!(e.to_string()))?;
-    cab.set_nameplate("PolystnX v1.0.0-beta\nSwanStation 1.63");
+    cab.set_nameplate("PolystnX v1.0.0-beta\nPCSX Rearmed r26");
 
     // A logo oficial do RA (o favicon embutido no app) para o badge, e a
     // conta "ativa" — como no app real, o badge acompanha todas as telas.
@@ -48,11 +48,12 @@ fn main() -> anyhow::Result<()> {
 
     // --- Tela inicial: slot vazio, tubo em estática (o painel idle real,
     //     com a "Estante de games" e o rodapé "Configurações"). Sem o
-    //     prompt de core: nos screens do site o SwanStation já está instalado. ---
+    //     prompt de core: nos screens do site o PCSX Rearmed já está instalado. ---
     cab.clear_panel();
     idle::capture_preview(
         &mut cab,
         idle::RESTING_STATIC,
+        true,
         true,
         true,
         &out.join("inicial.bmp"),
@@ -134,7 +135,7 @@ fn main() -> anyhow::Result<()> {
         let mut cab = plat
             .create_cabinet("PolystnX", 1280, 800, false)
             .map_err(|e| anyhow::anyhow!(e.to_string()))?;
-        cab.set_nameplate("PolystnX v1.0.0-beta\nSwanStation 1.63");
+        cab.set_nameplate("PolystnX v1.0.0-beta\nPCSX Rearmed r26");
         if let Ok(icon) = image::load_from_memory(polystnx_app::RA_ICON_PNG) {
             let icon = icon.to_rgba8();
             cab.set_image(

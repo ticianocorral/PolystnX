@@ -654,9 +654,10 @@ impl GridLayout {
             let item_w = item_h * TILE_W as i32 / TILE_H as i32;
             let cell_w = item_w + gap;
             let cell_h = item_h + gap;
-            // Sobrou largura? A grade fica centrada na área dela.
-            let used = cols * cell_w - gap;
-            let x0 = MARGIN + (grid_w as i32 - used) / 2;
+            // Alinhada à ESQUERDA (plan revision: "alinhar a estante da
+            // lista dos jogos a esquerda") — a grade nasce na margem e a
+            // sobra de largura fica toda à direita.
+            let x0 = MARGIN;
             (cell_w, cell_h, item_w, item_h, cols as usize, x0)
         };
         let vis_rows = ((scr_h as i32 - top_y - MARGIN) / cell_h).max(1) as usize;
@@ -2193,15 +2194,6 @@ pub fn run(
             draw_history_button(d, history_rect);
             draw_refresh_button(d, refresh_rect);
 
-            // The marker itself (plan revision: "adicionar marcador de
-            // favorito nos jogos"; depois "o icone de favorito coloca uma
-            // estrela vermelha") — a red star in the tile's top-right
-            // corner, on every strip and the grid alike.
-            const FAV_RED: (u8, u8, u8) = (214, 40, 40);
-            let draw_fav_dot = |d: &mut Screen, x: i32, y: i32, tile_w: u32| {
-                d.star(x + tile_w as i32 - 16, y + 12, 9, FAV_RED);
-            };
-
             if show_fav {
                 d.text(MARGIN, MARGIN + HEADER_H, 1, DIM, FAV_TITLE);
                 for (i, entry) in favorites
@@ -2228,7 +2220,6 @@ pub fn run(
                             &entry.title().to_uppercase(),
                         );
                     }
-                    draw_fav_dot(d, x, y, RECENT_TILE_W);
                     if in_fav && i == fav_idx {
                         d.outline(
                             x - 3,
@@ -2279,7 +2270,6 @@ pub fn run(
                             &entry.title().to_uppercase(),
                         );
                     }
-                    draw_fav_dot(d, x, y, RECENT_TILE_W);
                     if in_recent && i == recent_idx {
                         d.outline(
                             x - 3,
@@ -2337,9 +2327,6 @@ pub fn run(
                             DIM,
                             &entry.title().to_uppercase(),
                         );
-                    }
-                    if entry.rom.favorite {
-                        draw_fav_dot(d, x, y, TILE_W);
                     }
                     if !in_recent && !in_fav && i == sel {
                         d.outline(x - 3, y - 3, TILE_W + 6, TILE_H + 6, 3, HILITE);

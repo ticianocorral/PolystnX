@@ -45,8 +45,17 @@ pub fn inspect(path: &Path) -> Option<CardInfo> {
         // O quadro `slot` do bloco 0 é a entrada de diretório do slot.
         let dir = &bytes[slot * FRAME..(slot + 1) * FRAME];
         let (b0, b1) = (dir[0], dir[1]);
-        // Livre (00 00), apagado (51 51 e contadores 51 xx) ou reservado.
-        if (b0 == 0 && b1 == 0) || b0 == 0x51 || (b0 == 0xFF && b1 == 0xFF) {
+        // Livre: (00 00) card fresco, (A0 00) formatado-vazio (o padrão da
+        // BIOS do Rearmed ao formatar), (51 51) apagado-fresco, (FF FF)
+        // fim-de-cadeia. QUALQUER outro magic = em uso — o Tekken 3, por
+        // exemplo, grava os saves com (51 00) e a BIOS lê normalmente (o
+        // filtro antigo tratava 0x51 como apagado universal e os saves do
+        // Tekken desapareciam do seletor).
+        if (b0 == 0 && b1 == 0)
+            || b0 == 0xA0
+            || (b0 == 0x51 && b1 == 0x51)
+            || (b0 == 0xFF && b1 == 0xFF)
+        {
             continue;
         }
         let save = &bytes[slot * BLOCK..(slot + 1) * BLOCK];
@@ -56,10 +65,28 @@ pub fn inspect(path: &Path) -> Option<CardInfo> {
         if head.iter().skip(8).all(|&b| b == 0) {
             continue;
         }
-        let code = trim_ascii(&head[0x08..0x14]);
+        // Título/produto em ASCII (jogos ocidentais) OU Shift-JIS (jogos
+        // japoneses gravam SJIS mesmo em discos US — o Tekken 3 grava até o
+        // CÓDIGO de produto em full-width: "ＥＫＫＥＮ　...").
+        let code = readable(trim_ascii(&head[0x08..0x14]));
+        let sjis_code = shift_jis_title(&head[0x08..0x14]);
+        let code = if !code.is_empty() {
+            code
+        } else if !sjis_code.is_empty() {
+            sjis_code
+        } else {
+            trim_ascii(&head[0x14..0x1C])
+        };
         let ident = trim_ascii(&head[0x14..0x1C]);
-        let sjis = readable(trim_ascii(&head[0x1C..0x38]));
-        let title = if sjis.is_empty() { code.clone() } else { sjis };
+        let ascii = readable(trim_ascii(&head[0x1C..0x38]));
+        let sjis = shift_jis_title(&head[0x1C..0x38]);
+        let title = if !ascii.is_empty() {
+            ascii
+        } else if !sjis.is_empty() {
+            sjis
+        } else {
+            code.clone()
+        };
         saves.push(CardSave {
             title,
             product: if code.is_empty() { ident } else { code },
@@ -137,6 +164,29 @@ fn trim_ascii(bytes: &[u8]) -> String {
     let end = bytes.iter().position(|&b| b == 0).unwrap_or(bytes.len());
     let trimmed: &[u8] = bytes[..end].strip_suffix(b" ").unwrap_or(&bytes[..end]);
     String::from_utf8_lossy(trimmed).into_owned()
+}
+
+/// Título gravado em Shift-JIS (jogos japoneses/europeus com saves JP),
+/// decodificado para a UI. Vazio se os bytes não formarem SJIS razoável
+/// (títulos ASCII caem no `readable` antes de chegarem aqui).
+fn shift_jis_title(bytes: &[u8]) -> String {
+    let trimmed: &[u8] = {
+        let end = bytes
+            .iter()
+            .rposition(|b| *b != 0 && *b != 0x20 && *b != 0x81 && *b != 0x40)
+            .map_or(0, |p| p + 1);
+        &bytes[..end]
+    };
+    let decoded = encoding_rs::SHIFT_JIS.decode(trimmed).0.into_owned();
+    let cleaned = decoded.trim().to_string();
+    // SJIS decodifica quase qualquer coisa: aceita só se ficou razoável
+    // (sem os losangos de substituição em excesso).
+    let bad = cleaned.matches('\u{FFFD}').count();
+    if !cleaned.is_empty() && bad * 4 <= cleaned.chars().count() {
+        cleaned
+    } else {
+        String::new()
+    }
 }
 
 /// SJIS cai mal em UTF-8: só aceita título ASCII imprimível; o resto vira

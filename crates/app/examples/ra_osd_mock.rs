@@ -24,7 +24,7 @@ fn main() -> anyhow::Result<()> {
 
     // What the app shows in-game today: nameplate with versions, the panel's
     // command rows, power on, a running session clock.
-    cab.set_nameplate("PolystnX v0.14.0\nSwanStation 1.63");
+    cab.set_nameplate("PolystnX v0.14.0\nPCSX Rearmed r26");
     cab.set_panel(
         None,
         None,

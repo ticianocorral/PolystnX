@@ -581,8 +581,8 @@ fn adjust_row(cfg: &mut Config, sec: usize, sel: usize, cab: &mut Cabinet, right
     }
 }
 
-/// Kick off a background download of the SwanStation core (plan: "opção pra
-/// baixar o SwanStation... e opção de update do núcleo" — one action serves both,
+/// Kick off a background download of the PCSX Rearmed core (plan: "opção pra
+/// baixar o PCSX Rearmed... e opção de update do núcleo" — one action serves both,
 /// the buildbot only ever serves "latest"). No-op while one is already in
 /// flight. The standard background-thread + `mpsc` shape of this app —
 /// `settings::run`'s loop drains it with `try_recv()` every frame.

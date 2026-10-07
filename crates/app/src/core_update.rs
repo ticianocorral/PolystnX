@@ -1,4 +1,4 @@
-//! Download/update the SwanStation libretro core from the official libretro
+//! Download/update the PCSX Rearmed libretro core from the official libretro
 //! buildbot (`buildbot.libretro.com`) — a settings-screen action. The core is
 //! still never bundled with the app itself (GPL — see the license text,
 //! see `THIRD-PARTY-NOTICES.md`); this just automates what used to be "drop
@@ -13,11 +13,11 @@ use std::time::Duration;
 /// `core/` at launch, and what a download is saved as.
 pub fn core_file_name() -> &'static str {
     if cfg!(target_os = "macos") {
-        "swanstation_libretro.dylib"
+        "pcsx_rearmed_libretro.dylib"
     } else if cfg!(target_os = "windows") {
-        "swanstation_libretro.dll"
+        "pcsx_rearmed_libretro.dll"
     } else {
-        "swanstation_libretro.so"
+        "pcsx_rearmed_libretro.so"
     }
 }
 
@@ -31,16 +31,16 @@ pub fn core_download_url() -> Option<&'static str> {
     };
     match (std::env::consts::OS, arch) {
         ("macos", "arm64") => Some(
-            "https://buildbot.libretro.com/nightly/apple/osx/arm64/latest/swanstation_libretro.dylib.zip",
+            "https://buildbot.libretro.com/nightly/apple/osx/arm64/latest/pcsx_rearmed_libretro.dylib.zip",
         ),
         ("macos", "x86_64") => Some(
-            "https://buildbot.libretro.com/nightly/apple/osx/x86_64/latest/swanstation_libretro.dylib.zip",
+            "https://buildbot.libretro.com/nightly/apple/osx/x86_64/latest/pcsx_rearmed_libretro.dylib.zip",
         ),
         ("windows", "x86_64") => Some(
-            "https://buildbot.libretro.com/nightly/windows/x86_64/latest/swanstation_libretro.dll.zip",
+            "https://buildbot.libretro.com/nightly/windows/x86_64/latest/pcsx_rearmed_libretro.dll.zip",
         ),
         ("linux", "x86_64") => Some(
-            "https://buildbot.libretro.com/nightly/linux/x86_64/latest/swanstation_libretro.so.zip",
+            "https://buildbot.libretro.com/nightly/linux/x86_64/latest/pcsx_rearmed_libretro.so.zip",
         ),
         _ => None,
     }
@@ -54,12 +54,12 @@ pub enum CoreUpdateMsg {
 }
 
 /// The cabinet's nameplate text (plan revision: "mostrar versao do app e
-/// versao do SwanStation, onde esta o nome do app na tv") — the app's own
+/// versao do PCSX Rearmed, onde esta o nome do app na tv") — the app's own
 /// version on the first line and, if a core is installed, the core's
 /// version on a second line below it (`draw_brand` splits on '\n'). Lives
 /// here rather than in the app crate so the idle screen can rebuild it the
 /// moment a setup-screen download finishes — the nameplate used to stay
-/// without the SwanStation line until the player left the screen.
+/// without the PCSX Rearmed line until the player left the screen.
 /// `Core::load` only resolves symbols and reads that info (no `retro_
 /// init`), so peeking at it here and dropping the `Core` right after is
 /// cheap and side-effect-free.
@@ -71,7 +71,7 @@ pub fn nameplate_text(core_path: Option<&std::path::Path>) -> String {
         .filter(|v| !v.is_empty());
     match core_version {
         Some(v) => format!(
-            "{} v{app_version}\nSwanStation {v}",
+            "{} v{app_version}\nPCSX Rearmed {v}",
             polystnx_platform::BRAND
         ),
         None => format!("{} v{app_version}", polystnx_platform::BRAND),
@@ -84,6 +84,25 @@ pub fn nameplate_text(core_path: Option<&std::path::Path>) -> String {
 pub fn default_core_path() -> Option<std::path::PathBuf> {
     let p = crate::dirs::core_dir().join(core_file_name());
     p.is_file().then_some(p)
+}
+
+/// O commit embutido no `library_version` do core — o PCSX Rearmed se
+/// apresenta como `r26 c881679` (upstream + commit). `None` se o core não
+/// reportar um sha.
+pub fn commit_from_version(version: &str) -> Option<String> {
+    let last = version.split_whitespace().next_back()?;
+    let looks_like_sha =
+        (7..=40).contains(&last.len()) && last.chars().all(|c| c.is_ascii_hexdigit());
+    looks_like_sha.then(|| last.to_ascii_lowercase())
+}
+
+/// The commit the core at `core_path` was built from — `None` if it doesn't
+/// load or doesn't report one. Like `nameplate_text`, this `Core::load`s
+/// (no `retro_init`), so it's read-only and cheap; safe to call from a
+/// background thread (`update_check` does).
+pub fn core_commit(core_path: &std::path::Path) -> Option<String> {
+    let core = polystnx_emulation::Core::load(core_path).ok()?;
+    commit_from_version(core.system_version())
 }
 
 /// Download `url` and unzip the core into `dest_dir/core_file_name()`,
@@ -104,7 +123,6 @@ fn try_download(url: &str, dest_dir: &Path, tx: &Sender<CoreUpdateMsg>) -> Resul
         .timeout(Duration::from_secs(120))
         .build();
     let resp = agent.get(url).call().map_err(|e| e.to_string())?;
-    let etag = resp.header("ETag").map(str::to_string);
     let total = resp
         .header("Content-Length")
         .and_then(|s| s.parse::<u64>().ok());
@@ -150,16 +168,5 @@ fn try_download(url: &str, dest_dir: &Path, tx: &Sender<CoreUpdateMsg>) -> Resul
 
     std::fs::create_dir_all(dest_dir).map_err(|e| e.to_string())?;
     std::fs::write(dest_dir.join(core_file_name()), out).map_err(|e| e.to_string())?;
-    // Record what was just installed (plan revision) — the only baseline a
-    // later startup check has for "is this core stale" without
-    // re-downloading the whole zip just to find out.
-    crate::update_check::save_core_meta(
-        dest_dir,
-        &crate::update_check::CoreInstallMeta {
-            url: url.to_string(),
-            etag,
-            content_length: total,
-        },
-    );
     Ok(())
 }

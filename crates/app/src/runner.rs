@@ -19,7 +19,6 @@ use polystnx_platform::{
 use crate::config::Config;
 
 /// How often to flush battery SRAM to disk while playing (frames ≈ 10 s).
-const SRAM_FLUSH_FRAMES: u32 = 600;
 /// Save-state slots, `0`..`9`.
 const SLOTS: u8 = 10;
 /// Max characters a pause-book free-text note may hold (plan revision) —
@@ -193,10 +192,6 @@ fn disc_name(rom: &Path) -> String {
 
 /// `save_dir/<title>/sram.srm` — battery SRAM, one file per game (plan
 /// revision — used to be `<hash>.srm` directly under `save_dir`).
-fn sram_file(save_dir: &Path, title: &str) -> PathBuf {
-    game_dir(save_dir, title).join("sram.srm")
-}
-
 /// `save_dir/<title>/cheats.txt` — plain text either way, so the extension
 /// might as well say so (plan revision — used to be `<hash>.cheats`).
 fn cheat_state_path(save_dir: &Path, title: &str) -> PathBuf {
@@ -278,9 +273,12 @@ fn load_slot_rows(save_dir: &Path, title: &str) -> Vec<(String, bool)> {
         .collect()
 }
 
-/// O arquivo que o SwanStation usa para o card do SLOT 2 (o core o cria
-/// no save dir com Card2Type = Shared e o escreve ao sair).
-const MC2_SHARED_FILE: &str = "duckstation_shared_card_2.mcd";
+/// O arquivo que o PCSX Rearmed usa para o card do SLOT 2 (o core o cria
+/// no save dir com memcard2 habilitado e o escreve ao sair).
+const MC2_SHARED_FILE: &str = "pcsx-card2.mcd";
+/// O arquivo do card do SLOT 1 no PCSX Rearmed — a fonte de verdade do
+/// core no boot; o SAVE_RAM é espelho e NÃO sobrevive à sessão.
+const MC1_SHARED_FILE: &str = "pcsx-card1.mcd";
 
 /// Os `.mcr` da pasta, ordenados — a fonte das duas vistas da biblioteca.
 fn list_cards(dir: &Path) -> Vec<PathBuf> {
@@ -345,7 +343,7 @@ fn card_rows_with_icons(
 
 // --- core em thread própria (plano revision: "faca tudo") ------------------
 //
-// O SwanStation bloqueia: boot, troca BIOS→jogo e FMV pesada seguram
+// O core bloqueia: boot, troca BIOS→jogo e FMV pesada seguram
 // `core.run()` por centenas de ms — e com o loop sequencial, nada era
 // redesenhado (quadro congelado, disco parado). O worker dono do core
 // responde a comandos; a interface continua desenhando a 60 fps o último
@@ -362,6 +360,12 @@ enum CoreCmd {
     Run {
         input: PadSnapshot,
     },
+    /// Snapshot do SAVE_RAM (o card do slot 1 vivo no core) — troca quente
+    /// salva o card que sai ANTES de mexer na memória, e o flush periódico
+    /// banker os saves contra crash.
+    Sram {
+        tx: std::sync::mpsc::Sender<Option<Vec<u8>>>,
+    },
     Reset,
     CheatReset,
     CheatSet {
@@ -375,23 +379,39 @@ enum CoreCmd {
     LoadState {
         bytes: Vec<u8>,
     },
-    Sram {
-        tx: std::sync::mpsc::Sender<Option<Vec<u8>>>,
-    },
-    SramAt {
-        id: u32,
-        tx: std::sync::mpsc::Sender<Option<Vec<u8>>>,
-    },
+
     WriteMem {
         id: u32,
         bytes: Vec<u8>,
     },
     SwitchDisc {
         path: PathBuf,
+        /// `true` = troca dentro do MESMO jogo (m3u): o estado da sessão
+        /// volta por cima da recarga. `false` = jogo novo / sessão de BIOS:
+        /// a BIOS re-boota o disco (restaurar snapshot antigo cobria o jogo
+        /// novo e ele nunca bootava).
+        restore: bool,
+        tx: std::sync::mpsc::Sender<bool>,
+    },
+    /// Inserção a partir da sessão de BIOS: REcria o core com a animação de
+    /// boot desligada e carrega o jogo — o skip do Rearmed (`show_bios_
+    /// bootlogo=disabled` na mesa antes do init) entra direto no exe, sem
+    /// replay da BIOS (no core vivo, o load_disc interno re-boota a BIOS:
+    /// animação + menu de novo — provado em probe).
+    BootFresh {
+        core_path: PathBuf,
+        disc: PathBuf,
+        bios_dir: PathBuf,
+        save_dir: PathBuf,
+        /// Os cards encaixados NO MOMENTO da inserção: o drop do core velho
+        /// reescreve os arquivos com o estado DELE (um card vazio, na sessão
+        /// de BIOS — o SAVE_RAM é espelho no Rearmed) e apagava o encaixe;
+        /// o worker re-semeia depois do drop.
+        card1: Option<PathBuf>,
+        card2: Option<PathBuf>,
         tx: std::sync::mpsc::Sender<bool>,
     },
     /// Sem disco + Reset: reseta e boota a BIOS (o console fica ligado).
-    BootBios,
     /// Abre (`true`)/fecha (`false`) a BANDEJA pela disk control interface —
     /// o jogo emulado VÊ a tampa abrir (telas de erro reais dele).
     TrayEject {
@@ -413,7 +433,7 @@ struct CoreOut {
 }
 
 /// Core bruto (handles de dlopen) atravessando uma fronteira de thread.
-struct CoreRunning(Core);
+struct CoreRunning(Option<Core>);
 unsafe impl Send for CoreRunning {}
 fn spawn_core_worker(
     core: Core,
@@ -428,7 +448,7 @@ fn spawn_core_worker(
     let (tx, rx) = std::sync::mpsc::channel::<CoreCmd>();
     let (otx, orx) = std::sync::mpsc::channel::<CoreOut>();
     let handle = std::thread::Builder::new()
-        .name("swanstation".into())
+        .name("core-psx".into())
         .spawn(move || {
             // Prioridade baixa para a thread do core (macOS: nice afeta só a
             // thread): nas FMVs o software renderer satura as CPUs e a thread
@@ -437,11 +457,15 @@ fn spawn_core_worker(
             unsafe {
                 libc::setpriority(libc::PRIO_DARWIN_THREAD, 0, 12);
             }
-            let mut running = CoreRunning(core);
+            let mut running = CoreRunning(Some(core));
             let mut spec_state = Vec::new();
             let mut disc = current_disc;
             while let Ok(cmd) = rx.recv() {
-                let core = &mut running.0;
+                // None só DENTRO do BootFresh (a lib descarrega entre um core
+                // e outro — dlopen refcounted); fora dele, sempre Some.
+                let Some(core) = running.0.as_mut() else {
+                    break; // core morto (falha de recriação): a sessão acaba
+                };
                 match cmd {
                     CoreCmd::Run { input } => {
                         for (port, btn, held) in &input.buttons {
@@ -481,16 +505,13 @@ fn spawn_core_worker(
                             ram,
                         });
                     }
+                    CoreCmd::Sram { tx } => {
+                        let _ = tx.send(core.sram());
+                    }
                     CoreCmd::Reset => core.reset(),
                     CoreCmd::TrayEject { ejected } => {
                         if core.set_eject_state(ejected).is_none() {
                             log::warn!("worker: core sem disk control interface");
-                        }
-                    }
-                    CoreCmd::BootBios => {
-                        core.reset();
-                        if core.load_bios().is_err() {
-                            log::warn!("worker: boot pela BIOS recusado");
                         }
                     }
                     CoreCmd::CheatReset => core.cheat_reset(),
@@ -503,29 +524,114 @@ fn spawn_core_worker(
                     CoreCmd::LoadState { bytes } => {
                         core.load_state(&bytes);
                     }
-                    CoreCmd::Sram { tx } => {
-                        let _ = tx.send(core.sram());
-                    }
-                    CoreCmd::SramAt { id, tx } => {
-                        let _ = tx.send(core.memory(id));
-                    }
                     CoreCmd::WriteMem { id, bytes } => {
                         core.write_memory(id, &bytes);
                     }
-                    CoreCmd::SwitchDisc { path, tx } => {
-                        // Mesma coreografia do fluxo antigo: estado volta por
-                        // cima da recarga; falha, volta ao disco atual.
-                        let state = core.save_state();
-                        core.reset();
-                        if core.load_disc(&path).is_ok() {
-                            if let Some(state) = state {
-                                core.load_state(&state);
+                    CoreCmd::BootFresh {
+                        core_path,
+                        disc: fresh_disc,
+                        bios_dir,
+                        save_dir,
+                        card1,
+                        card2,
+                        tx,
+                    } => {
+                        // O velho sai DE VERDADE: o drop dlcloseta a lib
+                        // (refcount → 0 descarrega) e os globals morrem com
+                        // ela — criar o novo antes mantinha a lib viva com
+                        // estado sujo (a tela preta eterna). O novo dlopen
+                        // nasce limpo, com a animação de boot ligada.
+                        let old = running.0.take();
+                        drop(old);
+                        // O drop do velho REESCREVEU os arquivos de card com
+                        // o estado dele (vazio na sessão de BIOS) — re-semeia
+                        // os encaixes antes do novo core ler.
+                        match card1 {
+                            Some(card) => {
+                                let _ = std::fs::copy(
+                                    &card,
+                                    crate::dirs::memcards_dir().join(MC1_SHARED_FILE),
+                                );
                             }
-                            disc = path;
-                            let _ = tx.send(true);
+                            None => {
+                                let _ = std::fs::remove_file(
+                                    crate::dirs::memcards_dir().join(MC1_SHARED_FILE),
+                                );
+                            }
+                        }
+                        match card2 {
+                            Some(card) => {
+                                let _ = std::fs::copy(
+                                    &card,
+                                    crate::dirs::memcards_dir().join(MC2_SHARED_FILE),
+                                );
+                            }
+                            None => {
+                                let _ = std::fs::remove_file(
+                                    crate::dirs::memcards_dir().join(MC2_SHARED_FILE),
+                                );
+                            }
+                        }
+                        match Core::load(&core_path) {
+                            Ok(mut fresh) => {
+                                fresh.set_directories(&bios_dir, &save_dir);
+                                // Animação desligada: o skip do Rearmed
+                                // entra direto no exe — o jogo abre sem o
+                                // replay das animações de boot.
+                                fresh.set_variable("pcsx_rearmed_show_bios_bootlogo", "disabled");
+                                fresh.set_variable("pcsx_rearmed_memcard2", "enabled");
+                                fresh.set_variable("pcsx_rearmed_nocdaudio", "disabled");
+                                fresh.init();
+                                if fresh.load_game(&fresh_disc, &[]).is_ok() {
+                                    running.0 = Some(fresh);
+                                    disc = fresh_disc;
+                                    log::info!("boot fresh: jogo no core recriado (sem animação)");
+                                    let _ = tx.send(true);
+                                } else {
+                                    log::warn!("boot fresh: load recusado — a sessão acaba");
+                                    let _ = tx.send(false);
+                                }
+                            }
+                            Err(e) => {
+                                log::warn!("boot fresh: {e} — a sessão acaba");
+                                let _ = tx.send(false);
+                            }
+                        }
+                    }
+                    CoreCmd::SwitchDisc { path, restore, tx } => {
+                        // `restore` = troca de disco DENTRO do mesmo jogo
+                        // (m3u): o estado volta por cima da recarga. Para
+                        // jogo novo (ou sessão de BIOS), restaurar era
+                        // veneno — o snapshot da BIOS/tela antiga cobria o
+                        // jogo novo e ele nunca bootava: troca a imagem com
+                        // a BIOS viva e fecha a tampa (a BIOS lê o drive e
+                        // bootA o jogo). Falha, volta ao disco atual.
+                        if restore {
+                            let state = core.save_state();
+                            core.reset();
+                            if core.load_disc(&path).is_ok() {
+                                if let Some(state) = state {
+                                    core.load_state(&state);
+                                }
+                                disc = path;
+                                let _ = tx.send(true);
+                            } else {
+                                let _ = core.load_disc(&disc);
+                                let _ = tx.send(false);
+                            }
                         } else {
-                            let _ = core.load_disc(&disc);
-                            let _ = tx.send(false);
+                            // BIOS viva: troca a imagem e fecha a tampa — a
+                            // própria BIOS lê o drive e bootA o jogo (sem
+                            // reset; provado em probe: menu MEMORY CARD /
+                            // CD PLAYER → logo do jogo em ~300 frames).
+                            if core.load_disc(&path).is_ok() {
+                                let _ = core.set_eject_state(false);
+                                disc = path;
+                                let _ = tx.send(true);
+                            } else {
+                                let _ = core.load_disc(&disc);
+                                let _ = tx.send(false);
+                            }
                         }
                     }
                 }
@@ -546,6 +652,22 @@ fn seat_card(
     mem_id: u32,
     path: PathBuf,
 ) {
+    // O PCSX Rearmed carrega o card do ARQUIVO dele no boot — o encaixe
+    // também semeia o arquivo (vale a partir do próximo boot do jogo; na
+    // sessão corrente o WriteMem abaixo é melhor-esforço).
+    let shared_file = match mem_id {
+        0 => Some(crate::dirs::memcards_dir().join(MC1_SHARED_FILE)),
+        _ => Some(crate::dirs::memcards_dir().join(MC2_SHARED_FILE)),
+    };
+    if let (Some(shared), Ok(bytes)) = (shared_file, fs::read(&path)) {
+        if std::fs::write(&shared, &bytes).is_ok() {
+            log::info!(
+                "card {}: {} semeado no arquivo do core",
+                mem_id + 1,
+                path.display()
+            );
+        }
+    }
     match fs::read(&path) {
         Ok(bytes) => {
             let n = bytes.len();
@@ -717,18 +839,6 @@ fn command_rows(
 }
 
 /// Write battery SRAM to `path` if it changed since the last flush.
-fn flush_sram(path: &Path, last: &mut Option<Vec<u8>>, cur: Option<Vec<u8>>) {
-    if let Some(cur) = cur {
-        if last.as_ref() != Some(&cur) {
-            match fs::write(path, &cur) {
-                Ok(_) => log::info!("SRAM flushed -> {}", path.display()),
-                Err(e) => log::warn!("SRAM flush failed: {e}"),
-            }
-            *last = Some(cur);
-        }
-    }
-}
-
 /// Desligar (plan §3.3): a short burst of RF snow through the tube with a
 /// decaying buzz, settling to a dim near-still hiss — never a full-screen
 /// flash, and the noise cuts rather than lingers.
@@ -1414,7 +1524,7 @@ pub fn run_game(
     plat: &mut Platform,
     cab: &mut Cabinet,
     spec: &GameSpec,
-    cfg: &Config,
+    cfg: &mut Config,
 ) -> Result<GameExit> {
     let runahead_cfg = spec.runahead.unwrap_or(cfg.runahead);
 
@@ -1429,23 +1539,27 @@ pub fn run_game(
         Core::load(&spec.core).with_context(|| format!("loading core {}", spec.core.display()))?;
     log::info!("core: {} {}", core.system_name(), core.system_version());
     core.set_directories(&spec.system_dir, &spec.save_dir);
-    core.init();
-    // Renderer de software, SEMPRE: o pipeline do app é 2D (framebuffer →
-    // tubo), e sem esta opção o SwanStation pede contexto de GPU que o
-    // frontend não dá — e cospe frames de lixo (o "quadrado colorido").
-    // A opção já se chamou `swanstation_Renderer`; cores novos usam
-    // `swanstation_GPU_Renderer` — setamos as duas, a desconhecida é só
-    // ignorada pelo core.
-    core.set_variable("swanstation_GPU_Renderer", "Software");
-    core.set_variable("swanstation_Renderer", "Software");
+    // Opções do core ANTES do retro_init: a declaração de opções do core
+    // (SET_VARIABLES, disparada no init) ZERA a tabela e repõe defaults —
+    // valores setados depois do init morriam nessa reposição (era o
+    // "boot não aparece").
+    // O PCSX Rearmed renderiza por software nativamente — o pipeline do app
+    // é 2D (framebuffer → tubo), nada de contexto de GPU.
     // O card do SLOT 2 não é exposto pelo protocolo (só o id 0 existe) —
-    // o core gerencia o segundo card num ARQUIVO próprio (plan revision:
-    // "ligando o card do slot 2 aos arquivos que o SwanStation lê").
-    core.set_variable("swanstation_MemoryCards_Card2Type", "Shared");
+    // ligamos o segundo card do core e sincronizamos por arquivo.
+    // Console de verdade: a intro do logo do PlayStation TOCA ao ligar (o
+    // Rearmed vem com ela desligada) e o áudio de CD-DA fica ligado (o
+    // Rearmed vem com `nocdaudio` ligado).
+    core.set_variable("pcsx_rearmed_memcard2", "enabled");
+    core.set_variable("pcsx_rearmed_show_bios_bootlogo", "enabled");
+    core.set_variable("pcsx_rearmed_nocdaudio", "disabled");
+    core.init();
     // A ponta de injeção: o card escolhido para o slot 2 é copiado para o
-    // arquivo do core ANTES do load (o core o carrega no boot do jogo).
+    // arquivo do core ANTES do load (o core o carrega no boot do jogo). Os
+    // arquivos de trabalho do core moram na pasta memcards (plan revision:
+    // "sempre usar a pasta memcards" — nada de card na pasta de saves).
     if let Some(card2) = &spec.card2 {
-        let shared = std::path::Path::new(&spec.save_dir).join(MC2_SHARED_FILE);
+        let shared = crate::dirs::memcards_dir().join(MC2_SHARED_FILE);
         if std::fs::copy(card2, &shared).is_ok() {
             log::info!("card 2: {} no arquivo do core", card2.display());
         }
@@ -1465,52 +1579,104 @@ pub fn run_game(
     // Discos não cabem em RAM: o core recebe o caminho (need_fullpath) e
     // lê o CHD por conta própria.
     // Sem disco: boot direto na BIOS (menu do console).
-    if spec.bios {
-        core.load_bios().context("core rejected the BIOS boot")?;
-    } else {
-        core.load_game(&spec.rom, &[])
-            .context("core rejected the disc")?;
-    }
-
+    // Per-game persistence — one folder per game, named for the title like
+    // notes already are (plan revision — used to be a flat file per kind,
+    // keyed by ROM hash: unreadable next to a folder a player might actually
+    // open, and the hash bought rename-proofing nobody asked for here).
     let title = if spec.bios {
         "BIOS".to_string()
     } else {
         rom_title(&spec.rom)
     };
-    // Painel: o nome canônico do DAT quando há — os arquivos continuam
-    // chaveados pelo stem.
-    let panel_title = spec.display_title.clone().unwrap_or_else(|| title.clone());
-
-    // Per-game persistence — one folder per game, named for the title like
-    // notes already are (plan revision — used to be a flat file per kind,
-    // keyed by ROM hash: unreadable next to a folder a player might actually
-    // open, and the hash bought rename-proofing nobody asked for here).
     fs::create_dir_all(game_dir(&spec.save_dir, &title)).ok();
     // O save mora no card físico quando há um card no slot 1 (plano §3) —
     // insert, flush e tudo mais passam a apontar para o arquivo do card.
     // Mutável: a biblioteca de cards troca o encaixado com o console off.
     let mut current_card = spec.card1.clone();
+    // Sem card encaixado, o card do CONSOLE é o arquivo de trabalho do core
+    // na pasta memcards — persiste entre sessões e nunca cria sram.srm no
+    // save dir (plan revision).
     let mut sram_path = spec
         .card1
         .clone()
-        .unwrap_or_else(|| sram_file(&spec.save_dir, &title));
+        .unwrap_or_else(|| crate::dirs::memcards_dir().join(MC1_SHARED_FILE));
     // Slot 2: vazio até o jogador escolher um card no botão "MC slot 2" —
     // sem card, nada é lido nem gravado (o core formata o dele em memória).
     let mut current_card2 = spec.card2.clone();
-    let mut sram2_path = spec.card2.clone().unwrap_or_default();
-    let mut last_sram2: Option<Vec<u8>> = None;
-    if let Some(card2) = spec.card2.clone() {
-        match fs::read(&card2) {
-            Ok(bytes) => {
-                let n = core.write_memory(MEMORY_SAVE_RAM + 1, &bytes);
-                log::info!(
-                    "card 2: conteúdo do {} no SAVE_RAM ({n} bytes)",
-                    card2.display()
-                );
+
+    // CARD 1 vai para o core pelo ARQUIVO dele (pcsx-card1.mcd na pasta
+    // memcards), semeado ANTES do load — o Rearmed lê o card do arquivo no
+    // boot e descarrega de volta nele ao desligar. O SAVE_RAM desse core é
+    // só um espelho de saída: escrever nele (antes OU depois do load) perde
+    // o conteúdo — o core empurra o próprio estado por cima (provado em
+    // probe: 122 KB sobrescritos numa sessão de 60 s). Fonte do conteúdo,
+    // nesta ordem: card encaixado → card do console (memcards) → sram.srm
+    // legado do jogo (migração, o arquivo legado fica intocado).
+    if !spec.bios {
+        // Migração: builds antigos deixavam os arquivos do core na pasta de
+        // saves — o conteúdo de quem já jogava vem junto para a memcards.
+        for name in [MC1_SHARED_FILE, MC2_SHARED_FILE] {
+            let legacy = std::path::Path::new(&spec.save_dir).join(name);
+            let dest = crate::dirs::memcards_dir().join(name);
+            if legacy.exists() && !dest.exists() {
+                std::fs::create_dir_all(crate::dirs::memcards_dir()).ok();
+                if std::fs::rename(&legacy, &dest).is_ok() {
+                    log::info!("card: {} migrado para memcards", name);
+                }
             }
-            Err(e) => log::info!("card 2: {e} — o core formata"),
+        }
+        let console_card = crate::dirs::memcards_dir().join(MC1_SHARED_FILE);
+        if let Some(card1) = &spec.card1 {
+            // Card encaixado: semeia o conteúdo dele no arquivo do core.
+            std::fs::create_dir_all(crate::dirs::memcards_dir()).ok();
+            if console_card != card1.as_path() {
+                match std::fs::copy(card1, &console_card) {
+                    Ok(_) => log::info!("card 1: {} semeado no arquivo do core", card1.display()),
+                    Err(e) => log::warn!("card 1: semeando {e}"),
+                }
+            }
+        } else {
+            // SEM card encaixado o console não tem card: o jogo vê slot
+            // vazio e avisa sozinho ("no memory card") — nada persiste.
+            if console_card.exists() {
+                let _ = std::fs::remove_file(&console_card);
+            }
+            log::info!("card 1: slot vazio — sem card pra salvar");
         }
     }
+
+    // Boot "sem disco" (botão Ligar sem disco / executar BIOS): o PCSX
+    // Rearmed rejeita `retro_load_game(null)` — mas a BIOS dele roda com um
+    // disco real EJETADO: dá boot no primeiro jogo da estante com a tampa já
+    // aberta (o disco sai antes de o jogo carregar) — a tela que sobe é a da
+    // BIOS, o mesmo que abrir a tampa no carregamento, agora automático.
+    let mut bios_lid_open = false;
+    if spec.bios {
+        let boot_disc = spec.library.first().map(|(_, p)| p.clone());
+        let ejected = boot_disc
+            .map(|d| core.load_game(&d, &[]).is_ok() && core.set_eject_state(true) == Some(true))
+            .unwrap_or(false);
+        if ejected {
+            bios_lid_open = true;
+            log::info!("BIOS: boot com disco ejetado");
+        } else {
+            log::info!("BIOS: sem jogo na estante para dar boot ejetado");
+            cab.push_osd(
+                &["SEM JOGO NA ESTANTE NÃO DÁ", "PARA SUBIR A BIOS NESTE CORE"],
+                None,
+                Duration::from_secs(4),
+            );
+            return Ok(GameExit::Ejected {
+                static_level: OFF_STATIC_LEVEL,
+            });
+        }
+    } else {
+        core.load_game(&spec.rom, &[])
+            .context("core rejected the disc")?;
+    }
+    // Painel: o nome canônico do DAT quando há — os arquivos continuam
+    // chaveados pelo stem.
+    let panel_title = spec.display_title.clone().unwrap_or_else(|| title.clone());
     // Note slot (fixed 1..=15, not save-state's 0..=9) — which of the 15
     // the notebook's right page shows; Prev/Next move it while paused
     // there, and picking a print's destination in the Printscreen modal
@@ -1521,29 +1687,6 @@ pub fn run_game(
     // paging through prints never moves which text slot is shown, or the
     // other way around.
     let mut text_slot: u8 = 1;
-
-    if let Ok(bytes) = fs::read(&sram_path) {
-        let n = core.load_sram(&bytes);
-        log::info!(
-            "card 1: conteúdo do {} no SAVE_RAM ({n} bytes)",
-            sram_path.display()
-        );
-    } else if spec.card1.is_some() {
-        // Primeira inserção: o card novo que o core formata vira arquivo na
-        // biblioteca já — o cartão existe, mesmo antes de o jogo salvar nele
-        // (o flush de changed-only nunca dispararia para um card intocado).
-        match core.sram() {
-            Some(bytes) => match fs::write(&sram_path, &bytes) {
-                Ok(_) => log::info!(
-                    "card 1: {} criado ({} bytes, formatado pelo core)",
-                    sram_path.display(),
-                    bytes.len()
-                ),
-                Err(e) => log::warn!("card 1: criando {}: {e}", sram_path.display()),
-            },
-            None => log::warn!("card 1: core não expõe SAVE_RAM; card novo fica em memória"),
-        }
-    }
 
     // Sem filtro composto no PSX (plano §2): o frame do core vai direto
     // para a tubo; o filtro do blargg é do irmão de SNES.
@@ -1670,7 +1813,7 @@ pub fn run_game(
     // Drive: tampa translúcida (OPEN abre/fecha sem desligar) e disco
     // presente (removível só com a tampa aberta). Boot pela BIOS: o drive
     // começa VAZIO — o jogo entra pelo botão "Estante de games" do painel.
-    let mut lid_open = false;
+    let mut lid_open = bios_lid_open;
     let mut disc_in = !spec.bios;
     // A sessão nasceu no boot da BIOS ("Ligar sem disco")? Inserir um jogo
     // pela tampa encerra o modo — o painel passa a se comportar como o de
@@ -1697,6 +1840,10 @@ pub fn run_game(
     // (inserção, `false`): (início, direção), animado no passe do jogo —
     // o drive desenhado segue `cartridge_motion`, não o estado lógico.
     let mut disc_motion: Option<(Instant, bool)> = None;
+    // Inserção pela tampa em andamento (sessão de BIOS): o BootFresh roda no
+    // worker — a UI NÃO bloqueia no recv (recriar o core leva segundos e
+    // era o travamento); o resultado é aplicado por try_recv no passe.
+    let mut pending_boot: Option<(std::sync::mpsc::Receiver<bool>, PathBuf, String)> = None;
     let mut glitch_rng: u32 = 0xC0FF_EEDD;
     let commands = command_rows(
         &flash,
@@ -1938,7 +2085,6 @@ pub fn run_game(
         log::warn!("core has no save state — run-ahead disabled");
         runahead = 0;
     }
-    let mut last_sram = core.sram();
     // Which note slot to save into once the next frame is ready — set at
     // click time, consumed after `core.run()` produces a real frame.
     let mut note_request: Option<u8> = None;
@@ -1954,7 +2100,10 @@ pub fn run_game(
     // `--debug-shot-pause`, both of which already returned above) exists to
     // inspect live gameplay, so it starts powered — there's no Power click
     // to send it in headless mode.
-    let mut powered = spec.shot.is_some();
+    // A sessão de BIOS NASCE LIGADA (o usuário "ligou o console" para
+    // chegar até aqui — o Power clicado foi o que disparou o boot): o
+    // flush do card e os comandos dependentes de power funcionam.
+    let mut powered = spec.bios || spec.shot.is_some();
     cab.set_powered(powered);
     // The session clock (plan revision: "no tempo da sessao considerar o
     // tempo que o jogo esta rodando, com o power ligado") counts only while
@@ -1985,7 +2134,7 @@ pub fn run_game(
     let mut print_capture: Option<EmuFrame> = None;
     log::info!("running: rf ntsc + crt tube, run-ahead {runahead}");
     // O core mora na thread dele; a interface continua a 60 fps com o
-    // último quadro enquanto o SwanStation bloqueia (boot, FMV).
+    // último quadro enquanto o PCSX Rearmed bloqueia (boot, FMV).
     let (core_tx, core_rx, worker_handle) = spawn_core_worker(
         core,
         runahead as usize,
@@ -2031,6 +2180,48 @@ pub fn run_game(
                     Err(_) => {
                         in_flight = false;
                         break;
+                    }
+                }
+            }
+        }};
+    }
+
+    // Flush do CARD 1 para a biblioteca (changed-only): o snapshot do
+    // SAVE_RAM vai para o arquivo do card ENCAIXADO. Pontos de chamada:
+    // troca quente (o card que sai guarda o que o jogo salvou nele),
+    // migração de slot, e o passe periódico (crash perde no máximo 10 s).
+    // (plan revision: "deixe perfeito" — antes disso, trocar A→B no meio
+    // da sessão descartava os saves feitos no A.)
+    let mut last_sram_flush: Option<Vec<u8>> = None;
+    macro_rules! flush_card1 {
+        () => {{
+            if powered && current_card.is_some() {
+                drain_core!();
+                let (tx, rx) = std::sync::mpsc::channel();
+                let _ = core_tx.send(CoreCmd::Sram { tx });
+                if let Ok(Some(sram)) = rx.recv() {
+                    let used = sram
+                        .chunks(128)
+                        .skip(1)
+                        .take(15)
+                        .filter(|e| {
+                            !(e[0] == 0 && e[1] == 0)
+                                && e[0] != 0xA0
+                                && e[0] != 0x51
+                                && !(e[0] == 0xFF && e[1] == 0xFF)
+                        })
+                        .count();
+                    if last_sram_flush.as_ref() != Some(&sram) {
+                        if let Some(dest) = current_card.clone() {
+                            if std::fs::write(&dest, &sram).is_ok() {
+                                log::info!(
+                                    "card 1: {} atualizado ({} bytes, {used} saves visíveis)",
+                                    dest.display(),
+                                    sram.len()
+                                );
+                                last_sram_flush = Some(sram);
+                            }
+                        }
                     }
                 }
             }
@@ -2165,7 +2356,6 @@ pub fn run_game(
                                     }
                                     if current_card2.as_deref() == Some(path.as_path()) {
                                         current_card2 = Some(new_path.clone());
-                                        sram2_path = new_path.clone();
                                     }
                                     cab.set_card_labels(
                                         crate::memcard::card_name(current_card.as_deref())
@@ -2247,8 +2437,50 @@ pub fn run_game(
         // exist at all. Which set of buttons a click can land on depends on
         // `paused`: the pause book replaces the whole window (no side panel
         // drawn alongside it), so it has its own hit-test.
-        let events: Vec<UiEvent> = plat
-            .poll(&mut input, &cfg.keymap)
+        let mut polled = plat.poll(&mut input, &cfg.keymap);
+        // DEBUG-AUTOINSERT (diagnóstico headless do fluxo BIOS→jogo):
+        // PSX_XPERIENCE_DEBUG_AUTOINSERT=N frames → dispara o InsertDisc e
+        // escolhe a linha N da lista, exatamente pelo caminho de eventos.
+        static AUTOINSERT: std::sync::OnceLock<Option<u16>> = std::sync::OnceLock::new();
+        let autoinsert = AUTOINSERT.get_or_init(|| {
+            std::env::var("PSX_XPERIENCE_DEBUG_AUTOINSERT")
+                .ok()
+                .and_then(|n| n.parse::<u16>().ok())
+        });
+        if let Some(pick) = autoinsert.as_ref() {
+            thread_local! {
+                static AUTOINSERT_STEP: std::cell::Cell<u8> = const { std::cell::Cell::new(0) };
+            }
+            AUTOINSERT_STEP.with(|st| match st.get() {
+                0 if spec.bios && modal == Modal::None && frames >= 400 => {
+                    st.set(1);
+                    log::info!("autoinsert: InsertDisc (frames {frames})");
+                    polled.push(UiEvent::InsertDisc);
+                }
+                1 if modal == Modal::Inserir && frames >= 500 => {
+                    st.set(2);
+                    log::info!("autoinsert: ModalPick({pick}) — disco (frames {frames})");
+                    polled.push(UiEvent::ModalPick(*pick));
+                }
+                2 if modal == Modal::None && frames >= 900 => {
+                    st.set(3);
+                    log::info!("autoinsert: OpenCards (frames {frames})");
+                    polled.push(UiEvent::OpenCards);
+                }
+                3 if modal == Modal::Cards && frames >= 1000 => {
+                    st.set(4);
+                    log::info!("autoinsert: ModalPick(1) — card (frames {frames})");
+                    polled.push(UiEvent::ModalPick(1));
+                }
+                4 if modal == Modal::CardsAction && frames >= 1100 => {
+                    st.set(5);
+                    log::info!("autoinsert: ModalPick(15) — Usar (frames {frames})");
+                    polled.push(UiEvent::ModalPick(15));
+                }
+                _ => {}
+            });
+        }
+        let events: Vec<UiEvent> = polled
             .into_iter()
             .filter_map(|ev| match ev {
                 UiEvent::MouseUp(x, y) => {
@@ -2498,20 +2730,10 @@ pub fn run_game(
                         // Desligar (plan §3.3): flush the cart, then the
                         // signal-off ritual. A second click while already off
                         // does nothing on purpose — it's Ligar (below) now.
+                        // Cards persistem pelos ARQUIVOS do core (o
+                        // SAVE_RAM é espelho de saída — escrever nele perde
+                        // conteúdo); nada a descarregar aqui.
                         drain_core!();
-                        let (sram_tx, sram_rx) = std::sync::mpsc::channel();
-                        let _ = core_tx.send(CoreCmd::Sram { tx: sram_tx });
-                        let sram = sram_rx.recv().ok().flatten();
-                        flush_sram(&sram_path, &mut last_sram, sram);
-                        if current_card2.is_some() {
-                            let (t2, r2) = std::sync::mpsc::channel();
-                            let _ = core_tx.send(CoreCmd::SramAt {
-                                id: MEMORY_SAVE_RAM + 1,
-                                tx: t2,
-                            });
-                            let s2 = r2.recv().ok().flatten();
-                            flush_sram(&sram2_path, &mut last_sram2, s2);
-                        }
                         if let Some(t) = powered_since.take() {
                             powered_elapsed += t.elapsed();
                         }
@@ -2598,17 +2820,9 @@ pub fn run_game(
                 UiEvent::Reset => {
                     if powered {
                         drain_core!();
-                        if disc_in {
-                            let _ = core_tx.send(CoreCmd::Reset);
-                        } else {
-                            // Sem disco + Reset: o console boota a BIOS.
-                            let _ = core_tx.send(CoreCmd::BootBios);
-                            cab.push_osd(
-                                &["SEM DISCO — BOOT PELA BIOS"],
-                                None,
-                                Duration::from_secs(3),
-                            );
-                        }
+                        // Sem disco (sessão de BIOS), o reset re-boota a
+                        // BIOS — a bandeja segue ejetada.
+                        let _ = core_tx.send(CoreCmd::Reset);
                         crate::sfx::play(cab, crate::sfx::Sfx::Reset);
                         // Momentary rocker (plan revision) — springs back on
                         // its own next frame via `reset_pressed`/`RESET_SPRING`,
@@ -2989,24 +3203,37 @@ pub fn run_game(
                             .unwrap_or_default();
                         let info = crate::memcard::inspect(path);
                         let used = info.as_ref().map(|c| c.used).unwrap_or(0);
-                        let mut rows: Vec<CardModalRow> = info
-                            .map(|c| {
-                                c.saves
-                                    .iter()
-                                    .map(|s| {
-                                        (
-                                            if s.title.is_empty() {
-                                                s.product.clone()
-                                            } else {
-                                                format!("{} — {}", s.title, s.product)
-                                            },
+                        // Os 15 SLOTS do card (plan revision: "a lista dos
+                        // 15 slots"): usados com título/produto/ícone,
+                        // livres como "(vazio)". Os n primeiros índices são
+                        // os slots em uso — `Modal::CardsAction` usa
+                        // `n_saves` como fronteira (clicar num save é
+                        // informativo; as ações ficam abaixo da lista).
+                        let mut rows: Vec<CardModalRow> = Vec::new();
+                        if let Some(c) = &info {
+                            let mut by_slot = c.saves.iter();
+                            for slot in 1..=15usize {
+                                if slot <= c.used as usize {
+                                    if let Some(sav) = by_slot.next() {
+                                        rows.push((
+                                            format!(
+                                                "slot {slot}: {} — {}",
+                                                if sav.title.is_empty() {
+                                                    sav.product.clone()
+                                                } else {
+                                                    sav.title.clone()
+                                                },
+                                                sav.product
+                                            ),
                                             false,
-                                            s.icon.clone().map(|d| (16u32, 16u32, d)),
-                                        )
-                                    })
-                                    .collect()
-                            })
-                            .unwrap_or_default();
+                                            sav.icon.clone().map(|d| (16u32, 16u32, d)),
+                                        ));
+                                        continue;
+                                    }
+                                }
+                                rows.push((format!("slot {slot}: (vazio)"), false, None));
+                            }
+                        }
                         rows.push(("Usar neste slot".to_string(), true, None));
                         rows.push(("Renomear".to_string(), true, None));
                         rows.push(("Apagar".to_string(), true, None));
@@ -3017,15 +3244,18 @@ pub fn run_game(
                         );
                     }
                     Modal::CardsAction => {
+                        // Os 15 slots do card são linhas informativas.
+                        const CARD_SLOTS_CONST: u16 = 15;
+                        if i < CARD_SLOTS_CONST {
+                            // Slot informativo (os 15 do card): o picker segue
+                            // aberto — clicar num slot não fecha nada.
+                            continue;
+                        }
                         modal = Modal::None;
                         cab.clear_modal();
                         let Some((path, port)) = card_action.take() else {
                             continue;
                         };
-                        let n_saves = crate::memcard::inspect(&path)
-                            .map(|c| c.saves.len())
-                            .unwrap_or(0);
-                        let n_saves = n_saves as u16;
                         let name = crate::memcard::card_name(Some(path.as_path()))
                             .unwrap_or_default();
                         let seated = if port == 1 {
@@ -3033,13 +3263,12 @@ pub fn run_game(
                         } else {
                             current_card.as_deref() == Some(path.as_path())
                         };
-                        if i < n_saves {
-                            // Linha informativa (um save do card) — clicar não
-                            // faz nada; as ações ficam logo abaixo.
-                            card_action = Some((path, port));
-                            continue;
-                        }
-                        match i - n_saves {
+                        // As ações vêm depois dos 15 slots: 15 = Usar,
+                        // 16 = Renomear, 17 = Apagar. (A fronteira é o SLOT
+                        // COUNT, não a contagem de saves — ver o gate no
+                        // topo do braço.)
+                        const CARD_SLOTS: u16 = 15;
+                        match i - CARD_SLOTS {
                             // Usar: encaixa no slot e imprime o nome no
                             // adesivo da porta. Na troca quente (ligado), o
                             // SRAM do card que sai é descarregado no arquivo
@@ -3053,23 +3282,6 @@ pub fn run_game(
                                 // only-if-changed, então é de graça).
                                 if powered {
                                     drain_core!();
-                                    let (f1_tx, f1_rx) = std::sync::mpsc::channel();
-                                    let _ = core_tx.send(CoreCmd::Sram { tx: f1_tx });
-                                    flush_sram(
-                                        &sram_path,
-                                        &mut last_sram,
-                                        f1_rx.recv().ok().flatten(),
-                                    );
-                                    let (f2_tx, f2_rx) = std::sync::mpsc::channel();
-                                    let _ = core_tx.send(CoreCmd::SramAt {
-                                        id: MEMORY_SAVE_RAM + 1,
-                                        tx: f2_tx,
-                                    });
-                                    flush_sram(
-                                        &sram2_path,
-                                        &mut last_sram2,
-                                        f2_rx.recv().ok().flatten(),
-                                    );
                                 }
                                 // Um card, um slot (o alvo é o PICKER que
                                 // abriu: port 0 -> slot 1, port 1 -> slot 2).
@@ -3078,23 +3290,37 @@ pub fn run_game(
                                 // (o jogo vê um card em branco se salvar).
                                 if port == 1 {
                                     if current_card.as_deref() == Some(path.as_path()) {
+                                        // Migração 1→2: o card leva o que o
+                                        // jogo salvou nele (flush ANTES de
+                                        // zerar a memória do slot 1) — o
+                                        // arquivo do slot 2 semeia dele.
+                                        flush_card1!();
                                         let _ = core_tx.send(CoreCmd::WriteMem {
                                             id: MEMORY_SAVE_RAM,
                                             bytes: vec![0; crate::memcard::CARD_SIZE],
                                         });
                                         current_card = None;
                                         sram_path = PathBuf::new();
+                                        // O arquivo do core também sai: o
+                                        // slot fica vazio de verdade (vale
+                                        // a partir do próximo boot).
+                                        let core_card1 =
+                                            crate::dirs::memcards_dir().join(MC1_SHARED_FILE);
+                                        if core_card1.exists() {
+                                            let _ = std::fs::remove_file(&core_card1);
+                                        }
+                                        cfg.card_slot1 = None;
+                                        let _ = cfg.save();
                                     }
                                     // SLOT 2 = ARQUIVO do core (o protocolo
                                     // só expõe o card 1): copia o card
                                     // escolhido para o arquivo que o core
                                     // carrega/gerencia. Vale a partir do
                                     // próximo boot do jogo.
-                                    let shared = std::path::Path::new(&spec.save_dir)
+                                    let shared = crate::dirs::memcards_dir()
                                         .join(MC2_SHARED_FILE);
                                     match std::fs::copy(&path, &shared) {
                                         Ok(_) => {
-                                            sram2_path = shared;
                                             current_card2 = Some(path.clone());
                                         }
                                         Err(e) => {
@@ -3108,8 +3334,11 @@ pub fn run_game(
                                             bytes: vec![0; crate::memcard::CARD_SIZE],
                                         });
                                         current_card2 = None;
-                                        sram2_path = PathBuf::new();
                                     }
+                                    // O card que SAI guarda o que o jogo
+                                    // salvou nele nesta sessão (o estado
+                                    // vive no core até aqui).
+                                    flush_card1!();
                                     seat_card(
                                         &core_tx,
                                         &mut sram_path,
@@ -3124,11 +3353,43 @@ pub fn run_game(
                                     crate::memcard::card_name(current_card2.as_deref())
                                         .as_deref(),
                                 );
+                                // Persiste o encaixe (plan revision: "deve
+                                // sempre utilizar o card que está inserido
+                                // no console") — o console lembra quais
+                                // cards estão nos slots entre sessões.
+                                cfg.card_slot1 = current_card
+                                    .as_ref()
+                                    .map(|p| p.to_string_lossy().into_owned());
+                                cfg.card_slot2 = current_card2
+                                    .as_ref()
+                                    .map(|p| p.to_string_lossy().into_owned());
+                                let _ = cfg.save();
                                 cab.push_osd(
                                     &[&format!("CARD: {name}")],
                                     None,
                                     Duration::from_secs(2),
                                 );
+                                // De volta ao picker com a lista REATUALIZADA
+                                // (plan revision: "ao trocar de MC durante
+                                // jogo nao atualiza automatico") — o rótulo
+                                // "no slot N" segue o card que acabou de
+                                // mudar de slot.
+                                let dir = crate::dirs::memcards_dir();
+                                let (rows, _) = card_rows_with_icons(
+                                    &dir,
+                                    current_card.as_deref(),
+                                    current_card2.as_deref(),
+                                );
+                                modal = if port == 1 { Modal::Cards2 } else { Modal::Cards };
+                                cab.set_modal_with_icons(
+                                    if port == 1 {
+                                        "Memory Cards - slot 2"
+                                    } else {
+                                        "Memory Cards - slot 1"
+                                    },
+                                    &rows,
+                                );
+                                continue;
                             }
                             1 => {
                                 // Renomear: o draft vive DENTRO de um modal —
@@ -3219,11 +3480,44 @@ pub fn run_game(
                             continue;
                         }
                         let (d_tx, d_rx) = std::sync::mpsc::channel();
+                        if bios_session {
+                            // Sessão de BIOS: REcria o core com a animação
+                            // desligada — o skip entra direto no exe (o
+                            // load no core vivo replaya a BIOS inteira).
+                            // SEM recv bloqueante: a UI continua viva (o
+                            // travamento era o recv segurando o passe por
+                            // segundos de recriação de core).
+                            let _ = core_tx.send(CoreCmd::BootFresh {
+                                core_path: spec.core.clone(),
+                                disc: path.clone(),
+                                bios_dir: spec.system_dir.clone(),
+                                save_dir: spec.save_dir.clone(),
+                                card1: current_card.clone(),
+                                card2: current_card2.clone(),
+                                tx: d_tx,
+                            });
+                            let title = spec
+                                .library
+                                .get(i as usize)
+                                .map(|(t, _)| t.clone())
+                                .unwrap_or_default();
+                            pending_boot = Some((d_rx, path.clone(), title));
+                            lid_open = false;
+                            disc_in = true;
+                            cab.set_drive(lid_open, disc_in);
+                            disc_motion = Some((Instant::now(), false));
+                            cab.push_osd(&["LENDO O DISCO..."], None, Duration::from_secs(2));
+                            continue;
+                        }
                         let _ = core_tx.send(CoreCmd::SwitchDisc {
                             path: path.clone(),
+                            restore: false,
                             tx: d_tx,
                         });
                         if d_rx.recv().unwrap_or(false) {
+                            // A bandeja fecha com a troca (o worker cuida do
+                            // estado do core): o painel acompanha.
+                            lid_open = false;
                             let _ = core_tx.send(CoreCmd::TrayEject { ejected: false });
                             disc_in = true;
                             disc_glitch = None;
@@ -3315,6 +3609,7 @@ pub fn run_game(
                         let (d_tx, d_rx) = std::sync::mpsc::channel();
                         let _ = core_tx.send(CoreCmd::SwitchDisc {
                             path: path.clone(),
+                            restore: true,
                             tx: d_tx,
                         });
                         if d_rx.recv().unwrap_or(false) {
@@ -3623,26 +3918,6 @@ pub fn run_game(
                             }
                         }
                     }
-
-                    // Flush periódico do SRAM quando mudou (via comando, o
-                    // core vive na thread do worker).
-                    if frames.is_multiple_of(SRAM_FLUSH_FRAMES) {
-                        let (tx, rx) = std::sync::mpsc::channel();
-                        let _ = core_tx.send(CoreCmd::Sram { tx });
-                        if let Ok(s) = rx.recv() {
-                            flush_sram(&sram_path, &mut last_sram, s);
-                        }
-                        if current_card2.is_some() {
-                            let (tx, rx) = std::sync::mpsc::channel();
-                            let _ = core_tx.send(CoreCmd::SramAt {
-                                id: MEMORY_SAVE_RAM + 1,
-                                tx,
-                            });
-                            if let Ok(s) = rx.recv() {
-                                flush_sram(&sram2_path, &mut last_sram2, s);
-                            }
-                        }
-                    }
                 }
             }
             // Mantém o worker alimentado: um Run em voo por vez. No FIM do
@@ -3691,6 +3966,80 @@ pub fn run_game(
                         cab.set_cartridge_motion(None); // assentado de volta
                     } // totalmente fora fica em (1.0, true): p=0, não desenha
                     disc_motion = None;
+                }
+            }
+            // Flush periódico do card 1 (a cada ~10 s ligado): crash perde
+            // no máximo a última janela — o card da biblioteca sempre tem
+            // quase tudo (o mesmo esquema do auto-save do RetroArch).
+            if powered && frames > 0 && frames.is_multiple_of(600) {
+                flush_card1!();
+            }
+            // BootFresh concluiu? Aplica o resultado SEM bloquear (o worker
+            // recriou o core e carregou o jogo — o painel acompanha agora).
+            if let Some((rx, _, _)) = pending_boot.as_ref() {
+                match rx.try_recv() {
+                    Ok(ok) => {
+                        let (_, path, new_title) = pending_boot.take().unwrap();
+                        if ok {
+                            disc_glitch = None;
+                            current_disc = path.clone();
+                            bios_session = false;
+                            prev_sig = None;
+                            let assets = crate::dirs::assets_dir();
+                            let rom_str = path.to_string_lossy();
+                            let logo = crate::shelf::find_local_art(
+                                &assets.join("logo"),
+                                &rom_str,
+                                Some(&new_title),
+                            );
+                            // A arte do disco vive em assets/disc; cartridge
+                            // fica como fallback pela convenção antiga.
+                            let cart = crate::shelf::find_local_art(
+                                &assets.join("disc"),
+                                &rom_str,
+                                Some(&new_title),
+                            )
+                            .or_else(|| {
+                                crate::shelf::find_local_art(
+                                    &assets.join("cartridge"),
+                                    &rom_str,
+                                    Some(&new_title),
+                                )
+                            });
+                            let logo_img = decode_panel_art(&logo, "logo");
+                            let cart_img = decode_panel_art(&cart, "disco");
+                            let rows = command_rows(
+                                &flash,
+                                !cheat_defs.is_empty(),
+                                ra_session.is_some(),
+                                discs.is_some(),
+                                all_slots_pinned(&notes_meta),
+                                lid_open,
+                                true,
+                                !spec.library.is_empty(),
+                                false,
+                            );
+                            cab.set_panel(
+                                logo_img.as_ref().map(|(w, h, d)| (*w, *h, d.as_slice())),
+                                cart_img.as_ref().map(|(w, h, d)| (*w, *h, d.as_slice())),
+                                &new_title,
+                                &rows,
+                            );
+                            cab.set_card_labels(
+                                crate::memcard::card_name(current_card.as_deref()).as_deref(),
+                                crate::memcard::card_name(current_card2.as_deref()).as_deref(),
+                            );
+                            cab.set_powered(powered);
+                            cab.push_osd(&["DISCO INSERIDO"], None, Duration::from_secs(2));
+                        } else {
+                            cab.push_osd(&["FALHA AO INSERIR"], None, Duration::from_secs(2));
+                        }
+                    }
+                    Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                        pending_boot = None;
+                        cab.push_osd(&["FALHA AO INSERIR"], None, Duration::from_secs(2));
+                    }
+                    Err(std::sync::mpsc::TryRecvError::Empty) => {}
                 }
             }
             // Sem quadro novo (worker ocupado no boot/FMV), reapresenta o
@@ -3743,27 +4092,45 @@ pub fn run_game(
         pace_frame(&mut next, frame_time);
     };
 
-    // Final SRAM flush on the way out (either exit path) — o worker é
-    // desligado depois dos flushes (Quit derruba a thread).
-    let (f_tx, f_rx) = std::sync::mpsc::channel();
-    let _ = core_tx.send(CoreCmd::Sram { tx: f_tx });
-    flush_sram(&sram_path, &mut last_sram, f_rx.recv().ok().flatten());
-    // O core desliga AGORA: ao cair, ele escreve os cards nos arquivos
-    // (o card 2 mora no ARQUIVO dele). A sincronia do card 2 com a
-    // biblioteca espera essa escrita terminar.
-    drop(core_tx);
-    let _ = worker_handle.join();
-    if current_card2.is_some() {
-        // O conteúdo que o core escreveu volta para o card da biblioteca
-        // que estava encaixado no slot 2.
-        let shared = std::path::Path::new(&spec.save_dir).join(MC2_SHARED_FILE);
-        if shared.exists() {
-            if let Some(dest) = &current_card2 {
-                let _ = std::fs::copy(&shared, dest);
-                log::info!("card 2: {} sincronizado", dest.display());
+    // ÚLTIMA leitura do SRAM — ANTES de derrubar o core. O Rearmed NÃO
+    // escreve os arquivos pcsx-card*.mcd depois do boot (provado em probe:
+    // o deinit deixa o arquivo com o conteúdo semeado) — o save vive no
+    // card interno, cuja única via de leitura é o SAVE_RAM. O arquivo é só
+    // INPUT de boot; a persistência é do frontend (o mesmo esquema do
+    // auto-save do RetroArch).
+    {
+        drain_core!();
+        let (tx, rx) = std::sync::mpsc::channel();
+        let _ = core_tx.send(CoreCmd::Sram { tx });
+        if let Ok(Some(sram)) = rx.recv() {
+            if let Some(dest) = &current_card {
+                if std::fs::write(dest, &sram).is_ok() {
+                    log::info!(
+                        "card 1: {} sincronizado no fim da sessão ({} bytes)",
+                        dest.display(),
+                        sram.len()
+                    );
+                }
             }
         }
     }
+    // (o drain acima é o último uso destes estados — consome-os pro lint)
+    let _ = (frames, in_flight, last_aspect, last_frame_dims);
+    drop(core_tx);
+    let _ = worker_handle.join();
+    // O ARQUIVO do core é stale por definição (o core não o escreve) —
+    // nada de copiá-lo para a biblioteca (era destrutivo: sobrescrevia o
+    // card com o seed do boot). Sem card encaixado, some (slot vazio).
+    let core_card1 = crate::dirs::memcards_dir().join(MC1_SHARED_FILE);
+    if current_card.is_none() && core_card1.exists() {
+        let _ = std::fs::remove_file(&core_card1);
+    }
+    // CARD 2 (limitação do core): o Rearmed não expõe o segundo card via
+    // memória (id 1 = RTC = None — provado), então não há leitura em vida
+    // e o arquivo dele nunca é escrito pelo core. O card 2 persiste pelo
+    // SEED do boot (o jogo lê o que a biblioteca der); o que o JOGO salvar
+    // no slot 2 vive apenas até o fim da sessão. Nada de copiar o arquivo
+    // stale para o card da biblioteca.
     // Bank whatever powered-on stretch was still running (exiting while on,
     // e.g. window closed mid-session) and add it to the all-time total.
     if let Some(t) = powered_since.take() {
@@ -3785,7 +4152,7 @@ mod tests {
         add_playtime, cheat_state_path, delete_text_slot, frame_to_rgb8, game_dir,
         legacy_note_text_path, load_cheat_state, migrate_legacy_text_notes, note_dir,
         note_slot_path, note_text_slot_path, read_text_slot, rom_title, save_cheat_state,
-        save_note_image, save_text_slot, sram_file, state_file, total_playtime_secs, EmuFrame,
+        save_note_image, save_text_slot, state_file, total_playtime_secs, EmuFrame,
     };
     use polystnx_emulation::PixelFormat as EmuFormat;
 
@@ -4046,10 +4413,6 @@ mod tests {
         assert_eq!(
             state_file(&dir, title, 3),
             game_dir(&dir, title).join("3.state")
-        );
-        assert_eq!(
-            sram_file(&dir, title),
-            game_dir(&dir, title).join("sram.srm")
         );
         assert_eq!(
             cheat_state_path(&dir, title),
