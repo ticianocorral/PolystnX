@@ -729,6 +729,38 @@ pub(crate) fn pace_frame(next: &mut Instant, frame_time: Duration) {
     }
 }
 
+/// Grade de luma amostrada do quadro XRGB8888 (48×36) — o "igual?" barato
+/// entre quadros reais consecutivos. A tela PARADA é a assinatura do freeze
+/// de loading do PS1: o Rearmed é leve e segue entregando 60 fps com o jogo
+/// preso no CD, então o ritmo dos quadros não revela leitura nenhuma.
+fn luma_grid(pixels: &[u8], width: u32, height: u32, out: &mut Vec<u8>) {
+    const COLS: usize = 48;
+    const ROWS: usize = 36;
+    out.clear();
+    let (w, h) = (width as usize, height as usize);
+    if w == 0 || h == 0 {
+        return;
+    }
+    for r in 0..ROWS {
+        let y = (r * h / ROWS).min(h - 1);
+        let row = &pixels[y * w * 4..(y * w + w) * 4];
+        for c in 0..COLS {
+            let x = (c * w / COLS).min(w - 1);
+            let p = &row[x * 4..x * 4 + 4];
+            out.push(
+                ((u32::from(p[0]) * 299 + u32::from(p[1]) * 587 + u32::from(p[2]) * 114) / 1000)
+                    as u8,
+            );
+        }
+    }
+}
+
+/// O SPU calado no quadro (pico abaixo do ruído de 8 bits): na leitura o
+/// jogo solta o CD e a música em stream (XA/CDDA) para antes da tela voltar.
+fn audio_mudo(samples: &[i16]) -> bool {
+    samples.iter().all(|&s| s.abs() < 512)
+}
+
 /// Whether `b`'s flash is still showing — `flash` maps a button to when it
 /// last fired, only ever holding entries for buttons that flash at all.
 fn flashed(flash: &HashMap<PanelButton, Instant>, b: PanelButton) -> bool {
@@ -2153,6 +2185,15 @@ pub fn run_game(
     let mut last_frame_at: Option<Instant> = None;
     let mut last_aspect = 4.0_f32 / 3.0;
     let mut drive_reading_until: Option<Instant> = None;
+    // Leitura na era Rearmed: o core leve segue a 60 fps com o jogo esperando
+    // o CD, então a leitura se deduz do CONTEÚDO — grade de luma idêntica
+    // entre quadros + SPU calado por 1 s é o freeze clássico de loading (a
+    // música para quando o drive tem o barramento), e a leitura da BIOS
+    // depois do logo cai na mesma regra.
+    let mut grid_prev: Vec<u8> = Vec::new();
+    let mut grid_prev_valid = false;
+    let mut grid_cur: Vec<u8> = Vec::new();
+    let mut frozen_since: Option<Instant> = None;
     // O último quadro REAL (o core não é retido entre presents): buffer
     // REUTILIZADO entre frames — sem alocação de 1,2 MB a 60 fps (era o
     // `LastFrame::from_frame` inteiro por frame). XRGB8888 vem como o core
@@ -3880,6 +3921,36 @@ pub fn run_game(
                         last_frame_dims = Some((frame.width, frame.height));
                         last_aspect = out.aspect;
 
+                        // Tela congelada + áudio mudo (com disco encaixado)
+                        // = o jogo lendo o CD — liga o leitor por uma janela
+                        // rolante; o fade do loop cobre a emenda. Sem disco
+                        // (BIOS parada na tela de menu) não há leitura.
+                        if disc_in {
+                            luma_grid(&last_frame, frame.width, frame.height, &mut grid_cur);
+                            let same = grid_prev_valid
+                                && grid_prev.len() == grid_cur.len()
+                                && grid_prev
+                                    .iter()
+                                    .zip(&grid_cur)
+                                    .all(|(a, b)| a.abs_diff(*b) <= 8);
+                            let frozen = same && audio_mudo(&out.audio);
+                            frozen_since = if frozen {
+                                Some(*frozen_since.get_or_insert(Instant::now()))
+                            } else {
+                                None
+                            };
+                            if frozen_since.is_some_and(|t| t.elapsed() > Duration::from_millis(1000))
+                            {
+                                drive_reading_until =
+                                    Some(Instant::now() + Duration::from_millis(400));
+                            }
+                            std::mem::swap(&mut grid_prev, &mut grid_cur);
+                            grid_prev_valid = true;
+                        } else {
+                            frozen_since = None;
+                            grid_prev_valid = false;
+                        }
+
                         if let Some(slot) = note_request.take() {
                             match save_note_image(&spec.notes_dir, &title, slot, frame) {
                                 Ok(_) => {
@@ -4063,11 +4134,13 @@ pub fn run_game(
                     disc_glitch = None; // pendurou: quadro congelado
                 }
             }
-            // O drive "lê" quando o core hesita: mais de 250 ms desde o
-            // último quadro real (ou desde o ligar — o boot lê o disco) —
-            // ou quando os quadros chegam lento (loading com tela viva:
-            // o jogo corre devagar lendo o CD em stream). Com a tampa
-            // aberta o leitor está PARADO — nada de som de leitura.
+            // O drive "lê" em três casos: hesitação do core (mais de 250 ms
+            // sem quadro real — boot, FMV pesada, máquina fraca), quadros
+            // chegando lento (vão > 70 ms: loading com o jogo correndo
+            // devagar no CD em stream) e tela congelada + áudio mudo por
+            // 1 s (era Rearmed: o core leve não hesita, o freeze de loading
+            // revela — ver o bloco do quadro). Com a tampa aberta o leitor
+            // está PARADO — nada de som de leitura.
             if let Some(loop_samples) = cd_loop {
                 let hesitating = !lid_open
                     && (last_frame_at.is_none_or(|t| t.elapsed() > Duration::from_millis(250))
@@ -4149,8 +4222,8 @@ pub fn run_game(
 mod tests {
     use super::card_rows_with_icons;
     use super::{
-        add_playtime, cheat_state_path, delete_text_slot, frame_to_rgb8, game_dir,
-        legacy_note_text_path, load_cheat_state, migrate_legacy_text_notes, note_dir,
+        add_playtime, audio_mudo, cheat_state_path, delete_text_slot, frame_to_rgb8, game_dir,
+        legacy_note_text_path, luma_grid, load_cheat_state, migrate_legacy_text_notes, note_dir,
         note_slot_path, note_text_slot_path, read_text_slot, rom_title, save_cheat_state,
         save_note_image, save_text_slot, state_file, total_playtime_secs, EmuFrame,
     };
@@ -4430,5 +4503,38 @@ mod tests {
         assert!(!d.file_name().unwrap().to_string_lossy().contains('/'));
 
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// A grade tem tamanho fixo, distingue tela viva de parada e reflete
+    /// luma — é ela que liga o leitor na era Rearmed (freeze de loading).
+    #[test]
+    fn luma_grid_separates_frozen_from_alive() {
+        let black = vec![0u8; 8 * 8 * 4];
+        let (mut a, mut b) = (Vec::new(), Vec::new());
+        luma_grid(&black, 8, 8, &mut a);
+        luma_grid(&black, 8, 8, &mut b);
+        assert_eq!(a.len(), 48 * 36);
+        assert!(a.iter().zip(&b).all(|(x, y)| x.abs_diff(*y) <= 8));
+
+        // Metade da tela branca: quadro vivo — a grade muda além da tolerância.
+        let mut split = black.clone();
+        for y in 0..4 {
+            for x in 0..8 {
+                split[(y * 8 + x) * 4..(y * 8 + x) * 4 + 3].fill(255);
+            }
+        }
+        luma_grid(&split, 8, 8, &mut b);
+        assert!(a.iter().zip(&b).any(|(x, y)| x.abs_diff(*y) > 8));
+        assert!(b.iter().any(|&l| l > 200));
+    }
+
+    /// Mudo = pico do quadro abaixo do ruído; 512 é o limiar.
+    #[test]
+    fn audio_mudo_judges_by_peak() {
+        assert!(audio_mudo(&[]));
+        assert!(audio_mudo(&[0; 2940]));
+        assert!(audio_mudo(&[100, -100, 511, -511]));
+        assert!(!audio_mudo(&[0, 0, 512]));
+        assert!(!audio_mudo(&[-2000, 0, 0]));
     }
 }

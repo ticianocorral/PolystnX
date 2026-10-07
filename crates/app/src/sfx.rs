@@ -27,10 +27,12 @@ pub enum Sfx {
     /// ao ganhar uma conquista") — a synthesized ascending chime, made
     /// in-repo (no Pixabay credit due), same fixed format as the foley set.
     Achievement,
-    /// O leitor de CD-ROM lendo (hesitação do core: boot, load, FMV) —
-    /// foley real da produção de um vídeo, cortado num loop sem emenda
-    /// (crossfade de 250 ms; ver THIRD-PARTY-NOTICES.md). Toca em loop
-    /// pelo `tick_cd_noise` do Cabinet, não pelo `play` one-shot.
+    /// O leitor de CD-ROM lendo — hesitação do core (boot, load, FMV) ou
+    /// tela congelada + áudio mudo por 1 s (era PCSX Rearmed: o core leve
+    /// não hesita, o freeze de loading revela a leitura). Foley real da
+    /// produção de um vídeo, cortado num loop sem emenda (crossfade de
+    /// 250 ms; ver THIRD-PARTY-NOTICES.md). Toca em loop pelo
+    /// `tick_cd_noise` do Cabinet, não pelo `play` one-shot.
     CdSeek,
 }
 
