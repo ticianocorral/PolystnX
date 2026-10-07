@@ -14,6 +14,12 @@
   </description>
   <launchable type="desktop-id">dev.ticianocorral.PolystnX.desktop</launchable>
   <url type="homepage">https://github.com/ticianocorral/PolystnX</url>
+  <screenshots>
+    <screenshot type="default">
+      <image>https://raw.githubusercontent.com/ticianocorral/PolystnX/main/packaging/flatpak/screenshots/setup.png</image>
+      <caption>Tela de primeiro uso (core, DAT e BIOS)</caption>
+    </screenshot>
+  </screenshots>
   <content_rating type="oars-1.1" />
   <provides>
     <binary>polystnx</binary>
