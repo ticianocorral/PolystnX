@@ -107,6 +107,8 @@ jobs:
             org.kde.Platform//6.8 org.kde.Sdk//6.8
           mkdir -p packaging/flatpak
           cp target/release/polystnx packaging/flatpak/polystnx-bin
+          cp packaging/linux/polystnx.desktop packaging/flatpak/dev.ticianocorral.PolystnX.desktop
+          cp packaging/linux/polystnx.png packaging/flatpak/polystnx.png
           flatpak-builder --force-clean --repo=flatpak-repo flatpak-build \
             packaging/flatpak/dev.ticianocorral.PolystnX.yml
           flatpak build-bundle flatpak-repo \
