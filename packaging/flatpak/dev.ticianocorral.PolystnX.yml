@@ -34,6 +34,10 @@ modules:
       - install -Dm755 polystnx-bin /app/bin/polystnx
       - install -Dm644 dev.ticianocorral.PolystnX.desktop -t /app/share/applications/ || install -Dm644 dev.ticianocorral.PolystnX.desktop /app/share/applications/dev.ticianocorral.PolystnX.desktop
       - install -Dm644 polystnx.png /app/share/icons/hicolor/1024x1024/apps/dev.ticianocorral.PolystnX.png
+      - install -Dm644 polystnx.png /app/share/icons/hicolor/512x512/apps/dev.ticianocorral.PolystnX.png
+      - install -Dm644 polystnx.png /app/share/icons/hicolor/256x256/apps/dev.ticianocorral.PolystnX.png
+      - install -Dm644 polystnx.png /app/share/icons/hicolor/128x128/apps/dev.ticianocorral.PolystnX.png
+      - install -Dm644 polystnx.png /app/share/icons/hicolor/64x64/apps/dev.ticianocorral.PolystnX.png
       - install -Dm644 dev.ticianocorral.PolystnX.metainfo.xml /app/share/metainfo/dev.ticianocorral.PolystnX.metainfo.xml
     sources:
       - type: file
