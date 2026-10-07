@@ -299,7 +299,7 @@ pub fn run(
         }
 
         if setup {
-            if frames_log % 120 == 0 {
+            if frames_log.is_multiple_of(120) {
                 log::info!("setup ativo (frames {frames_log})");
             }
             let (w, h) = cab.screen_size();
@@ -316,10 +316,15 @@ pub fn run(
                     cab.minimize();
                     continue;
                 }
-                let (sx, sy) = cab.window_to_screen(x, y);
-                log::info!(
-                    "setup: clique em janela ({x},{y}) → screen ({sx},{sy})"
-                );
+                // O setup é desenhado no buffer 2D e compostp pelo CRT mesh
+                // (barril) — o botão VISÍVEL perto do fundo da TV está
+                // deslocado do buffer. O hit_screen_point DES-destorce o
+                // clique de volta ao buffer (o mesmo que os tiles da
+                // estante usam).
+                let Some((sx, sy)) = cab.hit_screen_point(ox, oy) else {
+                    continue;
+                };
+                log::info!("setup: clique em janela ({x},{y}) → buffer ({sx},{sy})");
                 match hit_setup_button(w, h, sx, sy) {
                     Some(SetupButton::Core) if core.rx.is_none() && !core.done => {
                         if let Some(url) = core_update::core_download_url() {

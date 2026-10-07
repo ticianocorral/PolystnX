@@ -1,10 +1,10 @@
 //! Clica no "continuar" da tela de setup (headless) e captura o frame
 //! seguinte: se o setup sumiu, o fluxo funciona.
-use std::sync::mpsc;
-use std::time::Duration;
 use polystnx_app::idle::{self, IdleExit};
 use polystnx_app::update_check::UpdateNotice;
 use polystnx_platform::Platform;
+use std::sync::mpsc;
+use std::time::Duration;
 
 fn main() -> anyhow::Result<()> {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
