@@ -74,11 +74,15 @@ enum SetupButton {
 /// size — the single source both `draw_setup` and `hit_setup_button` use.
 fn setup_rects(w: u32, h: u32) -> (RectT, RectT, RectT, RectT) {
     let bw = 640.min(w.saturating_sub(160)).max(280);
-    let bh = 64u32;
+    let bh = 64u32.min((h / 14).max(44));
     let x = (w as i32 - bw as i32) / 2;
-    let core_y = h as i32 * 22 / 100;
-    let dat_y = core_y + bh as i32 + 40;
-    let bios_y = dat_y + bh as i32 + 40;
+    // Tela apertada (Steam Deck, buffer 685x525): o grupo de TRÊS botões +
+    // continuar cabe justo — agrupa do topo (22%) com gap 28; telas altas
+    // mantêm o espaçamento largo (44).
+    let gap = if h >= 700 { 40 } else { 34 };
+    let core_y = h as i32 * 24 / 100;
+    let dat_y = core_y + bh as i32 + gap;
+    let bios_y = dat_y + bh as i32 + gap;
     let cw = 280u32;
     let ch = 56u32;
     let cont = (
@@ -790,27 +794,32 @@ fn draw_setup(
     draw_button(d, &core_r, core_label, core_color);
     draw_button(d, &dat_r, dat_label, dat_color);
     draw_button(d, &bios_r, bios_label, bios_color);
-    d.text(
-        core_r.0 + 4,
-        core_r.1 + core_r.3 as i32 + 8,
-        1,
-        SETUP_DIM,
-        "necessário para rodar os jogos",
-    );
-    d.text(
-        dat_r.0 + 4,
-        dat_r.1 + dat_r.3 as i32 + 8,
-        1,
-        SETUP_DIM,
-        "opcional: nomes canônicos, ano e editora dos jogos",
-    );
-    d.text(
-        bios_r.0 + 4,
-        bios_r.1 + bios_r.3 as i32 + 8,
-        1,
-        SETUP_DIM,
-        "necessária: a BIOS do console (SCPH*.BIN) em bios/",
-    );
+    // Os rótulos descritivos sob os botões só cabem em telas altas — em
+    // telas apertadas eles CAIAM SOBRE o botão seguinte (plan revision:
+    // "os botoes estao por cima do texto").
+    if h >= 750 {
+        d.text(
+            core_r.0 + 4,
+            core_r.1 + core_r.3 as i32 + 8,
+            1,
+            SETUP_DIM,
+            "necessário para rodar os jogos",
+        );
+        d.text(
+            dat_r.0 + 4,
+            dat_r.1 + dat_r.3 as i32 + 8,
+            1,
+            SETUP_DIM,
+            "opcional: nomes canônicos, ano e editora dos jogos",
+        );
+        d.text(
+            bios_r.0 + 4,
+            bios_r.1 + bios_r.3 as i32 + 8,
+            1,
+            SETUP_DIM,
+            "necessária: a BIOS do console (SCPH*.BIN) em bios/",
+        );
+    }
 
     // O continuar fica CINZA (desabilitado) sem BIOS — não há o que
     // continuar sem ela (plan revision: "liberar continuar somente com a
