@@ -31,16 +31,10 @@ modules:
   - name: polystnx
     buildsystem: simple
     build-commands:
-      # O appstreamcli compose procura o ícone NA RAIZ do AppDir como
-      # <id>.png (hicolor sozinho não basta para ele).
-      - install -Dm644 polystnx.png /app/dev.ticianocorral.PolystnX.png
+      # O ícone instalado no hicolor TEM que bater com o Icon= do desktop
+      # file ("polystnx") — é o nome que o appstreamcli procura.
       - install -Dm755 polystnx-bin /app/bin/polystnx
-      - install -Dm644 dev.ticianocorral.PolystnX.desktop -t /app/share/applications/ || install -Dm644 dev.ticianocorral.PolystnX.desktop /app/share/applications/dev.ticianocorral.PolystnX.desktop
-      - install -Dm644 polystnx.png /app/share/icons/hicolor/1024x1024/apps/dev.ticianocorral.PolystnX.png
-      - install -Dm644 polystnx.png /app/share/icons/hicolor/512x512/apps/dev.ticianocorral.PolystnX.png
-      - install -Dm644 polystnx.png /app/share/icons/hicolor/256x256/apps/dev.ticianocorral.PolystnX.png
-      - install -Dm644 polystnx.png /app/share/icons/hicolor/128x128/apps/dev.ticianocorral.PolystnX.png
-      - install -Dm644 polystnx.png /app/share/icons/hicolor/64x64/apps/dev.ticianocorral.PolystnX.png
+      - install -Dm644 polystnx.png /app/share/icons/hicolor/128x128/apps/polystnx.png
       - install -Dm644 dev.ticianocorral.PolystnX.metainfo.xml /app/share/metainfo/dev.ticianocorral.PolystnX.metainfo.xml
     sources:
       - type: file
