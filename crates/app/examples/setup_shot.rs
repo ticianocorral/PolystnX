@@ -20,6 +20,7 @@ fn main() -> anyhow::Result<()> {
         idle::RESTING_STATIC,
         false,
         false,
+        false,
         std::path::Path::new(&path),
     )?;
     println!("wrote {path}");

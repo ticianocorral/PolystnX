@@ -38,6 +38,13 @@ impl BiosInfo {
     }
 }
 
+/// Há uma BIOS utilizável em `dir`? (.bin presente com tamanho de ROM —
+/// as oficiais têm 512 KB; qualquer coisa abaixo de 128 KB não é BIOS.)
+/// (plan revision: "liberar continuar somente com a bios".)
+pub fn any_installed(dir: &Path) -> bool {
+    list(dir).iter().any(|b| b.kb >= 128)
+}
+
 /// Lista as BIOS de `dir` (`.bin`/`.BIN`), com a informação da ROM.
 pub fn list(dir: &Path) -> Vec<BiosInfo> {
     let Ok(entries) = fs::read_dir(dir) else {

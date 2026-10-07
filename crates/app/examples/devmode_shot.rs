@@ -28,6 +28,7 @@ fn main() -> anyhow::Result<()> {
         idle::RESTING_STATIC,
         true,
         true,
+        true,
         Path::new(&idle_shot),
     )?;
     println!("wrote {}", idle_shot.display());

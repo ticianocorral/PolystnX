@@ -66,36 +66,45 @@ type RectT = (i32, i32, u32, u32);
 enum SetupButton {
     Core,
     Dat,
+    Bios,
     Continue,
 }
 
 /// Button/status geometry for the setup screen, derived from the output
 /// size — the single source both `draw_setup` and `hit_setup_button` use.
-fn setup_rects(w: u32, h: u32) -> (RectT, RectT, RectT) {
+fn setup_rects(w: u32, h: u32) -> (RectT, RectT, RectT, RectT) {
     let bw = 640.min(w.saturating_sub(160)).max(280);
     let bh = 64u32;
     let x = (w as i32 - bw as i32) / 2;
-    let core_y = h as i32 * 34 / 100;
-    let dat_y = core_y + bh as i32 + 44;
+    let core_y = h as i32 * 22 / 100;
+    let dat_y = core_y + bh as i32 + 40;
+    let bios_y = dat_y + bh as i32 + 40;
     let cw = 280u32;
     let ch = 56u32;
     let cont = (
         (w as i32 - cw as i32) / 2,
-        h as i32 - ch as i32 - 72,
+        h as i32 - ch as i32 - 60,
         cw,
         ch,
     );
-    ((x, core_y, bw, bh), (x, dat_y, bw, bh), cont)
+    (
+        (x, core_y, bw, bh),
+        (x, dat_y, bw, bh),
+        (x, bios_y, bw, bh),
+        cont,
+    )
 }
 
 fn hit_setup_button(w: u32, h: u32, x: i32, y: i32) -> Option<SetupButton> {
-    let (core, dat, cont) = setup_rects(w, h);
+    let (core, dat, bios, cont) = setup_rects(w, h);
     let inside =
         |r: &RectT| x >= r.0 && y >= r.1 && (x - r.0) < r.2 as i32 && (y - r.1) < r.3 as i32;
     if inside(&core) {
         Some(SetupButton::Core)
     } else if inside(&dat) {
         Some(SetupButton::Dat)
+    } else if inside(&bios) {
+        Some(SetupButton::Bios)
     } else if inside(&cont) {
         Some(SetupButton::Continue)
     } else {
@@ -167,6 +176,7 @@ pub fn run(
     notice_rx: &mut Option<Receiver<UpdateNotice>>,
     core_installed: bool,
     dat_installed: bool,
+    bios_installed: bool,
 ) -> Result<IdleExit> {
     // Whatever game was loaded before (if any) is gone now — without this the
     // panel keeps showing its stale logo/commands instead of the "Inserir
@@ -184,13 +194,21 @@ pub fn run(
     // two download buttons until the player hits "continuar". After that
     // the plain idle panel takes over (with the old core prompt if the
     // core is still missing).
-    let mut setup = core_missing_at_start(core_installed, dat_installed);
+    let mut setup = core_missing_at_start(core_installed, dat_installed, bios_installed);
     let mut core = Download::idle("baixar núcleo PCSX Rearmed");
     if core_installed {
         core.done = true;
         core.label = "instalado".to_string();
     }
     let mut dat = Download::idle("baixar nointro.dat");
+    // A BIOS: o label do botão na tela de setup ("instalada" quando o
+    // any_installed acha uma .bin utilizável em bios/).
+    let mut bios_installed = bios_installed;
+    let mut bios_label = if bios_installed {
+        "instalada".to_string()
+    } else {
+        "colocar a BIOS (atualizar)".to_string()
+    };
     if dat_installed {
         dat.done = true;
         dat.label = "instalado".to_string();
@@ -350,9 +368,35 @@ pub fn run(
                         });
                         dat.rx = Some(rx);
                     }
+                    // BIOS: "atualizar" re-varre a pasta bios/ (o usuário
+                    // pode ter soltado o SCPH*.BIN lá agora) — o continuar
+                    // só libera quando houver uma BIOS utilizável.
+                    Some(SetupButton::Bios) => {
+                        bios_installed = crate::bios::any_installed(&crate::dirs::bios_dir());
+                        bios_label = if bios_installed {
+                            "instalada".to_string()
+                        } else {
+                            "sem BIOS em bios/ (atualizar)".to_string()
+                        };
+                        if bios_installed {
+                            log::info!("setup: BIOS detectada — continuar liberado");
+                        }
+                    }
                     Some(SetupButton::Continue) => {
-                        log::info!("setup: continuar clicado — dismiss");
-                        dismiss = true;
+                        if bios_installed {
+                            log::info!("setup: continuar clicado — dismiss");
+                            dismiss = true;
+                        } else {
+                            log::info!("setup: continuar bloqueado sem BIOS");
+                            cab.push_osd(
+                                &[
+                                    "SEM A BIOS NÃO DÁ PARA CONTINUAR",
+                                    "COLOQUE O SCPH*.BIN EM bios/ E CLIQUE ATUALIZAR",
+                                ],
+                                None,
+                                Duration::from_secs(4),
+                            );
+                        }
                     }
                     _ => {}
                 }
@@ -361,7 +405,17 @@ pub fn run(
             // "continuar" — Back still quits.
             for nav in &m.nav {
                 match nav {
-                    MenuNav::Confirm => dismiss = true,
+                    MenuNav::Confirm => {
+                        if bios_installed {
+                            dismiss = true;
+                        } else {
+                            cab.push_osd(
+                                &["SEM A BIOS NÃO DÁ PARA CONTINUAR"],
+                                None,
+                                Duration::from_secs(3),
+                            );
+                        }
+                    }
                     MenuNav::Back => return Ok(IdleExit::Quit),
                     _ => {}
                 }
@@ -384,6 +438,8 @@ pub fn run(
                         &dat_label,
                         dat_done,
                         dat_busy,
+                        &bios_label,
+                        bios_installed,
                     )
                 };
                 cab.frame_idle_2d(SETUP_BG, render);
@@ -660,10 +716,10 @@ fn draw_update_view(
     (btn, voltar)
 }
 
-/// Whether the setup screen should come up — either file the player needs
-/// is missing (plan revision: "não tiver o DAT, o PCSX Rearmed").
-fn core_missing_at_start(core_installed: bool, dat_installed: bool) -> bool {
-    !core_installed || !dat_installed
+/// Whether the setup screen should come up — any of the three (plan
+/// revision: "liberar continuar somente com a bios": core, DAT e BIOS).
+fn core_missing_at_start(core_installed: bool, dat_installed: bool, bios_installed: bool) -> bool {
+    !core_installed || !dat_installed || !bios_installed
 }
 
 /// The first-run setup screen, drawn inside the TV: a download button per
@@ -679,13 +735,15 @@ fn draw_setup(
     dat_label: &str,
     dat_done: bool,
     dat_busy: bool,
+    bios_label: &str,
+    bios_done: bool,
 ) {
     /// Same glyph metrics the platform font uses — `Screen::text` advances
     /// `GLYPH_W * scale` per char, `GLYPH_H * scale` per line.
     const CELL: i32 = 9;
     let (w, h) = d.size();
     let (w, h) = (w as i32, h as i32);
-    let (core_r, dat_r, cont_r) = setup_rects(w as u32, h as u32);
+    let (core_r, dat_r, bios_r, cont_r) = setup_rects(w as u32, h as u32);
     let center_x = |s: &str, scale: u32| (w - s.chars().count() as i32 * CELL * scale as i32) / 2;
 
     d.text(
@@ -696,11 +754,11 @@ fn draw_setup(
         "bem-vindo ao polystnx",
     );
     d.text(
-        center_x("para jogar, faltam dois downloads", 1),
+        center_x("para jogar, faltam dois downloads e a bios", 1),
         h * 12 / 100 + 74,
         1,
         SETUP_DIM,
-        "para jogar, faltam dois downloads",
+        "para jogar, faltam dois downloads e a bios",
     );
 
     fn draw_button(d: &mut Screen, r: &RectT, label: &str, color: (u8, u8, u8)) {
@@ -715,7 +773,7 @@ fn draw_setup(
             label,
         );
     }
-    let (mut core_color, mut dat_color) = (SETUP_TEXT, SETUP_TEXT);
+    let (mut core_color, mut dat_color, mut bios_color) = (SETUP_TEXT, SETUP_TEXT, SETUP_TEXT);
     if core_busy {
         core_color = SETUP_DIM;
     } else if core_done {
@@ -726,8 +784,12 @@ fn draw_setup(
     } else if dat_done {
         dat_color = SETUP_GREEN;
     }
+    if bios_done {
+        bios_color = SETUP_GREEN;
+    }
     draw_button(d, &core_r, core_label, core_color);
     draw_button(d, &dat_r, dat_label, dat_color);
+    draw_button(d, &bios_r, bios_label, bios_color);
     d.text(
         core_r.0 + 4,
         core_r.1 + core_r.3 as i32 + 8,
@@ -742,8 +804,19 @@ fn draw_setup(
         SETUP_DIM,
         "opcional: nomes canônicos, ano e editora dos jogos",
     );
+    d.text(
+        bios_r.0 + 4,
+        bios_r.1 + bios_r.3 as i32 + 8,
+        1,
+        SETUP_DIM,
+        "necessária: a BIOS do console (SCPH*.BIN) em bios/",
+    );
 
-    draw_button(d, &cont_r, "continuar", SETUP_TEXT);
+    // O continuar fica CINZA (desabilitado) sem BIOS — não há o que
+    // continuar sem ela (plan revision: "liberar continuar somente com a
+    // bios").
+    let cont_color = if bios_done { SETUP_TEXT } else { SETUP_DIM };
+    draw_button(d, &cont_r, "continuar", cont_color);
     d.text(
         center_x("enter também continua", 1),
         cont_r.1 + cont_r.3 as i32 + 10,
@@ -762,10 +835,11 @@ pub fn capture_preview(
     static_level: f32,
     core_installed: bool,
     dat_installed: bool,
+    bios_installed: bool,
     path: &Path,
 ) -> Result<()> {
     cab.clear_panel();
-    if core_missing_at_start(core_installed, dat_installed) {
+    if core_missing_at_start(core_installed, dat_installed, bios_installed) {
         let render = |d: &mut Screen| {
             draw_setup(
                 d,
@@ -783,6 +857,12 @@ pub fn capture_preview(
                 },
                 dat_installed,
                 false,
+                if bios_installed {
+                    "instalada"
+                } else {
+                    "colocar a BIOS (atualizar)"
+                },
+                bios_installed,
             )
         };
         cab.capture_idle_2d(SETUP_BG, render, path)

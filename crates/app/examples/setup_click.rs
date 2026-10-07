@@ -22,7 +22,15 @@ fn main() -> anyhow::Result<()> {
     let (ntx, notice_rx) = mpsc::channel::<UpdateNotice>();
     drop(ntx);
     let mut notice_rx = Some(notice_rx);
-    idle::run(&mut plat, &mut cab, 0.0, &mut notice_rx, false, false)?;
+    idle::run(
+        &mut plat,
+        &mut cab,
+        0.0,
+        &mut notice_rx,
+        false,
+        false,
+        false,
+    )?;
     log::info!("idle::run saiu");
     Ok(())
 }

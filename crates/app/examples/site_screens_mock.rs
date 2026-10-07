@@ -55,6 +55,7 @@ fn main() -> anyhow::Result<()> {
         idle::RESTING_STATIC,
         true,
         true,
+        true,
         &out.join("inicial.bmp"),
     )
     .map_err(|e| anyhow::anyhow!(e.to_string()))?;

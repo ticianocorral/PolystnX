@@ -343,6 +343,7 @@ fn main() -> Result<()> {
             idle::RESTING_STATIC,
             core_path.is_some(),
             polystnx_app::dat_update::dat_installed(),
+            polystnx_app::bios::any_installed(&effective_system_dir),
             path,
         )?;
         log::info!("wrote {} (idle preview)", path.display());
@@ -387,6 +388,7 @@ fn main() -> Result<()> {
                 &mut update_rx,
                 core_path.is_some(),
                 polystnx_app::dat_update::dat_installed(),
+                polystnx_app::bios::any_installed(&effective_system_dir),
             )?
         };
         plat.set_konami_watch(false);
