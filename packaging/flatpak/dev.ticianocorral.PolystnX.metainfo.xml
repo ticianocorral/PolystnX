@@ -22,6 +22,10 @@
     </screenshot>
   </screenshots>
   <content_rating type="oars-1.1" />
+  <categories>
+    <category>Game</category>
+    <category>Emulator</category>
+  </categories>
   <provides>
     <binary>polystnx</binary>
   </provides>
