@@ -27,8 +27,6 @@ struct Args {
     /// O memory card físico do slot 1 (biblioteca `memcards/`, plano §3):
     /// o conteúdo vira o `SAVE_RAM` da sessão e o flush volta para o arquivo.
     card1: Option<PathBuf>,
-    card2: Option<PathBuf>,
-    bios: bool,
     /// Speculative frames past the shown one; `None` = take the config value.
     runahead: Option<u32>,
     /// Headless self-check: run N frames, save the composited window, exit.
@@ -58,8 +56,6 @@ fn parse_args() -> Result<Args> {
     let mut notes_dir = None;
     let mut config = None;
     let mut card1 = None;
-    let mut card2 = None;
-    let mut bios = false;
     let mut runahead = None;
     let mut shot = None;
     let mut shot_frame = 180u32;
@@ -113,14 +109,6 @@ fn parse_args() -> Result<Args> {
                 card1 = Some(
                     it.next()
                         .ok_or_else(|| anyhow!("--card1 needs a path (.mcr)"))?
-                        .into(),
-                )
-            }
-            "--bios" => bios = true,
-            "--card2" => {
-                card2 = Some(
-                    it.next()
-                        .ok_or_else(|| anyhow!("--card2 needs a path (.mcr)"))?
                         .into(),
                 )
             }
@@ -192,7 +180,6 @@ fn parse_args() -> Result<Args> {
     }
 
     let core = core.ok_or_else(|| anyhow!("no core: pass --core or set $PSX_XPERIENCE_CORE"))?;
-    let rom = rom.or_else(|| if bios { Some(PathBuf::new()) } else { None });
     let rom = match rom {
         Some(r) => r,
         None => anyhow::bail!("no ROM: pass --rom <file>"),
@@ -209,8 +196,6 @@ fn parse_args() -> Result<Args> {
         notes_dir,
         config,
         card1,
-        card2,
-        bios,
         runahead,
         shot,
         shot_frame,
@@ -271,6 +256,9 @@ fn main() -> Result<()> {
     let mut cabinet = platform
         .create_cabinet("PolystnX", 1024, 768, false)
         .map_err(|e| anyhow!(e.to_string()))?;
+    // Mesmo nameplate do app real (bin/polystnx.rs) — sem isso o queixo do
+    // jogo mostra só "PolystnX" e o dev tool mente sobre a tela do usuário.
+    cabinet.set_nameplate(&polystnx_app::core_update::nameplate_text(Some(&args.core)));
     if cfg.fullscreen {
         cabinet.toggle_fullscreen();
     }
@@ -286,12 +274,7 @@ fn main() -> Result<()> {
         card1: args
             .card1
             .or_else(|| cfg.card_slot1.clone().map(PathBuf::from)),
-        card2: args
-            .card2
-            .or_else(|| cfg.card_slot2.clone().map(PathBuf::from)),
         display_title: None,
-        bios: args.bios,
-        library: Vec::new(),
         cartridge: args.cartridge,
         shot_off: args.shot_off,
         debug_note_capture: args.debug_note_capture,

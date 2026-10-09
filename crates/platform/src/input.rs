@@ -138,36 +138,18 @@ pub enum UiEvent {
     ModalScrollUp,
     ModalScrollDown,
     /// Abrir a biblioteca de memory cards (plano §3) — clicar no botão
-    /// "MC slot 1" do painel; a trava de troca só-desligado é do runner.
+    /// "MC slot 1" do painel (ou na porta do card, com card encaixado ou
+    /// não — trocar e ejetar vivem no card escolhido).
     OpenCards,
-    /// O mesmo para o "MC slot 2".
-    OpenCards2,
-    /// Ligar o console SEM disco — boot direto na BIOS.
-    BootBios,
     /// OPEN: abrir/fechar a tampa translúcida (sem desligar).
     ToggleLid,
-    /// Pressionou uma ENTRADA de controle na face (o drag começa): o
-    /// controle "sai" da entrada e segue o mouse até o soltar.
-    PadGrab(u8),
-    /// Clique no botão ANALOG da entrada (`u8`: 0 ou 1) — alterna o modo
-    /// analógico daquele controle (o LED vermelho do DualShock).
+    /// Clique no botão ANALOG da entrada 1 — alterna o modo do controle
+    /// (analógico + vibração, o LED vermelho vira verde).
     AnalogToggle(u8),
-    /// Clique no botão RUMBLE da entrada (`u8`: 0 ou 1) — alterna a
-    /// vibração daquele controle.
-    RumbleToggle(u8),
-    /// Botão esquerdo do mouse solto — completa (ou cancela) o arrasto do
-    /// controle entre as entradas.
+    /// Botão esquerdo do mouse solto.
     MouseUp(i32, i32),
-    /// Mouse movendo — enquanto um controle está sendo arrastado, destaca
-    /// a entrada sob o cursor. Ignorado fora do arrasto.
+    /// Mouse movendo.
     MouseMove(i32, i32),
-    /// Remover o disco (só com a tampa aberta).
-    RemoveDisc,
-    /// Inserir disco — abre o seletor de jogos.
-    InsertDisc,
-    /// Abrir o seletor de discos do jogo (m3u, plano §6) — o bloco
-    /// "Discos" da pausa.
-    OpenDiscos,
     /// Click the Cheats modal's search box — only drawn (and only
     /// clickable) on a modal that's marked searchable, which today is only
     /// Cheats (plan revision: the libretro-database expansion made

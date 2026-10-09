@@ -19,9 +19,6 @@ const DEFAULT_CD_READER: &[u8] = include_bytes!("../assets/cd_reader.png");
 /// A mesa do spindle (onde o CD assenta) — recorte da mesa do leitor, girado
 /// em runtime com o mesmo ângulo do disco.
 const DEFAULT_CD_SEAT: &[u8] = include_bytes!("../assets/cd_seat.png");
-/// A logo pixel-art mostrada no painel quando o console boota pela BIOS
-/// ("Ligar sem disco") — o jogo do topo do painel quando não há jogo.
-const DEFAULT_BIOS_LOGO: &[u8] = include_bytes!("../assets/bios_logo.png");
 /// O vidro da tampa de acrílico (gradientes de reflexo pré-renderizados —
 /// círculos chapados ficavam estranhos por cima da arte do disco).
 const DEFAULT_LID_GLASS: &[u8] = include_bytes!("../assets/lid_glass.png");
@@ -35,6 +32,21 @@ pub(crate) fn load_brand_images(cab: &mut Cabinet) {
     load_slot_tag(cab);
     load_cd_reader(cab);
     load_cd_seat(cab);
+    load_mc_logo(cab);
+}
+
+/// A logo do memory card desenhado no slot: a MESMA arte da console logo,
+/// mas o cabinet aplica modulação preta na textura (a marca em silhueta,
+/// como a Sony em relevo no card real).
+pub(crate) fn load_mc_logo(cab: &mut Cabinet) {
+    match image::load_from_memory(DEFAULT_CONSOLE_LOGO) {
+        Ok(img) => {
+            let img = img.thumbnail(256, 256).to_rgba8();
+            let (w, h) = img.dimensions();
+            cab.set_mc_logo(w, h, img.as_raw().as_slice());
+        }
+        Err(e) => log::warn!("console art: logo do MC embutida: {e}"),
+    }
 }
 
 /// O placeholder do leitor: sempre a imagem embutida (não tem override —
@@ -60,21 +72,6 @@ pub(crate) fn load_cd_reader(cab: &mut Cabinet) {
         Err(e) => {
             log::warn!("console art: vidro da tampa embutido: {e}");
             cab.set_lid_glass(None);
-        }
-    }
-}
-
-/// A logo do boot pela BIOS: sempre a imagem embutida — decodificada sob
-/// demanda (uma vez por sessão de BIOS, ao montar o painel).
-pub(crate) fn bios_panel_logo() -> Option<(u32, u32, Vec<u8>)> {
-    match image::load_from_memory(DEFAULT_BIOS_LOGO) {
-        Ok(img) => {
-            let img = img.thumbnail(640, 640).to_rgba8();
-            Some((img.width(), img.height(), img.into_raw()))
-        }
-        Err(e) => {
-            log::warn!("console art: logo da BIOS embutida: {e}");
-            None
         }
     }
 }

@@ -732,6 +732,15 @@ impl Platform {
         self.gamepads.len()
     }
 
+    /// Vibra o gamepad da entrada com os motores do core (forte/fraco,
+    /// 0..65535) — a ponte da interface de rumble do libretro. Sem pad na
+    /// entrada, é no-op (o teclado não treme).
+    pub fn rumble_pad(&mut self, port: usize, strong: u16, weak: u16) {
+        if let Some((_, pad)) = self.gamepads.get_mut(port) {
+            let _ = pad.set_rumble(strong, weak, 150);
+        }
+    }
+
     /// Drain the event queue, update `input` via `keymap` (gameplay D-pad/
     /// buttons only — every console/UI command is mouse-only now, reported
     /// as [`UiEvent::Click`] for the caller to resolve via

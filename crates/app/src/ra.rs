@@ -978,6 +978,12 @@ pub fn tally_from_cache(
 ) -> Option<(usize, usize, Option<Award>)> {
     let game = cached_game(hash)?;
     let total = game.achievements;
+    // Jogo identificado mas sem set publicado (0 conquistas reais): não há
+    // tally — o painel não mostra "0 de 0" nem medalha (o botão Conquistas
+    // some junto, no chamador).
+    if total == 0 {
+        return None;
+    }
     let entry = completion.and_then(|c| cached_game_id(hash).and_then(|id| c.get(&id)));
     let earned = entry
         .map(|e| e.awarded as usize)
@@ -1326,6 +1332,23 @@ mod tests {
         let g = game_from_json(&body).unwrap();
         assert!(!g.unsupported);
         assert_eq!(g.achievements, 1);
+    }
+
+    #[test]
+    fn identified_with_empty_set_is_not_unsupported() {
+        // Jogo com entrada no RA mas SEM set publicado (caso Spawn: The
+        // Eternal): identificado, zero conquistas reais, e NÃO é "versão sem
+        // suporte" — é o formato que mantém o botão Conquistas fora do
+        // painel e o tally fora das infos (sem "0 de 0").
+        let body = serde_json::json!({
+            "Success": true, "Title": "Spawn: The Eternal",
+            "Sets": [ { "AchievementSetId": 1, "GameId": 18829,
+                "Achievements": [] } ]
+        });
+        let g = game_from_json(&body).unwrap();
+        assert_eq!(g.title, "Spawn: The Eternal");
+        assert_eq!(g.achievements, 0);
+        assert!(!g.unsupported);
     }
 
     #[test]

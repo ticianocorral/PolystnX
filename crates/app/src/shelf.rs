@@ -2135,10 +2135,15 @@ pub fn run(
                     section: panel_section,
                     scroll: panel_scroll,
                     favorite: Some(e.rom.favorite),
-                    // Identificado = botão desenhado; hash marcado "versão
-                    // não suportada" = botão desativado com o motivo
-                    // (plan revision).
-                    achievements: ra_state.is_some_and(|g| g.is_some()),
+                    // Identificado com set publicado = botão desenhado;
+                    // hash marcado "versão não suportada" = botão
+                    // desativado com o motivo (plan revision); jogo
+                    // identificado SEM conquistas (set vazio, tipo Spawn
+                    // The Eternal) = nada de botão nem "0 de 0".
+                    achievements: ra_state.is_some_and(|g| {
+                        g.as_ref()
+                            .is_some_and(|g| g.unsupported || g.achievements > 0)
+                    }),
                     achievements_reason: ra_state
                         .and_then(|g| g.as_ref())
                         .filter(|g| g.unsupported)
