@@ -4,6 +4,47 @@ Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/);
 versionamento por [SemVer 2.0.0](https://semver.org/lang/pt-BR/). O workspace
 inteiro compartilha uma versão (`[workspace.package]` em `Cargo.toml`).
 
+## [1.1.0-beta] - 2026-10-09
+
+### Adicionado
+- **Vibração DualShock**: o core pede a interface de rumble do libretro e
+  o gamepad da entrada 1 responde (motores forte/fraco, drenados a cada
+  quadro, zerados na troca de core/jogo). No painel, o botão ANALOG liga
+  as duas coisas juntas — analógico + vibração (o LED vermelho vira
+  verde).
+- **Log em arquivo**: todo lançamento escreve `polystnx-<timestamp>.log`
+  em `logs/` na pasta de config — lançado pelo Finder o stderr se perde,
+  e o rastro do fluxo de card/boot precisava sobreviver a isso.
+
+### Modificado
+- **O memory card é decisão do jogador**: os slots nascem VAZIOS em todo
+  jogo — nada de auto-encaixe pelo `config.toml`, o mecanismo do apagão
+  de saves (`card_slot1/2` ficam no arquivo por compatibilidade, sem
+  efeito). Inserir card é manual, pelo modal de MC no painel.
+- **O console tem UMA porta de card** (o slot 2 saiu do painel) e o card
+  encaixado ganhou corpo de verdade: logo em silhueta preta, adesivo
+  caseiro com o nome e o gesto "Trocar/Ejetar" impresso no plástico.
+- **"Ligar sem disco" saiu do setup** — junto com o toggle "Controle 2"
+  das configurações e as flags `--bios`/`--card2` do emu-run: o suporte
+  ao segundo controle foi removido.
+- **Leitor**: no core leve (PCSX Rearmed) a leitura do disco se deduz do
+  conteúdo — tela congelada (grade de luma 48×36 idêntica) + áudio mudo
+  por 1 s ligam o loop; hesitação (250 ms) e vão lento (70 ms) ficam como
+  rede para boot/FMV/máquina fraca.
+- **RetroAchievements**: jogo identificado SEM set publicado (caso
+  Spawn: The Eternal) não é "versão sem suporte" — sem botão Conquistas
+  e sem tally "0 de 0".
+- Setup: os botões se agrupam em telas apertadas — rótulos descritivos
+  só quando cabem (Steam Deck: ficavam por cima do texto).
+- Ícones e logo com a arte nova (P + PolyStnX, fundo transparente) em
+  todos os formatos — macOS, Windows, Linux/Flatpak, cabeçalho e tampa.
+
+### Corrigido
+- **O sync do card não perde mais saves**: slot com o magic (51 00) —
+  como o Tekken 3 grava os saves — é EM USO; o contador antigo o tratava
+  como livre-apagado. Títulos de card em Shift-JIS full-width
+  (ＴＥＫＫＥＮ) são normalizados para ASCII.
+
 ## [0.1.3] - 2026-09-30
 
 ### Adicionado
