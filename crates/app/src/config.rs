@@ -31,9 +31,8 @@ pub struct Config {
     pub hiss_on_static: bool,
     /// Silencia o áudio do jogo (só o som de ambiente do leitor toca).
     pub mute_game: bool,
-    /// Habilita o CONTROLE 2 (a segunda entrada do console) — padrão
-    /// desligado: um controle só, como o console saía de fábrica.
-    pub pad2: bool,
+    /// LEGADO: o suporte ao CONTROLE 2 saiu do painel (plan revision,
+    /// "no momento") — o campo morre na leitura, sem efeito.
     /// A BIOS padrão (nome do arquivo em `bios/`); `None` = o core varre a
     /// pasta como sempre fez.
     pub bios_default: Option<String>,
@@ -82,7 +81,6 @@ struct Raw {
     #[serde(default)]
     hiss_on_static: Option<bool>,
     mute_game: Option<bool>,
-    pad2: Option<bool>,
     card_slot1: Option<String>,
     card_slot2: Option<String>,
     bios_default: Option<String>,
@@ -122,7 +120,6 @@ impl Config {
             check_updates_on_start: true,
             hiss_on_static: false,
             mute_game: false,
-            pad2: false,
             card_slot1: None,
             card_slot2: None,
             bios_default: None,
@@ -176,9 +173,6 @@ impl Config {
         }
         if let Some(m) = raw.mute_game {
             self.mute_game = m;
-        }
-        if let Some(m) = raw.pad2 {
-            self.pad2 = m;
         }
         if let Some(c) = raw.card_slot1 {
             self.card_slot1 = if c.is_empty() { None } else { Some(c) };
@@ -250,10 +244,9 @@ impl Config {
              # RetroAchievements: ra_user/ra_token from retroachievements.org\n\
              # (Settings -> Web API); empty = the whole feature stays off.\n\
              # ra_hardcore: no cheats/savestates while earning achievements.\n\
-             # card_slot1/card_slot2: o card `.mcr` (da pasta memcards)\n\
-             # encaixado em cada slot do console — persiste entre sessões.\n\
-             # vazio = slot sem card (o jogo não salva em nada).\n\
-             # pad2: habilita o CONTROLE 2 (a segunda entrada do console).\n\
+             # card_slot1/card_slot2: LEGADO (sem efeito) — os slots do\n\
+             # console nascem vazios em todo jogo; inserir card é manual,\n\
+             # pelo modal de MC no painel.\n\
              # [keyboard]: action = \"SDL key name\" (e.g. \"Left Shift\", \"F2\", \"]\").\n\
              # [gamepad]: action = \"SDL gamepad button name\" (e.g. \"south\",\n\
              # \"dpup\", \"leftshoulder\") — which pad button drives each action.\n\n",
@@ -265,11 +258,7 @@ impl Config {
             self.check_updates_on_start
         ));
         s.push_str(&format!(
-            "# pad2: habilita o CONTROLE 2 (a segunda entrada do console).\npad2 = {}\n\n",
-            self.pad2
-        ));
-        s.push_str(&format!(
-            "# card_slot1/card_slot2: o card .mcr (da pasta memcards) encaixado\n# em cada slot do console; vazio (\"\" ) = slot sem card.\ncard_slot1 = \"{}\"\ncard_slot2 = \"{}\"\n\n",
+            "# card_slot1/card_slot2: LEGADO (sem efeito) — os slots nascem vazios\n# em todo jogo; inserir card é manual pelo modal de cards.\ncard_slot1 = \"{}\"\ncard_slot2 = \"{}\"\n\n",
             self.card_slot1.as_deref().unwrap_or(""),
             self.card_slot2.as_deref().unwrap_or("")
         ));
@@ -326,7 +315,6 @@ mod tests {
             check_updates_on_start: true,
             hiss_on_static: false,
             mute_game: false,
-            pad2: false,
             card_slot1: None,
             card_slot2: None,
             bios_default: None,

@@ -8,6 +8,6 @@ mod core;
 mod sys;
 
 pub use crate::core::{
-    AnalogStick, AvInfo, Button, Core, CoreError, Frame, PixelFormat, MAX_PORTS, MEMORY_SAVE_RAM,
-    MEMORY_SYSTEM_RAM,
+    rumble, AnalogStick, AvInfo, Button, Core, CoreError, Frame, PixelFormat, MAX_PORTS,
+    MEMORY_SAVE_RAM, MEMORY_SYSTEM_RAM,
 };

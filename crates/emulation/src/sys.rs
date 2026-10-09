@@ -41,6 +41,13 @@ pub const RETRO_ENVIRONMENT_GET_PREFERRED_HW_RENDER: c_uint = 56;
 /// Versão da interface de disk control que o frontend suporta (`unsigned*`):
 /// 0 = só a legada (cmd 13), ≥ 1 = o core deve registrar a EXT (cmd 58).
 pub const RETRO_ENVIRONMENT_GET_DISK_CONTROL_INTERFACE_VERSION: c_uint = 57;
+/// A interface de vibração (o DualShock do core): o core pergunta no init
+/// e chama `set_rumble_state` quando o jogo liga os motores.
+pub const RETRO_ENVIRONMENT_GET_RUMBLE_INTERFACE: c_uint = 23;
+/// retro_rumble_effect: o motor forte (o "pesado" do DualShock).
+pub const RETRO_RUMBLE_STRONG: c_uint = 0;
+/// retro_rumble_effect: o motor fraco (o zumbido fino).
+pub const RETRO_RUMBLE_WEAK: c_uint = 1;
 /// A bandeja do drive: `retro_disk_control_ext_callback`.
 pub const RETRO_ENVIRONMENT_SET_DISK_CONTROL_EXT_INTERFACE: c_uint = 58;
 pub const RETRO_ENVIRONMENT_SET_CORE_OPTIONS_V2: c_uint = 67;

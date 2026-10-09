@@ -9,6 +9,7 @@ use std::ffi::{c_void, CStr, CString};
 use std::os::raw::{c_char, c_uint};
 use std::path::{Path, PathBuf};
 use std::ptr;
+use std::sync::atomic::{AtomicU32, Ordering};
 
 use libloading::{Library, Symbol};
 
@@ -192,6 +193,7 @@ pub struct Core {
 impl Core {
     /// dlopen the core and resolve its entry points. Does not init it yet.
     pub fn load(path: impl AsRef<Path>) -> Result<Self, CoreError> {
+        reset_rumble();
         let path = path.as_ref().to_path_buf();
         // Safety: loading arbitrary native code. The path comes from the user.
         let lib = unsafe { Library::new(&path) }.map_err(|source| CoreError::Open {
@@ -674,6 +676,49 @@ fn cstr_to_string(p: *const c_char) -> String {
     }
 }
 
+// --- Vibração ---------------------------------------------------------------
+
+/// A vibração pedida pelo core ([porta × efeito] → força 0..65535): o
+/// callback C do libretro não carrega contexto, então o core vivo escreve
+/// neste global e o frontend drena a cada quadro (`rumble()`).
+static RUMBLE: [AtomicU32; 4] = [
+    AtomicU32::new(0),
+    AtomicU32::new(0),
+    AtomicU32::new(0),
+    AtomicU32::new(0),
+];
+
+/// Lê (SEM zerar) a vibração atual — [(forte, fraco); portas]: o core
+/// mantém a força enquanto o jogo quer vibrar, e o frontend reapresenta
+/// ao gamepad a cada quadro.
+pub fn rumble() -> [(u16, u16); 2] {
+    let mut out = [(0u16, 0u16); 2];
+    for port in 0..2usize {
+        let strong = RUMBLE[port * 2]
+            .load(Ordering::Relaxed)
+            .min(u16::MAX as u32) as u16;
+        let weak = RUMBLE[port * 2 + 1]
+            .load(Ordering::Relaxed)
+            .min(u16::MAX as u32) as u16;
+        out[port] = (strong, weak);
+    }
+    out
+}
+
+/// Zera a vibração pedida (na troca de core/jogo: nenhum estado velho
+/// sobrevive).
+fn reset_rumble() {
+    for r in &RUMBLE {
+        r.store(0, Ordering::Relaxed);
+    }
+}
+
+unsafe extern "C" fn set_rumble_state_cb(port: c_uint, effect: c_uint, strength: u16) {
+    if port < 2 && effect < 2 {
+        RUMBLE[(port * 2 + effect) as usize].store(strength as u32, Ordering::Relaxed);
+    }
+}
+
 // --- C callbacks -----------------------------------------------------------
 
 unsafe extern "C" fn environment_cb(cmd: c_uint, data: *mut c_void) -> bool {
@@ -860,6 +905,20 @@ unsafe extern "C" fn environment_cb(cmd: c_uint, data: *mut c_void) -> bool {
         }
         RETRO_ENVIRONMENT_SET_SYSTEM_AV_INFO | RETRO_ENVIRONMENT_SET_GEOMETRY => {
             with_cb(|s| s.av_info_dirty = true);
+            true
+        }
+        RETRO_ENVIRONMENT_GET_RUMBLE_INTERFACE => {
+            if !data.is_null() {
+                #[repr(C)]
+                struct retro_rumble_interface {
+                    set_rumble_state: Option<unsafe extern "C" fn(c_uint, c_uint, u16)>,
+                }
+                unsafe {
+                    *(data as *mut retro_rumble_interface) = retro_rumble_interface {
+                        set_rumble_state: Some(set_rumble_state_cb),
+                    };
+                }
+            }
             true
         }
         RETRO_ENVIRONMENT_GET_INPUT_BITMASKS => true,

@@ -186,7 +186,27 @@ their canonical No-Intro name.";
 
 fn main() -> Result<()> {
     polystnx_app::dirs::migrate_legacy_data_root();
-    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
+    // Log em ARQUIVO além do stderr: lançado pelo Finder o stderr se perde,
+    // e diagnósticos como o fluxo de card/boot precisam do rastro. Um
+    // polystnx.log por execução, na pasta de config.
+    {
+        let dir = polystnx_app::dirs::config_dir().join("logs");
+        let _ = std::fs::create_dir_all(&dir);
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        let path = dir.join(format!("polystnx-{stamp}.log"));
+        if let Ok(file) = std::fs::File::create(&path) {
+            env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info"))
+                .target(env_logger::Target::Pipe(Box::new(file)))
+                .init();
+            eprintln!("log: {}", path.display());
+        } else {
+            env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info"))
+                .init();
+        }
+    }
     // A pasta de updates mudou de lugar (plan revision 1.1.5 do irmão de
     // SNES, aplicada aqui) — o pacote pendente que ficou em saves/update/
     // precisa estar no caminho novo antes de o apply olhar pra ele.
@@ -214,11 +234,12 @@ fn main() -> Result<()> {
     migrate_old_data();
 
     let mut cfg = Config::load(args.config.as_deref())?;
-    // Os cards encaixados no console (persistidos na config) — o mesmo
-    // card acompanha o console entre sessões (plan revision: "deve sempre
-    // utilizar o card que está inserido no console").
-    let card_slot1 = cfg.card_slot1.clone().map(PathBuf::from);
-    let card_slot2 = cfg.card_slot2.clone().map(PathBuf::from);
+    // Cards: os slots nascem VAZIOS em todo lançamento — inserir é sempre
+    // manual, pelo modal de cards dentro da sessão (plan revision: "nunca
+    // inserir MC ao inserir jogo, sempre deve inserir manual"). O
+    // auto-encaixe pelo config (card_slot1/2) era o mecanismo do apagão de
+    // saves; os campos continuam na config por compatibilidade, mas ninguém
+    // mais os aplica.
     if let Some(p) = &cfg.source {
         log::info!("config: {}", p.display());
     }
@@ -247,13 +268,6 @@ fn main() -> Result<()> {
         cfg.bios_default.as_deref(),
     );
     let mut catalog = open_catalog().with_context(|| "opening the catalog")?;
-    // A estante inteira para o modal "Inserir disco" da troca quente.
-    let library: Vec<(String, PathBuf)> = catalog
-        .list(polystnx_domain::catalog::Order::Name)
-        .unwrap_or_default()
-        .iter()
-        .map(|e| (e.title().into_owned(), PathBuf::from(&e.rom.path)))
-        .collect();
 
     log::info!("{} rom(s) in roms/", catalog.counts()?);
 
@@ -284,11 +298,10 @@ fn main() -> Result<()> {
             runahead: None,
             shot: None,
             logo: None,
-            card1: card_slot1.clone(),
-            card2: card_slot2.clone(),
+            // Lançamento nasce sem card — inserção é manual pelo modal
+            // (mesma regra do lançamento pela estante).
+            card1: None,
             display_title: None,
-            bios: false,
-            library: library.clone(),
             cartridge,
             shot_off: false,
             debug_note_capture: false,
@@ -400,40 +413,6 @@ fn main() -> Result<()> {
         match exit {
             IdleExit::Quit => break 'app,
             IdleExit::OpenShelf => shelf_opts.fade_in = Some(idle_static),
-            IdleExit::BootBios => {
-                // Ligar SEM disco: boot direto na BIOS (menu do console).
-                let Some(core) = core_path.clone() else {
-                    continue;
-                };
-                let spec = GameSpec {
-                    core,
-                    rom: PathBuf::new(),
-                    system_dir: effective_system_dir.clone(),
-                    save_dir: args.save_dir.clone(),
-                    notes_dir: args.notes_dir.clone(),
-                    runahead: None,
-                    shot: None,
-                    logo: None,
-                    card1: card_slot1.clone(),
-                    card2: card_slot2.clone(),
-                    display_title: None,
-                    bios: true,
-                    library: library.clone(),
-                    cartridge: None,
-                    shot_off: false,
-                    debug_note_capture: false,
-                    debug_shot_pause: false,
-                    debug_shot_modal: None,
-                    debug_cart_anim: None,
-                };
-                match run_game(&mut plat, &mut cab, &spec, &mut cfg)? {
-                    GameExit::Ejected { static_level } => {
-                        idle_static = static_level;
-                    }
-                    GameExit::Quit => break 'app,
-                }
-                continue;
-            }
             IdleExit::OpenDev => {
                 // O menu do devmode (plan revision: "por enquanto criar menu
                 // em branco apenas com o botão voltar") — `true` aqui é o
@@ -514,13 +493,13 @@ fn main() -> Result<()> {
                 };
             shelf_opts.fade_in = None; // consumed
 
-            // A Metal guarda estado do 2D da estante que corrompe a textura
-            // do jogo (o "quadrado colorido"): a troca recria o canvas —
-            // a TV trocando de entrada. O mesmo na volta, no Ejected.
-            drop(cab);
-            cab = plat
-                .create_cabinet("PolystnX", 1280, 800, cfg.fullscreen)
-                .map_err(|e| anyhow!(e.to_string()))?;
+            // MESMO cabinet da estante: recriar aqui era blindagem contra o
+            // "quadrado colorido" — que nunca foi estado 2D da Metal, e sim o
+            // system_dir default apontando saves/ (BIOS nunca achada; corrigido
+            // no parse_args). Recriar descartava o nameplate do arranque e o
+            // jogo voltava a mostrar só "PolystnX" no queixo, sem a versão do
+            // core. O caminho do Ligar sem disco sempre rodou no mesmo
+            // cabinet, sem síntoma.
 
             let Some(core) = &core_path else {
                 if no_core_screen(&mut plat, &mut cab)? {
@@ -532,6 +511,10 @@ fn main() -> Result<()> {
             // SNES Xperience. (O bug do "quadrado colorido" nunca foi da
             // Metal: o system_dir default apontava saves/, a BIOS nunca era
             // encontrada e o boot não saía do lugar. Corrigido no parse_args.)
+            // Slot SEMPRE vazio no lançamento (plan revision: "nunca inserir
+            // MC ao inserir jogo, sempre deve inserir manual") — card é
+            // decisão do jogador dentro da sessão, pelo modal de cards; o
+            // auto-encaixe pelo config foi o mecanismo do apagão de saves.
             let spec = GameSpec {
                 core: core.clone(),
                 rom,
@@ -541,11 +524,8 @@ fn main() -> Result<()> {
                 runahead: args.runahead,
                 shot: None,
                 logo,
-                card1: card_slot1.clone(),
-                card2: card_slot2.clone(),
+                card1: None,
                 display_title,
-                bios: false,
-                library: library.clone(),
                 cartridge,
                 shot_off: false,
                 debug_note_capture: false,

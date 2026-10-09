@@ -60,6 +60,10 @@ pub const CD_READER_IMG: u64 = u64::MAX - 8;
 pub const LID_GLASS_IMG: u64 = u64::MAX - 9;
 /// A mesa do spindle (onde o CD assenta) — desenhada girando com o disco.
 pub const CD_SEAT_IMG: u64 = u64::MAX - 10;
+/// A logo PolyStn do memory card desenhado no slot — a MESMA arte da
+/// console logo, com `set_color_mod` preto na textura (o desenho do card
+/// quer a marca em silhueta, não colorida).
+pub const MC_LOGO_IMG: u64 = u64::MAX - 11;
 
 /// The pause book: two pages, not warped by the tube — a dedicated screen
 /// (plan §3.2/§3.4), not cabinet furniture, so it replaces the whole window
@@ -399,12 +403,6 @@ enum ChinOsd {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum PanelButton {
     Insert,
-    /// "Ligar sem disco" — boot direto na BIOS a partir da tela inicial.
-    BootBios,
-    /// Remover o disco (habilitado só com a tampa aberta).
-    DiscRemover,
-    /// Sem disco: inserir — abre o seletor de jogos.
-    DiscInserter,
     Settings,
     /// The idle screen's dev-mode button (plan revision: "habilitar botão em
     /// cima da configuração") — only drawn while the app's dev mode is on,
@@ -423,21 +421,9 @@ pub enum PanelButton {
     /// biblioteca de cards do slot — a troca em si só acontece desligado (a
     /// trava é do runner, igual à do ejetar).
     Cards1,
-    Cards2,
-    /// As entradas de controle na face (o clássico da troca do Metal
-    /// Gear): clicar em qualquer uma troca o pad 1 com o 2.
-    PadPort1,
-    PadPort2,
-    /// O botão ANALOG da entrada (com o LED vermelho do DualShock):
-    /// liga/desliga o modo analógico daquele controle.
+    /// O botão ANALOG da entrada 1 — o botão do DualShock: liga o modo
+    /// analógico E a vibração (o LED vermelho vira verde).
     Analog1,
-    Analog2,
-    /// O botão RUMBLE da entrada: liga/desliga a vibração daquele controle.
-    Rumble1,
-    Rumble2,
-    /// Abre o seletor de discos (jogos m3u, plano §6) — troca o disco no
-    /// drive com a sessão viva, estado serializado por baixo.
-    Discos,
     /// Pauses and opens the notebook in one click (plan revision — replaces
     /// the old separate "Pausar" button; "Nota" moved to `PrintScreen`).
     Notebook,
@@ -755,21 +741,14 @@ struct PanelInfo {
     /// adesivo da porta (plan revision: "mostrar o nome dele no espacinho").
     /// `None` = slot vazio, o painel fica liso.
     card1_label: Option<String>,
-    card2_label: Option<String>,
     /// As entradas de controle (plan revision: "no controle 1 mostrar texto
     /// conectado, no controle 2 caso não tenha mostrar o slot"; e o drag):
     /// trocados?, segunda entrada com gamepad?, entrada sob o cursor no
     /// arrasto (highlight verde).
-    pads_swapped: bool,
-    pads_second: bool,
-    pads_hover: Option<u8>,
-    /// O modo analógico de cada entrada (o LED vermelho do botão ANALOG):
-    /// desligado = os sticks daquela entrada ficam mudos para o core.
+
+    /// O modo analógico da entrada 1 (o botão ANALOG do DualShock):
+    /// desligado = os sticks ficam mudos para o core (e a vibração junto).
     analog1: bool,
-    analog2: bool,
-    /// A vibração de cada entrada (o botão RUMBLE com o LED vermelho).
-    rumble1: bool,
-    rumble2: bool,
     cheats: Vec<(String, bool)>,
     /// Notebook block (item 5, plan §3.4): absent entirely when this is 0 —
     /// no "no notes" filler.
@@ -786,6 +765,10 @@ struct PanelInfo {
     /// `Some((t, ejecting))` while `runner`'s animation drives it, drawn by
     /// `draw_panel_slot`. Reset to `None` by `set_panel`.
     cartridge_motion: Option<(f32, bool)>,
+    /// O encaixe do memory card (plan revision — o card desliza no slot
+    /// como o cartucho do SNES): `Some((t, inserindo))` com t 0..1 — 1 =
+    /// encaixado. `None` = parado no estado final.
+    card_motion: Option<(f32, bool)>,
 }
 
 /// What the shelf's flat side panel shows for the currently-selected game
@@ -1288,14 +1271,8 @@ impl Cabinet {
             disc_in: true,
             reset_pressed: false,
             card1_label: None,
-            card2_label: None,
-            pads_swapped: false,
-            pads_second: false,
-            pads_hover: None,
-            analog1: true,
-            analog2: true,
-            rumble1: true,
-            rumble2: true,
+
+            analog1: false,
             cheats: Vec::new(),
             note_count: 0,
             has_note_thumb: false,
@@ -1303,6 +1280,7 @@ impl Cabinet {
             // Seated in the slot until `runner`'s insert animation says
             // otherwise (it runs right after this).
             cartridge_motion: None,
+            card_motion: None,
         });
     }
 
@@ -1325,7 +1303,8 @@ impl Cabinet {
     }
 
     /// Estado do drive: tampa aberta/fechada e disco presente/ausente —
-    /// governa o giro, o vidro da tampa e o botão de remover/inserir.
+    /// governa o giro e o vidro da tampa. O disco assentado pela estante
+    /// não sai do drive (não há remoção/troca no painel).
     pub fn set_drive(&mut self, lid_open: bool, disc_in: bool) {
         if let Some(p) = self.panel.as_mut() {
             p.lid_open = lid_open;
@@ -1333,57 +1312,22 @@ impl Cabinet {
         }
     }
 
-    /// O estado das entradas de controle na face (plan revision: "no
-    /// controle 1 mostrar texto conectado, no controle 2 caso não tenha
-    /// mostrar o slot"; e o drag de troca): `swapped` = o controle da
-    /// entrada 1 foi arrastado para a 2; `second` = há um segundo gamepad
-    /// conectado; `hover` = entrada sob o cursor durante o arrasto.
-    /// Sem painel de jogo aberto, é no-op.
-    pub fn set_pad_entries(&mut self, swapped: bool, second: bool, hover: Option<u8>) {
+    /// O LED do botão ANALOG da entrada 1 — o do controle original:
+    /// vermelho = desligado (digital), verde = ligado (analógico +
+    /// vibração). Sem painel de jogo aberto, é no-op.
+    pub fn set_analog_led(&mut self, on: bool) {
         if let Some(p) = self.panel.as_mut() {
-            p.pads_swapped = swapped;
-            p.pads_second = second;
-            p.pads_hover = hover;
+            p.analog1 = on;
         }
     }
 
-    /// O LED vermelho dos botões ANALOG de cada entrada (o do controle
-    /// original): aceso = modo analógico ligado. Sem painel de jogo
-    /// aberto, é no-op.
-    pub fn set_analog_leds(&mut self, a1: bool, a2: bool) {
-        if let Some(p) = self.panel.as_mut() {
-            p.analog1 = a1;
-            p.analog2 = a2;
-        }
-    }
-
-    /// O LED dos botões RUMBLE de cada entrada: aceso = vibração ligada
-    /// para aquele controle. Sem painel de jogo aberto, é no-op.
-    pub fn set_rumble_leds(&mut self, r1: bool, r2: bool) {
-        if let Some(p) = self.panel.as_mut() {
-            p.rumble1 = r1;
-            p.rumble2 = r2;
-        }
-    }
-
-    /// A entrada de controle sob o cursor (0 ou 1), pelos rects desenhados
-    /// na última apresentação — o alvo do arrasto do controle.
-    pub fn hit_pad_port(&self, out_x: i32, out_y: i32) -> Option<u8> {
-        self.panel_buttons.iter().find_map(|(b, r)| match b {
-            PanelButton::PadPort1 if r.contains_point((out_x, out_y)) => Some(0u8),
-            PanelButton::PadPort2 if r.contains_point((out_x, out_y)) => Some(1u8),
-            _ => None,
-        })
-    }
-
-    /// O nome do memory card encaixado em cada slot, impresso no painel do
-    /// adesivo da porta (plan revision: "mostrar o nome dele no espacinho
-    /// que fica acima da copy no slot escolhido"). `None` deixa o painel
-    /// liso. Sem painel de jogo aberto, é no-op.
-    pub fn set_card_labels(&mut self, card1: Option<&str>, card2: Option<&str>) {
+    /// O nome do memory card encaixado, impresso no painel do adesivo da
+    /// porta (plan revision: "mostrar o nome dele no espacinho que fica
+    /// acima da copy no slot escolhido"). `None` deixa o painel liso. Sem
+    /// painel de jogo aberto, é no-op.
+    pub fn set_card_labels(&mut self, card1: Option<&str>) {
         if let Some(p) = self.panel.as_mut() {
             p.card1_label = card1.map(|s| s.to_string());
-            p.card2_label = card2.map(|s| s.to_string());
         }
     }
 
@@ -1978,15 +1922,21 @@ impl Cabinet {
     /// O `present_frame` chama isto e apresenta; o `present_modal` reusa
     /// para compor o dialog POR CIMA da última cena (a interface não muda).
     fn render_frame_scene(&mut self, frame: &FrameRef, aspect_ratio: f32) {
-        // O disco gira enquanto o console está ligado com disco assentado —
-        // por relógio: FMV pesada ou hesitação do core atrasa o QUADRO, não
-        // a velocidade do disco. Ligar/desligar é por RAMPA (o motor do
-        // leitor tem inércia): abre a tampa e o disco freia aos poucos,
-        // PARANDO NO ÂNGULO EM QUE ESTÁ — não volta para o original.
-        let spinning = self
-            .panel
-            .as_ref()
-            .is_some_and(|p| p.has_cartridge && p.powered && !p.lid_open);
+        self.ensure_src(frame.width, frame.height, frame.format);
+        self.upload(frame);
+        self.render_frame_scene_last(aspect_ratio);
+    }
+
+    /// Um passo da RAMPA do motor do leitor — o disco gira a 420 °/s com o
+    /// console ligado, disco assentado e tampa fechada; sem qualquer um
+    /// desses, o alvo é 0 e o giro COASTA (aceleração na arrancada, freio
+    /// na parada, °/s²: ~1.5 s até o giro cheio, ~2 s até parar), SEMPRE
+    /// parando no ângulo em que está. Por relógio: FMV pesada atrasa o
+    /// QUADRO, não a velocidade do disco. Chamado por toda cena que
+    /// desenha o painel — o desligar troca a cena (`render_frame_scene` →
+    /// `render_static_scene`), e sem o tick lá o disco congelava seco no
+    /// clique do Power em vez de frear com inércia.
+    fn tick_spin(&mut self, spinning: bool) {
         let now = Instant::now();
         let dt = self
             .spin_last
@@ -1995,8 +1945,6 @@ impl Cabinet {
             .min(0.1);
         let target = if spinning { 420.0 } else { 0.0 };
         if self.spin_speed != target {
-            // Aceleração na arrancada, freio na parada (°/s²): ~1.5 s até o
-            // giro cheio, ~2 s de coast até parar.
             let rate = if target > self.spin_speed {
                 280.0
             } else {
@@ -2011,14 +1959,16 @@ impl Cabinet {
         if self.spin_speed > 0.0 {
             self.spin = (self.spin + self.spin_speed * dt) % 360.0;
         }
-        self.ensure_src(frame.width, frame.height, frame.format);
-        self.upload(frame);
-        self.render_frame_scene_last(aspect_ratio);
     }
 
     /// O quadro JÁ carregado (`self.src`, retido pelo `present_frame`),
     /// redesenhado na cena completa — o backdrop do modal em jogo.
     fn render_frame_scene_last(&mut self, aspect_ratio: f32) {
+        let spinning = self
+            .panel
+            .as_ref()
+            .is_some_and(|p| p.has_cartridge && p.powered && !p.lid_open);
+        self.tick_spin(spinning);
         let (real_w, real_h) = self.canvas.output_size().unwrap_or((1280, 720));
         let canvas_rect = cabinet_canvas_rect(real_w, real_h);
         self.canvas_rect = canvas_rect;
@@ -2280,6 +2230,16 @@ impl Cabinet {
     // frame — so the shelf bulges with the same tube.
 
     /// Register/replace an image from tightly-packed RGBA8 (call between frames).
+    /// A logo do memory card: a arte da console logo com modulação PRETA —
+    /// o card desenhado no slot leva a marca em silhueta, como na foto do
+    /// card real (a Sony lá é cinza-escuro em relevo).
+    pub fn set_mc_logo(&mut self, w: u32, h: u32, rgba: &[u8]) {
+        self.set_image(MC_LOGO_IMG, w, h, rgba);
+        if let Some(img) = self.images.get_mut(&MC_LOGO_IMG) {
+            img.tex.set_color_mod(0, 0, 0);
+        }
+    }
+
     pub fn set_image(&mut self, id: u64, w: u32, h: u32, rgba: &[u8]) {
         if w == 0 || h == 0 || rgba.len() < (w * h * 4) as usize {
             return;
@@ -2484,68 +2444,6 @@ impl Cabinet {
         true
     }
 
-    /// Faixas de erro de leitura sobre a imagem corrente (o "disco
-    /// arranhado"): bandas horizontais deslocadas/tingidas, linhas de ruído
-    /// e cintilações — puramente visual, sobre a área do tubo. `rng` é o
-    /// gerador do chamador (xorshift), para o padrão mudar a cada tick.
-    pub fn draw_glitch_overlay(&mut self, rng: &mut u32) {
-        let prev = self.canvas.blend_mode();
-        self.canvas.set_blend_mode(sdl3::render::BlendMode::Blend);
-        let (x, y, w, h) = (
-            self.screen.x(),
-            self.screen.y(),
-            self.screen.width() as i32,
-            self.screen.height() as i32,
-        );
-        let next = |rng: &mut u32| {
-            *rng ^= *rng << 13;
-            *rng ^= *rng >> 17;
-            *rng ^= *rng << 5;
-            *rng
-        };
-        // 2-4 bandas tintadas (dados corrompidos)
-        let bands = 2 + (next(rng) % 3) as i32;
-        for _ in 0..bands {
-            let bh = 8 + (next(rng) % 44) as i32;
-            let by = y + (next(rng) % (h - bh).max(1) as u32) as i32;
-            let tint = [
-                (90, 220, 140, 46),
-                (220, 90, 160, 42),
-                (90, 140, 240, 44),
-                (240, 220, 90, 36),
-            ][(next(rng) % 4) as usize];
-            self.canvas
-                .set_draw_color(sdl3::pixels::Color::RGBA(tint.0, tint.1, tint.2, tint.3));
-            let inset = (next(rng) % 30) as i32;
-            let _ = self.canvas.fill_rect(Rect::new(
-                x + inset,
-                by,
-                (w - inset * 2).max(8) as u32,
-                bh as u32,
-            ));
-        }
-        // linhas finas de ruído
-        for _ in 0..5 {
-            let ly = y + (next(rng) % h.max(1) as u32) as i32;
-            self.canvas.set_draw_color(sdl3::pixels::Color::RGBA(
-                255,
-                255,
-                255,
-                (18 + next(rng) % 40) as u8,
-            ));
-            let _ = self
-                .canvas
-                .fill_rect(Rect::new(x, ly, w as u32, 1 + next(rng) % 2));
-        }
-        // cintilação ocasional de quadro inteiro
-        if next(rng) % 5 == 0 {
-            self.canvas
-                .set_draw_color(sdl3::pixels::Color::RGBA(255, 255, 255, 12));
-            let _ = self.canvas.fill_rect(Rect::new(x, y, w as u32, h as u32));
-        }
-        self.canvas.set_blend_mode(prev);
-    }
-
     /// Um tick da máquina de som do leitor de CD: `on` = o core está
     /// hesitando (boot, load, FMV) e o drive "lê". O loop entra com fade de
     /// ~150 ms e sai com fade igual — nenhum corte seco no meio do som.
@@ -2719,6 +2617,14 @@ impl Cabinet {
     /// painel) desenhada no backbuffer — SEM apresentar. O `present_static`
     /// apresenta; o `present_modal` reusa para compor o dialog por cima.
     fn render_static_scene(&mut self, level: f32) {
+        // Console fora do ar: a cena trocou, o motor não — o coast da
+        // inércia do disco segue AQUI (a `panel.powered` já caiu, então é
+        // freio até 0), parando no ângulo em que estiver (ver `tick_spin`).
+        let spinning = self
+            .panel
+            .as_ref()
+            .is_some_and(|p| p.has_cartridge && p.powered && !p.lid_open);
+        self.tick_spin(spinning);
         let (real_w, real_h) = self.canvas.output_size().unwrap_or((1280, 720));
         let canvas_rect = cabinet_canvas_rect(real_w, real_h);
         self.canvas_rect = canvas_rect;
@@ -2891,6 +2797,13 @@ impl Cabinet {
     pub fn set_cartridge_motion(&mut self, motion: Option<(f32, bool)>) {
         if let Some(panel) = &mut self.panel {
             panel.cartridge_motion = motion;
+        }
+    }
+    /// A animação do memory card deslizando no slot (mesmo formato do
+    /// cartridge_motion: `(t, inserindo)`, t 0..1).
+    pub fn set_card_motion(&mut self, motion: Option<(f32, bool)>) {
+        if let Some(panel) = &mut self.panel {
+            panel.card_motion = motion;
         }
     }
 
@@ -4189,6 +4102,54 @@ fn draw_update_arrow(canvas: &mut WindowCanvas, x: i32, y_center: i32) {
 
 /// Like `Screen::image_fit`, but at absolute window coordinates instead of
 /// offset into the 2D screen buffer — for cabinet furniture and panel art.
+/// Recorta um blit (célula de origem → retângulo de destino) na banda
+/// visível do card (`ymin` = a linha de encaixe na boca, `ymax` = o pé da
+/// face): fora da banda não desenha (`None`); o que cruza as linhas copia
+/// só a parte de dentro, com a origem cortada na mesma proporção. É o
+/// "some atrás da carcaça / não vaza na lista de comandos" do card — sem
+/// depender do clip do renderizador (o SDL3.4 do cocoa engole o clip).
+fn blit_band(src: Rect, dst: Rect, ymin: i32, ymax: i32) -> Option<(Rect, Rect)> {
+    if dst.bottom() <= ymin || dst.y() >= ymax {
+        return None;
+    }
+    let (mut src, mut dst) = (src, dst);
+    if dst.y() < ymin {
+        let cut = ymin - dst.y();
+        let src_cut =
+            (src.height() as i32 * cut / dst.height() as i32).min(src.height() as i32 - 1);
+        src = Rect::new(
+            src.x(),
+            src.y() + src_cut,
+            src.width(),
+            (src.height() as i32 - src_cut) as u32,
+        );
+        dst = Rect::new(
+            dst.x(),
+            ymin,
+            dst.width(),
+            (dst.height() as i32 - cut) as u32,
+        );
+    }
+    if dst.bottom() > ymax {
+        let cut = dst.bottom() - ymax;
+        let src_cut =
+            (src.height() as i32 * cut / dst.height() as i32).min(src.height() as i32 - 1);
+        src = Rect::new(
+            src.x(),
+            src.y(),
+            src.width(),
+            (src.height() as i32 - src_cut) as u32,
+        );
+        dst = Rect::new(
+            dst.x(),
+            dst.y(),
+            dst.width(),
+            (dst.height() as i32 - cut) as u32,
+        );
+    }
+    Some((src, dst))
+}
+
 fn draw_image_absolute(
     canvas: &mut WindowCanvas,
     images: &HashMap<u64, ImgTex>,
@@ -4212,6 +4173,38 @@ fn draw_image_absolute(
         None,
         Rect::new(dx, dy, dw.max(1) as u32, dh.max(1) as u32),
     );
+}
+
+#[allow(clippy::too_many_arguments)]
+fn draw_image_absolute_band(
+    canvas: &mut WindowCanvas,
+    images: &HashMap<u64, ImgTex>,
+    id: u64,
+    x: i32,
+    y: i32,
+    bw: u32,
+    bh: u32,
+    ymin: i32,
+    ymax: i32,
+) {
+    let Some(img) = images.get(&id) else {
+        return;
+    };
+    let (iwf, ihf) = (img.w as f32, img.h as f32);
+    let scale = (bw as f32 / iwf).min(bh as f32 / ihf);
+    let dw = (iwf * scale).round() as i32;
+    let dh = (ihf * scale).round() as i32;
+    let dx = x + (bw as i32 - dw) / 2;
+    let dy = y + (bh as i32 - dh) / 2;
+    let Some((src, dst)) = blit_band(
+        Rect::new(0, 0, img.w, img.h),
+        Rect::new(dx, dy, dw.max(1) as u32, dh.max(1) as u32),
+        ymin,
+        ymax,
+    ) else {
+        return;
+    };
+    let _ = canvas.copy(&img.tex, src, dst);
 }
 
 /// Círculo preenchido rasterizado linha a linha (o canvas só tem retângulos).
@@ -4288,15 +4281,12 @@ struct FaceHits {
     eject: Rect,
     reset: Rect,
     cards1: Rect,
-    cards2: Rect,
-    /// As duas entradas de controle (clicar troca os pads).
-    ports: [Rect; 2],
-    /// Os botões ANALOG de cada entrada (clicar alterna o modo).
+    /// A label do card encaixado (o adesivo com o nome e o "Trocar/
+    /// Ejetar") — clicável igual ao bay: também abre a biblioteca (`None`
+    /// com o slot vazio).
+    card_btn: Option<Rect>,
+    /// O botão ANALOG da entrada 1 (clicar alterna o modo).
     analog1: Rect,
-    analog2: Rect,
-    /// Os botões RUMBLE de cada entrada (clicar alterna a vibração).
-    rumble1: Rect,
-    rumble2: Rect,
 }
 
 /// O bloco do console no painel, sem o corpo: fundo limpo, apenas os três
@@ -4313,10 +4303,9 @@ fn draw_slot_furniture(
     led_on: bool,
     reset_pressed: bool,
     lid_open: bool,
-    card_labels: (Option<&str>, Option<&str>),
-    pads: (bool, bool, Option<u8>),
-    analog: (bool, bool),
-    rumble: (bool, bool),
+    card_labels: Option<&str>,
+    card_motion: Option<(f32, bool)>,
+    analog: bool,
     lid: bool,
 ) -> (Rect, FaceHits) {
     let fill = |canvas: &mut WindowCanvas, color: (u8, u8, u8), r: Rect| {
@@ -4324,142 +4313,144 @@ fn draw_slot_furniture(
         let _ = canvas.fill_rect(r);
     };
 
-    // Memory cards: duas PORTAS cinzas (as tampas do console real), cada uma
-    // com o painel do adesivo rebaixado (onde a arte do card escolhido vai
-    // colar — é também a área clicável da biblioteca de cards) e o rótulo
-    // "Memory Card 1/2" moldado em preto baixo-relevo, como o SONY da foto.
-    // Rótulo GRANDE (o 0.75 não dava leitura): escala 1.0, o mesmo corpo
-    // dos rótulos POWER/OPEN. O pé do bloco empilha as portas de card e as
-    // ENTRADAS DE CONTROLE — MESMO TAMANHO (placa contínua na carcaça real).
-    let door_h = 44;
-    let door_w = (block.width() as i32 / 2 - 14).max(1);
-    let port_h = door_h;
-    let ports_y = block.bottom() - port_h;
-    let doors_y = ports_y - door_h - 2;
-    let mc1 = Rect::new(block.x() + 4, doors_y, door_w as u32, door_h as u32);
-    let mc2 = Rect::new(
-        block.right() - 4 - door_w,
-        doors_y,
-        door_w as u32,
-        door_h as u32,
+    // A entrada de controle 1 e o bay do memory card lado a lado (plan
+    // revision: "coloque o controle 1 na esquerda e o memory card na
+    // direita") — e a entrada 2 saiu com o suporte ao segundo controle
+    // (removido "no momento").
+    let gap = 4;
+    // 56 px de altura para os DOIS boxes: os botões redondos de cima
+    // precisam da face.
+    let box_h = 56;
+    let box_w = (block.width() as f32 * 0.46).round() as i32;
+    let grid_top = block.bottom() - (box_h + 4);
+    let analog_rect;
+    let p1 = Rect::new(block.x() + 4, grid_top, box_w as u32, box_h as u32);
+    let mc1 = Rect::new(p1.right() + gap, grid_top, box_w as u32, box_h as u32);
+    // O bay: painel do adesivo rebaixado (onde a arte do card escolhido
+    // vai colar — é também a área clicável da biblioteca de cards) e o
+    // rótulo "MEMORY CARD" moldado em preto baixo-relevo, como o SONY da
+    // foto. O box do controle usa a MESMA altura (placa contínua na
+    // carcaça real) e as plaquinhas ANALOG/RUMBLE.
+    // UMA porta de memory card (plan revision: "remova o slot 2 — o console
+    // só vai ter um slot"), à direita da entrada de controle 1; a entrada de
+
+    // ---------- BOX: o bay do memory card (à DIREITA) ----------
+    fill(canvas, PSX_SHELL_EDGE, mc1);
+    fill(
+        canvas,
+        PSX_SHELL,
+        Rect::new(mc1.x() + 1, mc1.y() + 1, mc1.width() - 2, mc1.height() - 2),
     );
-    for (door, label, card) in [
-        (mc1, "Memory Card 1", card_labels.0),
-        (mc2, "Memory Card 2", card_labels.1),
-    ] {
-        fill(canvas, PSX_SHELL_EDGE, door);
-        fill(
-            canvas,
-            PSX_SHELL,
-            Rect::new(
-                door.x() + 1,
-                door.y() + 1,
-                door.width() - 2,
-                door.height() - 2,
-            ),
-        );
-        // Bisel de plástico: a luz pega a borda de cima, a de baixo fica em
-        // sombra.
-        fill_rect_rgba(
-            canvas,
-            (255, 255, 255, 30),
-            Rect::new(door.x() + 1, door.y() + 1, door.width() - 2, 2),
-        );
-        fill_rect_rgba(
-            canvas,
-            (0, 0, 0, 40),
-            Rect::new(door.x() + 1, door.bottom() - 3, door.width() - 2, 2),
-        );
-        // O painel do adesivo: um platô REBAIXADO bem visível — interior
-        // mais escuro, canto de cima/esquerda em sombra e de baixo/direita
-        // pegando luz (o encaixe onde o adesivo do card cola). Com card
-        // encaixado, o NOME dele impresso no painel — o "adesivo".
-        let panel = Rect::new(door.x() + 4, door.y() + 3, door.width() - 8, 14);
-        fill(canvas, (146, 142, 133), panel);
-        fill(
-            canvas,
-            (108, 104, 96),
-            Rect::new(panel.x(), panel.y(), panel.width(), 1),
-        );
-        fill(
-            canvas,
-            (108, 104, 96),
-            Rect::new(panel.x(), panel.y(), 1, panel.height()),
-        );
-        fill(
-            canvas,
-            (214, 210, 200),
-            Rect::new(panel.x(), panel.bottom() - 1, panel.width(), 1),
-        );
-        fill(
-            canvas,
-            (214, 210, 200),
-            Rect::new(panel.right() - 1, panel.y(), 1, panel.height()),
-        );
-        // O estado do slot no adesivo, UMA LINHA CENTRALIZADA (plan
-        // revision: "deixe apenas uma linha - e alinhe a copy centralizada"):
-        // card encaixado = o NOME dele em PRETO negrito (legibilidade no
-        // adesivo claro; máximo de 16 caracteres); vazio = "inserir memory
-        // card" em VERMELHO negrito (o convite à biblioteca).
-        let scale = 0.7_f32;
+    fill_rect_rgba(
+        canvas,
+        (255, 255, 255, 30),
+        Rect::new(mc1.x() + 1, mc1.y() + 1, mc1.width() - 2, 2),
+    );
+    fill_rect_rgba(
+        canvas,
+        (0, 0, 0, 40),
+        Rect::new(mc1.x() + 1, mc1.bottom() - 3, mc1.width() - 2, 2),
+    );
+    let seated = card_labels.is_some();
+    // A copy do topo do tray, CENTRALIZADA e em CAIXA ALTA (o padrão dos
+    // rótulos do painel) — e na escala que couber no bay: o "Memory Card"
+    // fixo estourava em janela apertada e a caixa do controle (desenhada
+    // depois) pintava por cima, deixando o rótulo cortado (plan revision:
+    // "melhore a copy que ficou cortada ali no topo do slot").
+    {
+        let copy = "MEMORY CARD";
+        let full_w = copy.chars().count() as i32 * GLYPH_W as i32;
+        let scale = ((mc1.width() as i32 - 8) as f32 / full_w as f32).clamp(0.55, 1.0);
         let dw = (GLYPH_W as f32 * scale).round() as i32;
-        let shown = match card {
-            Some(name) => Cow::Owned(name.chars().take(16).collect()),
-            None => Cow::Borrowed("inserir memory card"),
-        };
-        let color = if card.is_some() {
-            (24, 24, 22)
-        } else {
-            (215, 70, 60)
-        };
+        let tw = copy.chars().count() as i32 * dw;
         draw_text_bold(
             canvas,
             font,
-            panel.x() + (panel.width() as i32 - shown.chars().count() as i32 * dw).max(0) / 2,
-            panel.y() + 1,
-            TextStyle::new(scale, color),
-            &shown,
-            usize::MAX,
-        );
-        // O rótulo em preto baixo-relevo, NA ESCALA CHEIA (1.0) — alinhado
-        // no TOPO da porta, logo abaixo do painel do adesivo (não colado no
-        // pé: a copy sobe e o espaço morto some).
-        let lw = label.chars().count() as i32 * GLYPH_W as i32;
-        let lx = door.x() + door.width() as i32 / 2 - lw / 2;
-        let ly = door.y() + 18;
-        draw_text_bold(
-            canvas,
-            font,
-            lx,
-            ly + 1,
-            TextStyle::new(1.0, (222, 218, 208)),
-            label,
-            usize::MAX,
-        );
-        draw_text_bold(
-            canvas,
-            font,
-            lx,
-            ly,
-            TextStyle::new(1.0, (26, 26, 24)),
-            label,
+            mc1.x() + (mc1.width() as i32 - tw) / 2,
+            mc1.y() + 3,
+            TextStyle::new(scale, (26, 26, 24)),
+            copy,
             usize::MAX,
         );
     }
-
-    // As duas entradas de controle: MESMA PLACA das portas de memory card
-    // (o plástico é contínuo na carcaça real), com a abertura escura e os
-    // dois grupos de 4 pinos do conector de 8 vias + o parafuso central —
-    // a foto do console real. Clicar em qualquer uma troca os controles.
-    let mut port_rects = [Rect::new(0, 0, 0, 0), Rect::new(0, 0, 0, 0)];
-    let mut analog_rects = [Rect::new(0, 0, 0, 0), Rect::new(0, 0, 0, 0)];
-    let mut rumble_rects = [Rect::new(0, 0, 0, 0), Rect::new(0, 0, 0, 0)];
-    for (pi, (_, pxx)) in [(0, block.x() + 4), (1, block.right() - 4 - door_w)]
-        .iter()
-        .enumerate()
+    // O slot: a BOCA por onde o card entra — baixa (18 px), funda (a sombra
+    // interna em degradê dá o efeito de o card estar DENTRO do console, não
+    // de um buraco vazado). plan revision: "a abertura nao deveria ser
+    // transparente, reduza a altura e faça um sombreamento".
+    let recess = Rect::new(mc1.x() + 6, mc1.y() + 27, mc1.width() - 12, 14);
+    fill(canvas, (36, 34, 31), recess);
+    // degradê de profundidade: escuro no topo (o interior do console),
+    // clareando pra baixo (a borda da boca).
+    fill_rect_rgba(
+        canvas,
+        (0, 0, 0, 150),
+        Rect::new(recess.x(), recess.y(), recess.width(), 5),
+    );
+    fill_rect_rgba(
+        canvas,
+        (0, 0, 0, 70),
+        Rect::new(recess.x(), recess.y() + 5, recess.width(), 5),
+    );
+    fill(
+        canvas,
+        (12, 11, 10),
+        Rect::new(recess.x(), recess.y(), recess.width(), 1),
+    );
+    fill(
+        canvas,
+        (120, 116, 107),
+        Rect::new(recess.x(), recess.bottom() - 1, recess.width(), 1),
+    );
+    if !seated {
+        // VAZIO: o convite é um BOTÃO de verdade, ocupando o bay abaixo do
+        // título (plan revision: "o aviso inserir card tá muito pequeno,
+        // ruim de ver e feio, faça tipo um botão"). O clique no bay inteiro
+        // já abre a biblioteca — o botão é o alvo visível desse gesto; o
+        // plástico escuro com borda clara lê como peça do console. O rótulo
+        // desce de escala até caber (o draw_button cortava em "Inserir ...").
+        let btn = Rect::new(
+            mc1.x() + 6,
+            mc1.y() + 20,
+            mc1.width() - 12,
+            mc1.height() - 22,
+        );
+        fill(canvas, PANEL_TEXT, btn);
+        fill(
+            canvas,
+            PANEL_BTN_BG,
+            Rect::new(btn.x() + 1, btn.y() + 1, btn.width() - 2, btn.height() - 2),
+        );
+        fill_rect_rgba(
+            canvas,
+            (255, 255, 255, 25),
+            Rect::new(btn.x() + 1, btn.y() + 1, btn.width() - 2, 1),
+        );
+        fill_rect_rgba(
+            canvas,
+            (0, 0, 0, 50),
+            Rect::new(btn.x(), btn.bottom(), btn.width(), 1),
+        );
+        let copy = "Inserir card";
+        let full_w = copy.chars().count() as i32 * GLYPH_W as i32;
+        let scale = ((btn.width() as i32 - 12) as f32 / full_w as f32).clamp(0.6, 1.0);
+        let dw = (GLYPH_W as f32 * scale).round() as i32;
+        let dh = (GLYPH_H as f32 * scale).round() as i32;
+        let tw = copy.chars().count() as i32 * dw;
+        draw_text_bold(
+            canvas,
+            font,
+            btn.x() + (btn.width() as i32 - tw) / 2,
+            btn.y() + (btn.height() as i32 - dh) / 2,
+            TextStyle::new(scale, PANEL_TEXT),
+            copy,
+            usize::MAX,
+        );
+    }
+    // ---------- BOX: a entrada de controle 1 (à ESQUERDA) ----------
+    // O pad 1 vive na entrada 1 de fábrica — o teclado/gamepad conecta
+    // nela; o drag de troca de entrada saiu junto com o controle 2.
     {
-        let plate = Rect::new(*pxx, ports_y, door_w as u32, port_h as u32);
-        port_rects[pi] = plate;
+        let plate = p1;
         fill(canvas, PSX_SHELL_EDGE, plate);
         fill(
             canvas,
@@ -4471,7 +4462,6 @@ fn draw_slot_furniture(
                 plate.height() - 2,
             ),
         );
-        // Bisel de plástico como nas portas de card.
         fill_rect_rgba(
             canvas,
             (255, 255, 255, 30),
@@ -4482,183 +4472,80 @@ fn draw_slot_furniture(
             (0, 0, 0, 40),
             Rect::new(plate.x() + 1, plate.bottom() - 3, plate.width() - 2, 2),
         );
-        // A abertura escura do conector (recesso fundo).
-        let hole = Rect::new(
-            plate.x() + 7,
-            plate.y() + 4,
-            plate.width() - 14,
-            (port_h - 8) as u32,
-        );
-        fill(canvas, (52, 50, 46), hole);
+
+        let hole_h = box_h - 8;
+        let hole_y = plate.y() + (box_h - hole_h) / 2;
+        let hole = Rect::new(plate.x() + 7, hole_y, plate.width() - 14, hole_h as u32);
+        fill(canvas, (30, 28, 26), hole);
         fill(
             canvas,
-            (30, 28, 26),
+            (12, 11, 10),
             Rect::new(hole.x(), hole.y(), hole.width(), 2),
         );
-        fill(
+
+        // Conectado: status em verde + os botões ANALOG e RUMBLE.
+        let l1 = "CONTROLE 1 CONECTADO".to_string();
+        let l1w = l1.chars().count() as i32 * GLYPH_W as i32;
+        let scale = ((hole.width() as i32 - 12) as f32 / l1w as f32).clamp(0.75, 1.0);
+        let sh = (GLYPH_H as f32 * scale).round() as i32;
+        let l1y = hole.y() + 3;
+        draw_text_bold(
             canvas,
-            (120, 116, 107),
-            Rect::new(hole.x(), hole.bottom() - 1, hole.width(), 1),
+            font,
+            hole.x() + 6,
+            l1y,
+            TextStyle::new(scale, (120, 220, 140)),
+            &l1,
+            usize::MAX,
         );
-        // O estado da entrada (plan revision): TUDO dentro do furo escuro —
-        // linha 1: "CONTROLE N CONECTADO" na fonte cheia (bold, verde;
-        // escala desce só se a abertura for estreita); linha 2: o botão
-        // ANALOG quadrado com o LED vermelho ao lado. Vazio: só os pinos.
-        let connected = if pi == 0 {
-            !pads.0 || pads.1
-        } else {
-            pads.0 || pads.1
-        };
-        // Painel ESTREITO (Steam Deck, furo < 150 px): o layout adaptativo
-        // (copy e plaquinhas reduzidas que cabem). Painel LARGO (full HD):
-        // o desenho em escala cheia como estava antes do layout adaptativo.
-        let narrow = hole.width() < 150;
-        if connected {
-            let which = pi + 1;
-            let l1 = format!("CONTROLE {which} CONECTADO");
-            let full = l1.chars().count() as i32 * GLYPH_W as i32;
-            let scale = if narrow {
-                ((hole.width() as i32 - 12) as f32 / full as f32).clamp(0.55, 1.0)
-            } else {
-                ((hole.width() as i32 - 12) as f32 / full as f32).min(1.0)
-            };
-            let sh = if narrow {
-                ((GLYPH_H as f32 * scale).round() as i32).max(11)
-            } else {
-                GLYPH_H as i32
-            };
-            let lh = if narrow {
-                ((GLYPH_H as f32 * scale).round() as i32).max(11)
-            } else {
-                GLYPH_H as i32
-            };
-            let l1y = hole.y() + if narrow { 3 } else { 4 };
+        let analog_on = analog;
+        let copy_h = (GLYPH_H as f32 * 0.85).round() as i32;
+        let mut tag = |x: i32, y: i32, w: i32, h: i32, copy: &str, on: bool| {
+            fill(canvas, PSX_SHELL_EDGE, Rect::new(x, y, w as u32, h as u32));
+            fill(
+                canvas,
+                PSX_SHELL,
+                Rect::new(x + 1, y + 1, w as u32 - 2, h as u32 - 2),
+            );
+            let copy_w = copy.chars().count() as i32 * (GLYPH_W as f32 * 0.85).round() as i32;
             draw_text_bold(
                 canvas,
                 font,
-                hole.x() + 6,
-                l1y,
-                TextStyle::new(scale, (120, 220, 140)),
-                &l1,
+                x + (w - copy_w - 12) / 2,
+                y + (h - copy_h) / 2,
+                TextStyle::new(0.85, (40, 38, 35)),
+                copy,
                 usize::MAX,
             );
-            // Linha 2+: os botões ANALOG e RUMBLE. No painel LARGO ficam
-            // lado a lado (metade do furo cada); no ESTREITO empilham na
-            // vertical, cada um com a largura inteira do furo — alvo de
-            // toque maior e copy legível. Copy à esquerda, LED vermelho na
-            // PONTA DIREITA (aceso = ligado). Clicar alterna.
-            let analog_on = if pi == 0 { analog.0 } else { analog.1 };
-            let rumble_on = if pi == 0 { rumble.0 } else { rumble.1 };
-            let copy_scale = if narrow { 0.7_f32 } else { 1.0 };
-            let copy_h = (GLYPH_H as f32 * copy_scale).round() as i32;
-            let mut tag = |x: i32, y: i32, w: i32, h: i32, copy: &str, on: bool| {
-                fill(canvas, PSX_SHELL_EDGE, Rect::new(x, y, w as u32, h as u32));
-                fill(
-                    canvas,
-                    PSX_SHELL,
-                    Rect::new(x + 1, y + 1, w as u32 - 2, h as u32 - 2),
-                );
-                let copy_w =
-                    copy.chars().count() as i32 * (GLYPH_W as f32 * copy_scale).round() as i32;
-                draw_text_bold(
-                    canvas,
-                    font,
-                    x + (w - copy_w - 14) / 2,
-                    y + (h - copy_h) / 2,
-                    TextStyle::new(copy_scale, (40, 38, 35)),
-                    copy,
-                    usize::MAX,
-                );
-                // O LED vermelho na PONTA DIREITA do botão.
-                fill_circle(
-                    canvas,
-                    if on { (235, 50, 50) } else { (86, 28, 28) },
-                    x + w - 8,
-                    y + h / 2,
-                    3,
-                );
-            };
-            if narrow {
-                // Empilhados: cada plaquinha ocupa a largura do furo.
-                let fw = hole.width() as i32 - 12;
-                let th = (hole.height() as i32 - 6 - sh - 2 - 2) / 2;
-                let a_y = l1y + sh + 2;
-                let r_y = a_y + th + 2;
-                tag(hole.x() + 6, a_y, fw, th, "ANALOG", analog_on);
-                tag(hole.x() + 6, r_y, fw, th, "RUMBLE", rumble_on);
-                analog_rects[pi] = Rect::new(hole.x() + 6, a_y, fw as u32, th as u32);
-                rumble_rects[pi] = Rect::new(hole.x() + 6, r_y, fw as u32, th as u32);
-            } else {
-                let l2y = l1y + lh + 2;
-                let gap = 6;
-                let half = (hole.width() as i32 - 12 - gap) / 2;
-                tag(hole.x() + 6, l2y, half, sh, "ANALOG", analog_on);
-                let r_x = hole.x() + 6 + half + gap;
-                tag(r_x, l2y, half, sh, "RUMBLE", rumble_on);
-                analog_rects[pi] = Rect::new(hole.x() + 6, l2y, half as u32, sh as u32);
-                rumble_rects[pi] = Rect::new(r_x, l2y, half as u32, sh as u32);
-            }
-        }
-        if !connected {
-            // A entrada vazia (a foto do console real): 3 quadradinhos, cada
-            // um com 3 pinos metálicos dentro (9 pinos no total), centrados
-            // na abertura — sem texto e sem botão.
-            // Preenche a LARGURA da abertura: 3 retângulos com vão de 8 px
-            // entre eles e 6 px das bordas do furo. A ALTURA é a de antes
-            // (12 px, a forma original da foto) — mexa só na largura.
-            let blk_w = (hole.width() as i32 - 12 - 2 * 8) / 3;
-            let blk_h = 14i32;
-            let gap = 8i32;
-            let b0 = hole.x() + 6;
-            let by = hole.y() + 4;
-            for g in 0..3i32 {
-                let bx = b0 + g * (blk_w + gap);
-                // o retângulo: borda clara, interior escuro
-                fill(
-                    canvas,
-                    (168, 164, 154),
-                    Rect::new(bx, by, blk_w as u32, blk_h as u32),
-                );
-                fill(
-                    canvas,
-                    (40, 38, 35),
-                    Rect::new(bx + 1, by + 1, blk_w as u32 - 2, blk_h as u32 - 2),
-                );
-                // os 3 conectores redondos VAZADOS, distribuídos com folga
-                let dot_r = 2i32;
-                let span = blk_w - 2 * dot_r - 6; // largura útil entre as bordas
-                let step = span / 2; // 3 bolinhas: 0, step, 2*step
-                for i in 0..3i32 {
-                    let dcx = bx + dot_r + 3 + i * step;
-                    let dcy = by + blk_h / 2;
-                    // vazado: contorno claro com o fundo escuro dentro
-                    fill_circle(canvas, (168, 164, 154), dcx, dcy, dot_r);
-                    fill_circle(canvas, (40, 38, 35), dcx, dcy, dot_r - 1);
-                }
-            }
-        }
+            fill_circle(
+                canvas,
+                if on { (110, 220, 130) } else { (235, 50, 50) },
+                x + w - 9,
+                y + h / 2,
+                4,
+            );
+        };
+        // SÓ o ANALOG (plan revision: "deixar apenas o botão de analog") —
+        // ele é o botão do DualShock: liga o analógico E a vibração. O LED
+        // fala o modo: vermelho = desligado (digital), verde = ligado.
+        let l2y = l1y + sh + 2;
+        let w_t = hole.width() as i32 - 12;
+        tag(hole.x() + 6, l2y, w_t, sh, "ANALOG", analog_on);
+        analog_rect = Rect::new(hole.x() + 6, l2y, w_t as u32, sh as u32);
     }
 
     // Os três botões redondos, centrados na altura útil acima das portas.
     let face_top = block.y() + 6;
-    let face_bottom = doors_y - 2;
+    let face_bottom = mc1.y() - 2;
     let face_h = (face_bottom - face_top).max(1);
-    // O raio acompanha a face, mas com teto: a face cresceu quando as
-    // portas desceram, e os botões não podem crescer junto — além de mudar
-    // o desenho deles, cada px de raio rouba largura do disco.
-    let btn_r = ((face_h as f32 * 0.26).round() as i32).min(if door_w < 150 { 30 } else { 38 });
+    let btn_r =
+        ((face_h as f32 * 0.30).round() as i32).min(if block.width() < 640 { 34 } else { 46 });
     let col_l = block.x() + 10 + btn_r;
     let col_r = block.right() - 10 - btn_r;
 
-    // O Reset fica na METADE do espaço entre o topo da face e o Power; o
-    // Power e o OPEN ficam quase na parte de baixo do disco — o centro
-    // deles alinha a ~75% da face, na altura da base do disco assentado.
     let reset_r = (btn_r as f32 * 0.70).round() as i32;
     let led_h = 13;
     let power_cy = face_top + face_h * 7 / 10;
-    // O Reset fica na METADE do espaço entre o topo da face e o Power — e
-    // a SEPARAÇÃO entre ele e o Power cresce (5 -> 14 px de folga entre
-    // as bordas dos dois botões).
     let reset_cy = face_top
         + 6
         + ((power_cy - btn_r) - (face_top + 6) - 14 - reset_r * 2).max(0) / 2
@@ -4671,8 +4558,6 @@ fn draw_slot_furniture(
         (reset_r * 2) as u32,
         (reset_r * 2) as u32,
     );
-    // O rótulo "RESET" gravado no botão, na escala CHEIA (1.0) e em bold —
-    // o mesmo corpo dos rótulos POWER/OPEN (o 0.7 fino era ilegível).
     let label = "RESET";
     let lw = label.chars().count() as i32 * GLYPH_W as i32;
     draw_text_bold(
@@ -4685,12 +4570,7 @@ fn draw_slot_furniture(
         usize::MAX,
     );
 
-    // Power: redondo, com o símbolo I/O (anel + traço vertical) e o LED
-    // verde no topo da borda, como na foto.
     draw_round_plastic(canvas, col_l, power_cy, btn_r, false);
-    // O LED verde do PS1 original (foto de referência): uma fenda VERTICAL
-    // FORA do botão, na carcaça logo abaixo dele; e o rótulo "POWER"
-    // gravado dentro do botão em verde escuro.
     let led_w = 4;
     fill(
         canvas,
@@ -4720,10 +4600,6 @@ fn draw_slot_furniture(
         (btn_r * 2) as u32,
     );
 
-    // Open/Eject: redondo do mesmo tamanho, o rótulo gravado dentro em azul
-    // escuro — o mesmo tratamento do rótulo "POWER" do outro lado. Com a
-    // tampa aberta o botão vira CLOSE (fechar faz o leitor voltar a ler,
-    // como no console original).
     draw_round_plastic(canvas, col_r, power_cy, btn_r, false);
     let label = if lid_open { "CLOSE" } else { "OPEN" };
     let lw = label.chars().count() as i32 * GLYPH_W as i32;
@@ -4743,16 +4619,10 @@ fn draw_slot_furniture(
         (btn_r * 2) as u32,
     );
 
-    // O vão central: é onde o disco se assenta e gira. O tamanho nasce da
-    // GEOMETRIA, não de fator fixo, com três limites duros: em cima, a
-    // folga da logo (o aro pode espiar até 7 px acima do bloco); embaixo,
-    // as portas dos slots — o disco NÃO pode cobri-las, a base do aro fica
-    // rente ao topo delas; e os três botões, sem encostar. O eixo do disco
-    // é o meio desse caminho — o que sobra vira diâmetro.
+    // O vão central do disco — os limites seguem o grid das caixas.
     let cx = block.x() + block.width() as i32 / 2;
     let disc_top_lim = block.y() - 7;
-    // 5 px de ar entre a borda do disco e as portas — respiro visível.
-    let disc_bot_lim = doors_y - 5;
+    let disc_bot_lim = mc1.y() - 5;
     let cy = (disc_top_lim + disc_bot_lim) / 2;
     let clearance = |bx: i32, by: i32, br: i32| -> f32 {
         let dx = (cx - bx) as f32;
@@ -4763,8 +4633,6 @@ fn draw_slot_furniture(
         .min(clearance(col_l, power_cy, btn_r))
         .min(clearance(col_r, power_cy, btn_r))
         - 4.0;
-    // O disco (arte a 1.08×1.06 = 1.145× o lado do vão) é agora o círculo
-    // mais externo — cobre o aro e a borda da foto do leitor por dentro.
     let side_v = ((disc_bot_lim - disc_top_lim) as f32 / 1.145) as i32;
     let side_w = (reach * 2.0 / 1.13) as i32;
     let side = side_v.min(side_w).max(24);
@@ -4774,14 +4642,10 @@ fn draw_slot_furniture(
         side as u32,
         side as u32,
     );
-    // O placeholder: o leitor real (foto recortada) ocupa exatamente o vão
-    // onde o disco se assenta e gira — o disco entra POR CIMA dele.
     if let Some(reader) = images.get(&CD_READER_IMG) {
         let side_reader = (side as f32 * 1.06).round() as i32;
         let rcx = disc.x() + disc.width() as i32 / 2;
         let rcy = disc.y() + disc.height() as i32 / 2;
-        // Anel cinza (a cor dos botões) atrás da foto: disfarça o recorte
-        // circular e assenta o leitor na carcaça, como um aro real.
         let ring_r = (side_reader as f32 / 2.0 + side as f32 * 0.035) as i32;
         fill_circle(canvas, PSX_SHELL_EDGE, rcx, rcy, ring_r);
         fill_circle(canvas, PSX_SHELL, rcx, rcy, ring_r - 2);
@@ -4793,9 +4657,6 @@ fn draw_slot_furniture(
         );
         disc = rr;
         let _ = canvas.copy(&reader.tex, None, rr);
-        // Na tela inicial o drive aparece COM a tampa de acrílico (o disco
-        // só entra por baixo dela em jogo — lá o vidro é desenhado pelo
-        // draw_panel_slot).
         if lid {
             if let Some(glass) = images.get(&LID_GLASS_IMG) {
                 let _ = canvas.copy(&glass.tex, None, rr);
@@ -4803,17 +4664,270 @@ fn draw_slot_furniture(
         }
     }
 
+    // O CARD ENTRANDO (plan revision: "deve entrar por cima na parte de
+    // baixo e na parte de cima entrar por baixo — não pode vazar pra
+    // fora, como se encaixasse mesmo"): o card SOBE de baixo da face,
+    // desliza POR CIMA do lábio de baixo da boca, e o que alcança a borda
+    // de CIMA da boca passa POR BAIXO da carcaça (some atrás dela, como
+    // cartucho entrando). A LABEL fica de fora, pendurada abaixo do bay —
+    // e é clicável (abre a biblioteca, onde vivem trocar e ejetar). Este
+    // é o último bloco da função: o card corre por cima de tudo que já
+    // foi desenhado, exceto a sombra da boca, que volta por cima dele.
+    let mut card_label_hit: Option<Rect> = None;
+    if let Some(name) = card_labels {
+        let (t, _) = card_motion.unwrap_or((1.0, false));
+        let t = t.clamp(0.0, 1.0);
+        let card_w = ((mc1.width() as i32 - 4) as f32 * 0.72).round() as i32;
+        let card_x = mc1.x() + (mc1.width() as i32 - card_w) / 2;
+        let body_h = 86i32;
+        // A label pendurada ABAIXO do pé da face (adesivo com o nome +
+        // "Trocar/Ejetar" impresso no plástico): o vão aberto até a lista
+        // de comandos é dela — encaixado, só a label fica de fora, com
+        // altura de verdade (colada no pé da face, ela colapsava em 1 px
+        // e o nome saía cortado numa fileira de pontos). 56 px: adesivo
+        // folgado para o nome e o gesto impresso embaixo.
+        let label_y = mc1.bottom() + 2;
+        let label_h = 56i32;
+        let lip_y = recess.y();
+        let bottom_lim = label_y + label_h + 2;
+        // encaixado (t=1): o corpo desce só até deixar 10 px de língua fora
+        // da boca — a copy "MEMORY CARD" e a logo ficam TODAS acima da
+        // linha da carcaça (o card entra fundo: plan revision "entre um
+        // pouco mais... deve aparecer apenas a label inteira e o botao de
+        // trocar ejetar"). início (t=0): o card nasce DE BAIXO do console —
+        // o corpo INTEIRO abaixo da banda visível, escondido — e SOBE,
+        // igual ao cartucho do SNES entrando por baixo.
+        let seated_y = mc1.bottom() - body_h - 19;
+        let travel = (bottom_lim - seated_y).max(1);
+        let card_y = seated_y + ((1.0 - t) * travel as f32).round() as i32;
+        let total_h = body_h + label_h;
+        let round_rows = 8i32;
+        let edge = (168, 164, 154);
+        let face_c = (205, 201, 192);
+        // O hit acompanha o card (a label viaja com o corpo na animação).
+        card_label_hit = Some(Rect::new(
+            card_x,
+            card_y + body_h,
+            card_w as u32,
+            label_h as u32,
+        ));
+
+        let mut draw_card = |canvas: &mut WindowCanvas| {
+            for row in 0..total_h {
+                let ry = card_y + row;
+                if ry < lip_y || ry >= bottom_lim {
+                    // acima da linha de encaixe: já "entrou" (por baixo da
+                    // carcaça); abaixo do pé da face: ainda não "saiu" —
+                    // nenhuma das duas faixas desenha.
+                    continue;
+                }
+                let inset = if row >= total_h - round_rows {
+                    (round_rows - (total_h - 1 - row)).min(round_rows)
+                } else {
+                    0
+                };
+                let w = card_w - inset * 2;
+                fill(canvas, edge, Rect::new(card_x + inset, ry, w as u32, 1));
+                if w > 2 {
+                    fill(
+                        canvas,
+                        if row < body_h {
+                            face_c
+                        } else {
+                            (200, 196, 188)
+                        },
+                        Rect::new(card_x + inset + 1, ry, (w - 2) as u32, 1),
+                    );
+                }
+            }
+            if card_y + 2 >= lip_y && card_y + 4 <= bottom_lim {
+                fill_rect_rgba(
+                    canvas,
+                    (255, 255, 255, 60),
+                    Rect::new(card_x + 2, card_y + 2, card_w as u32 - 4, 2),
+                );
+            }
+            // as ranhuras do MC real nas laterais do corpo
+            for gy in (card_y + 6..card_y + body_h - 6).step_by(3) {
+                if gy < lip_y || gy + 2 > bottom_lim {
+                    continue;
+                }
+                for (sx, dir) in [(card_x + 3, 1i32), (card_x + card_w - 10, -1i32)] {
+                    fill_rect_rgba(canvas, (0, 0, 0, 55), Rect::new(sx + dir, gy, 1, 2));
+                    fill_rect_rgba(
+                        canvas,
+                        (255, 255, 255, 45),
+                        Rect::new(sx + dir + 1, gy, 1, 2),
+                    );
+                }
+            }
+            // a logo PolyStn em PRETO no corpo (cortada nas duas linhas)
+            draw_image_absolute_band(
+                canvas,
+                images,
+                MC_LOGO_IMG,
+                card_x + (card_w - 56) / 2,
+                card_y + 12,
+                56,
+                32,
+                lip_y,
+                bottom_lim,
+            );
+            // "MEMORY CARD" — a identificação do corpo: 18 px abaixo da logo
+            // (colava nela) e ALTO o bastante para sumir inteira sob a
+            // carcaça com o card encaixado (a boca corta na linha 76 do
+            // corpo; a copy termina na 75) — só aparece na animação.
+            let mc_text = "MEMORY CARD";
+            let mc_w = mc_text.chars().count() as i32 * (GLYPH_W as f32 * 0.9).round() as i32;
+            draw_text_bold_band(
+                canvas,
+                font,
+                card_x + (card_w - mc_w) / 2,
+                card_y + 62,
+                TextStyle::new(0.9, (40, 38, 35)),
+                mc_text,
+                usize::MAX,
+                lip_y,
+                bottom_lim,
+            );
+            // a faixa que separa o corpo da label
+            let band_y = card_y + body_h - 2;
+            if band_y >= lip_y && band_y + 3 <= bottom_lim {
+                fill(
+                    canvas,
+                    (150, 146, 137),
+                    Rect::new(card_x + 1, band_y, card_w as u32 - 2, 3),
+                );
+            }
+            // O ADESIVO caseiro com o nome (papel creme tortinho)
+            let shown: Cow<str> = Cow::Owned(name.chars().take(16).collect());
+            let text_w = shown.chars().count() as i32 * GLYPH_W as i32;
+            let name_scale = ((card_w - 30) as f32 / text_w as f32).clamp(0.8, 1.0);
+            let tw = shown.chars().count() as i32 * (GLYPH_W as f32 * name_scale).round() as i32;
+            let th = (GLYPH_H as f32 * name_scale).round() as i32;
+            let stick_w = (card_w - 16).max(1);
+            let stick_h = (label_h - 26).max(1);
+            let stick_x = card_x + 9;
+            let stick_y = card_y + body_h + 4;
+            // cada pedaço do adesivo cortado na banda visível (a label
+            // desce com o card — não pode invadir a lista de comandos)
+            let fill_banded = |canvas: &mut WindowCanvas, color: (u8, u8, u8, u8), r: Rect| {
+                let y0 = r.y().max(lip_y);
+                let y1 = (r.y() + r.height() as i32).min(bottom_lim);
+                if y1 > y0 {
+                    fill_rect_rgba(
+                        canvas,
+                        color,
+                        Rect::new(r.x(), y0, r.width(), (y1 - y0) as u32),
+                    );
+                }
+            };
+            fill_banded(
+                canvas,
+                (0, 0, 0, 60),
+                Rect::new(stick_x + 2, stick_y + 2, stick_w as u32 - 2, stick_h as u32),
+            );
+            fill_banded(
+                canvas,
+                (232, 226, 204, 255),
+                Rect::new(stick_x, stick_y, stick_w as u32, stick_h as u32),
+            );
+            fill_banded(
+                canvas,
+                (205, 201, 192, 255),
+                Rect::new(stick_x, stick_y, 3, 3),
+            );
+            fill_banded(
+                canvas,
+                (205, 201, 192, 255),
+                Rect::new(stick_x + stick_w - 3, stick_y + stick_h - 3, 3, 3),
+            );
+            fill_banded(
+                canvas,
+                (120, 112, 90, 160),
+                Rect::new(stick_x, stick_y, stick_w as u32, 1),
+            );
+            fill_banded(
+                canvas,
+                (120, 112, 90, 120),
+                Rect::new(stick_x, stick_y + stick_h - 1, stick_w as u32, 1),
+            );
+            draw_text_bold_band(
+                canvas,
+                font,
+                stick_x + (stick_w - tw).max(0) / 2,
+                stick_y + (stick_h - th) / 2,
+                TextStyle::new(name_scale, (52, 46, 34)),
+                &shown,
+                usize::MAX,
+                lip_y,
+                bottom_lim,
+            );
+            // "Trocar/Ejetar" IMPRESSO no plástico do card (na faixa entre
+            // o adesivo e a base) — em relevo escuro, sem caixa preta.
+            let act = "Trocar/Ejetar";
+            let aw = act.chars().count() as i32 * (GLYPH_W as f32 * 0.75).round() as i32;
+            let act_y = card_y + total_h - 20;
+            draw_text_absolute_band(
+                canvas,
+                font,
+                card_x + (card_w - aw) / 2,
+                act_y + 1,
+                TextStyle::new(0.75, (222, 218, 208)),
+                act,
+                usize::MAX,
+                lip_y,
+                bottom_lim,
+            );
+            draw_text_absolute_band(
+                canvas,
+                font,
+                card_x + (card_w - aw) / 2,
+                act_y,
+                TextStyle::new(0.75, (96, 92, 84)),
+                act,
+                usize::MAX,
+                lip_y,
+                bottom_lim,
+            );
+        };
+
+        // O card desenha POR CIMA de tudo que já está na cena (o bloco é o
+        // último da função) — e o cull no lip_y faz a parte que "entrou"
+        // ficar por baixo da carcaça. Falta só a sombra da boca de volta
+        // POR CIMA do trecho dentro da abertura — o card está DENTRO do
+        // slot, não colado na frente. Os retângulos são a própria boca, já
+        // limitados; sem clip de renderizador (o SDL3.4 do cocoa engole).
+        draw_card(canvas);
+        fill(
+            canvas,
+            (12, 11, 10),
+            Rect::new(recess.x(), recess.y(), recess.width(), 1),
+        );
+        fill_rect_rgba(
+            canvas,
+            (0, 0, 0, 150),
+            Rect::new(recess.x(), recess.y(), recess.width(), 5),
+        );
+        fill_rect_rgba(
+            canvas,
+            (0, 0, 0, 70),
+            Rect::new(recess.x(), recess.y() + 5, recess.width(), 5),
+        );
+    }
+
     let hits = FaceHits {
         power: power_hit,
         eject: eject_hit,
         reset: reset_hit,
+        // O hit do tray é o bay INTEIRO, vazio ou encaixado — e também a
+        // label pendurada ("Trocar/Ejetar"): um gesto só, abrir a
+        // biblioteca (plan revision: "o botão de trocar e ejetar não abre
+        // nada" — com card encaixado nenhum caminho de UI voltava à
+        // biblioteca; ejetar é ação do card escolhido, "Ejetar do slot").
         cards1: mc1,
-        cards2: mc2,
-        ports: port_rects,
-        analog1: analog_rects[0],
-        analog2: analog_rects[1],
-        rumble1: rumble_rects[0],
-        rumble2: rumble_rects[1],
+        card_btn: card_label_hit,
+        analog1: analog_rect,
     };
     (disc, hits)
 }
@@ -4836,10 +4950,9 @@ fn draw_panel_slot(
     reset_pressed: bool,
     spin_deg: f32,
     lid_open: bool,
-    card_labels: (Option<&str>, Option<&str>),
-    pads: (bool, bool, Option<u8>),
-    analog: (bool, bool),
-    rumble: (bool, bool),
+    card_labels: Option<&str>,
+    card_motion: Option<(f32, bool)>,
+    analog: bool,
 ) -> FaceHits {
     let (disc, hits) = draw_slot_furniture(
         canvas,
@@ -4850,9 +4963,8 @@ fn draw_panel_slot(
         reset_pressed,
         lid_open,
         card_labels,
-        pads,
+        card_motion,
         analog,
-        rumble,
         false,
     );
 
@@ -4958,59 +5070,12 @@ fn draw_panel_slot(
     hits
 }
 
-/// The idle screen's console block: os DOIS botões em faixas no topo —
-/// "Estante de games" e o boot da BIOS — e o console abaixo, igual ao da
-/// tela de jogo. Returns both button rects as clickable areas
-/// (`PanelButton::Insert`, `PanelButton::BootBios`).
+/// The idle screen's console block: o botão "Estante de games" no topo e o
+/// console abaixo, igual ao da tela de jogo. Returns the button rect as the
+/// clickable area (`PanelButton::Insert`). (O botão "Ligar sem disco" saiu:
+/// o boot ejetado no Rearmed travava o app — main parada no recv do primeiro
+/// quadro — e a opção virou armadilha.)
 #[allow(clippy::too_many_arguments)]
-fn draw_idle_slot(
-    canvas: &mut WindowCanvas,
-    images: &HashMap<u64, ImgTex>,
-    font: &mut Texture,
-    block: Rect,
-    label: &str,
-    bios_label: &str,
-    reset_pressed: bool,
-) -> (Rect, Rect) {
-    // As duas faixas de botão no topo — a estante em cima, o boot da BIOS
-    // logo abaixo — e o console ocupa o resto, com a MESMA altura da face
-    // da tela de jogo. Mesma altura dos outros botões do painel
-    // (Configurações e as linhas de comando: GLYPH_H + 12).
-    let btn_h = GLYPH_H + 12;
-    let strip = Rect::new(block.x(), block.y(), block.width(), btn_h);
-    let insert = draw_button(canvas, font, strip, label, true);
-    let bios_strip = Rect::new(
-        block.x(),
-        block.y() + btn_h as i32 + 8,
-        block.width(),
-        btn_h,
-    );
-    let bios = draw_button(canvas, font, bios_strip, bios_label, true);
-    let console = Rect::new(
-        block.x(),
-        block.y() + btn_h as i32 + 8 + btn_h as i32 + 10,
-        block.width(),
-        (block.height() as i32 - (btn_h as i32 * 2 + 18)) as u32,
-    );
-    // A tela idle nunca tem tampa aberta nem card encaixado (o leitor só
-    // interage em jogo).
-    let _ = draw_slot_furniture(
-        canvas,
-        font,
-        images,
-        console,
-        false,
-        reset_pressed,
-        false,
-        (None, None),
-        (false, false, None),
-        (true, true),
-        (true, true),
-        true,
-    );
-    (insert, bios)
-}
-
 /// Scale + colour for one of the absolute-coordinate text helpers below —
 /// bundled so those functions stay under clippy's argument-count limit.
 /// `scale` é fractional (0.7 para rótulos pequenos, 2.0 para títulos).
@@ -5055,6 +5120,56 @@ fn draw_text_absolute(
         }
         pen += dw as f32;
     }
+}
+
+/// [`draw_text_absolute`] com corte na banda visível do card (glifos que
+/// cruzam as linhas saem cortados — o card deslizando sob a carcaça e
+/// nascendo pelo pé da face).
+#[allow(clippy::too_many_arguments)]
+fn draw_text_absolute_band(
+    canvas: &mut WindowCanvas,
+    font: &mut Texture,
+    x: i32,
+    y: i32,
+    style: TextStyle,
+    s: &str,
+    max_chars: usize,
+    ymin: i32,
+    ymax: i32,
+) {
+    let (r, g, b) = style.color;
+    font.set_color_mod(r, g, b);
+    let dw = (GLYPH_W as f32 * style.scale).round() as u32;
+    let dh = (GLYPH_H as f32 * style.scale).round() as u32;
+    let mut pen = x as f32;
+    for ch in s.chars().take(max_chars) {
+        let idx = glyph_index(ch);
+        if ch != ' ' {
+            let src = Rect::new(idx as i32 * GLYPH_W as i32, 0, GLYPH_W, GLYPH_H);
+            let dst = Rect::new(pen.round() as i32, y, dw, dh);
+            if let Some((src, dst)) = blit_band(src, dst, ymin, ymax) {
+                let _ = canvas.copy(font, src, dst);
+            }
+        }
+        pen += dw as f32;
+    }
+}
+
+/// [`draw_text_absolute_band`] na dupla passada do bold (a sombra de 1 px).
+#[allow(clippy::too_many_arguments)]
+fn draw_text_bold_band(
+    canvas: &mut WindowCanvas,
+    font: &mut Texture,
+    x: i32,
+    y: i32,
+    style: TextStyle,
+    s: &str,
+    max_chars: usize,
+    ymin: i32,
+    ymax: i32,
+) {
+    draw_text_absolute_band(canvas, font, x, y, style, s, max_chars, ymin, ymax);
+    draw_text_absolute_band(canvas, font, x + 1, y, style, s, max_chars, ymin, ymax);
 }
 
 /// Texto em negrito: o traço da fonte é fino (1 px), então o bold é o
@@ -5189,34 +5304,25 @@ fn draw_panel(
             )
         };
         cy += 4;
-        // Mesma ideia da tela de jogo: duas faixas de botão no topo
-        // ("Estante de games" e o boot da BIOS) + o console da altura da
-        // face do jogo — aproximado do que vem acima.
-        const INSERT_H: u32 = 446;
-        let insert_block = Rect::new(x, cy, inner_w, INSERT_H);
-        let (insert_drawn, bios_drawn) = draw_idle_slot(
-            canvas,
-            images,
-            font,
-            insert_block,
-            "Estante de games",
-            "Ligar sem disco (executar BIOS)",
-            false,
+        // O botão da estante flutuante no topo (estilo SNES, um pouco
+        // maior) — e nada de console: a face do PSX vive só na tela de
+        // jogo (plan revision: "remover o console da tela inicial"). O
+        // resto da coluna fica limpo até o rodapé.
+        let btn_w = (inner_w as f32 * 0.75).round() as u32;
+        let btn_h = GLYPH_H * 2 + 24;
+        let btn = Rect::new(
+            x + (inner_w as i32 - btn_w as i32) / 2,
+            cy + 6,
+            btn_w,
+            btn_h,
         );
-        cy += INSERT_H as i32;
-
-        // The console's own controls, the same geometry the game panel
-        // draws (plan revision: "é como se fosse a tela do jogo mesmo") —
-        // Power/Reset/Eject e os MC slots já vivem na face do console —
-        // os botões redondos do PS1 FAT desenhados pelo draw_idle_slot
-        // acima. (Os rockers deslizantes POWER/RESET/EJETAR do SNES eram
-        // desenhados aqui; saíram junto com o console antigo.)
+        let insert_drawn = draw_button(canvas, font, btn, "Estante de games", true);
+        cy = insert_drawn.bottom();
 
         let btn_h = (GLYPH_H + 12) as i32;
         let settings = Rect::new(x, rect.bottom() - pad - btn_h, inner_w, btn_h as u32);
         let mut buttons = vec![
             (PanelButton::Insert, insert_drawn),
-            (PanelButton::BootBios, bios_drawn),
             (
                 PanelButton::Settings,
                 draw_button(canvas, font, settings, "Configurações", true),
@@ -5320,10 +5426,9 @@ fn draw_panel(
             panel.reset_pressed,
             spin,
             panel.lid_open,
-            (panel.card1_label.as_deref(), panel.card2_label.as_deref()),
-            (panel.pads_swapped, panel.pads_second, panel.pads_hover),
-            (panel.analog1, panel.analog2),
-            (panel.rumble1, panel.rumble2),
+            panel.card1_label.as_deref(),
+            panel.card_motion,
+            panel.analog1,
         );
         console_face_hits = Some(face_hits);
         cy += CARTRIDGE_H as i32;
@@ -5346,13 +5451,12 @@ fn draw_panel(
         buttons.push((PanelButton::Eject, hits.eject));
         buttons.push((PanelButton::Reset, hits.reset));
         buttons.push((PanelButton::Cards1, hits.cards1));
-        buttons.push((PanelButton::Cards2, hits.cards2));
+        // A label do card encaixado é um segundo hit da biblioteca (o
+        // gesto "Trocar/Ejetar" impresso nela).
+        if let Some(label) = hits.card_btn {
+            buttons.push((PanelButton::Cards1, label));
+        }
         buttons.push((PanelButton::Analog1, hits.analog1));
-        buttons.push((PanelButton::Analog2, hits.analog2));
-        buttons.push((PanelButton::Rumble1, hits.rumble1));
-        buttons.push((PanelButton::Rumble2, hits.rumble2));
-        buttons.push((PanelButton::PadPort1, hits.ports[0]));
-        buttons.push((PanelButton::PadPort2, hits.ports[1]));
     }
 
     // 3. Commands — the console's own buttons, not the emulator's extras
@@ -5372,7 +5476,12 @@ fn draw_panel(
         })
         .collect();
     if !other_commands.is_empty() && cy < limit {
-        cy += 16;
+        // Respiro entre o pé da face e a lista: o bay do memory card mora
+        // na última faixa do console e a lista colada nele o espremia (plan
+        // revision: "colocar o bloco de comandos mais pra baixo, pra deixar
+        // o memory card mais visível") — o vão é a pista da label do card
+        // (adesivo + "Trocar/Ejetar"), que desce além do pé da face.
+        cy += 80;
         draw_text_absolute(
             canvas,
             font,

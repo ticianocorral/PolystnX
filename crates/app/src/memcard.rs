@@ -33,6 +33,26 @@ pub struct CardInfo {
     pub saves: Vec<CardSave>,
 }
 
+/// Quantos slots de save estão em uso num card (ou num SRAM cru de 128 KB)
+/// — a MESMA regra do [`inspect`]: (00 00) fresco, A0 formatado-livre,
+/// (51 51) apagado, (FF FF) fim de cadeia; QUALQUER outro magic, inclusive
+/// o (51 00) do Tekken 3, é slot EM USO. O runner usa isso para o sync do
+/// card (o contador antigo tratava 51 00 como livre e "perdia" saves).
+pub fn used_slots(bytes: &[u8]) -> u8 {
+    if bytes.len() < CARD_SIZE {
+        return 0;
+    }
+    (1..=15usize)
+        .filter(|slot| {
+            let (b0, b1) = (bytes[slot * FRAME], bytes[slot * FRAME + 1]);
+            !((b0 == 0 && b1 == 0)
+                || b0 == 0xA0
+                || (b0 == 0x51 && b1 == 0x51)
+                || (b0 == 0xFF && b1 == 0xFF))
+        })
+        .count() as u8
+}
+
 /// Lê e interpreta um card. `None` se o arquivo não é um card válido
 /// (tamanho errado ou sem o "MC" mágico do bloco 0).
 pub fn inspect(path: &Path) -> Option<CardInfo> {
@@ -177,7 +197,11 @@ fn shift_jis_title(bytes: &[u8]) -> String {
             .map_or(0, |p| p + 1);
         &bytes[..end]
     };
-    let decoded = encoding_rs::SHIFT_JIS.decode(trimmed).0.into_owned();
+    // Full-width → ASCII já na decodificação: jogos JP gravam títulos e
+    // códigos na meia-largura japonesa (ＴＨＥ　ＢＡＴＴＬＥ, o Tekken 3
+    // até o código de produto) — o fonte da UI não tem glifo pra esses
+    // caracteres e cada um aparecia como "?" no modal de saves.
+    let decoded = normalize_fullwidth(encoding_rs::SHIFT_JIS.decode(trimmed).0.into_owned());
     let cleaned = decoded.trim().to_string();
     // SJIS decodifica quase qualquer coisa: aceita só se ficou razoável
     // (sem os losangos de substituição em excesso).
@@ -187,6 +211,18 @@ fn shift_jis_title(bytes: &[u8]) -> String {
     } else {
         String::new()
     }
+}
+
+/// Forma full-width (Ｆｕｌｌｗｉｄｔｈ) → ASCII: o bloco U+FF01..U+FF5E
+/// é o espelho fixo do ASCII (Ａ→A, １→1) e o U+3000 é o espaço largo.
+fn normalize_fullwidth(s: String) -> String {
+    s.chars()
+        .map(|c| match c {
+            '\u{3000}' => ' ',
+            '\u{FF01}'..='\u{FF5E}' => char::from_u32(c as u32 - 0xFEE0).unwrap_or(c),
+            _ => c,
+        })
+        .collect()
 }
 
 /// SJIS cai mal em UTF-8: só aceita título ASCII imprimível; o resto vira
@@ -300,6 +336,70 @@ mod tests {
         let path = dir.join("sem-mc.mcr");
         std::fs::write(&path, vec![0u8; CARD_SIZE]).unwrap();
         assert!(inspect(&path).is_none());
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn blank_formatted_card_counts_as_empty() {
+        // O par que a trava de sincronização do runner distingue: card
+        // FORMATADO em branco (a BIOS do Rearmed formata com A0 00 em todos
+        // os slots — "sem card" pro jogo, mas é um card válido) tem
+        // `used == 0`; qualquer save real (o Tekken grava 51 00) conta como
+        // em uso. Escrever o primeiro por cima do segundo era o apagão.
+        let dir = std::env::temp_dir().join(format!("mc-test4-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let mut blank = vec![0u8; CARD_SIZE];
+        blank[0..2].copy_from_slice(b"MC");
+        for slot in 1..=15usize {
+            blank[slot * FRAME] = 0xA0;
+        }
+        let path = dir.join("vazio.mcr");
+        std::fs::write(&path, &blank).unwrap();
+        assert_eq!(inspect(&path).expect("válido").used, 0);
+
+        // Tekken 3: entrada de diretório (51 00) — em uso, NÃO é apagado.
+        let mut tekken = blank.clone();
+        tekken[FRAME] = 0x51;
+        tekken[FRAME + 1] = 0x00;
+        let block_at = BLOCK;
+        tekken[block_at + 0x08..block_at + 0x08 + 10].copy_from_slice(b"SLUS-01344");
+        let path = dir.join("tekken.mcr");
+        std::fs::write(&path, &tekken).unwrap();
+        assert_eq!(inspect(&path).expect("válido").used, 1);
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn tekken_fullwidth_sjis_reads_as_ascii() {
+        // O Tekken 3 grava título e código na meia-largura japonesa
+        // (ＴＨＥ　ＢＡＴＴＬＥ) — decodificados, os caracteres não têm
+        // glifo no fonte da UI e apareciam como "????????????" no modal.
+        // A normalização full-width → ASCII é o que o usuário lê.
+        let dir = std::env::temp_dir().join(format!("mc-test5-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let mut card = vec![0u8; CARD_SIZE];
+        card[0..2].copy_from_slice(b"MC");
+        // slot 1 EM USO (51 00 — a regra do used_slots/inspect) e corpo
+        // preenchido como um save real.
+        card[FRAME] = 0x51;
+        card[FRAME + 1] = 0x00;
+        let (title_sjis, _enc, _had) =
+            encoding_rs::SHIFT_JIS.encode("ＴＨＥ　ＢＡＴＴＬＥ　ＢＥＧ");
+        let (code_sjis, _, _) = encoding_rs::SHIFT_JIS.encode("ＥＫＫＥＮ");
+        let block_at = BLOCK;
+        card[block_at + 0x08..block_at + 0x08 + code_sjis.len()].copy_from_slice(&code_sjis);
+        card[block_at + 0x1C..block_at + 0x1C + title_sjis.len()].copy_from_slice(&title_sjis);
+        let path = dir.join("tekken.mcr");
+        std::fs::write(&path, &card).unwrap();
+
+        let info = inspect(&path).expect("válido");
+        assert_eq!(info.used, 1);
+        assert_eq!(info.saves[0].title, "THE BATTLE BEG");
+        assert_eq!(info.saves[0].product, "EKKEN");
+
         std::fs::remove_dir_all(&dir).ok();
     }
 

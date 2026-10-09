@@ -469,10 +469,6 @@ fn activate_row(
                 cfg.runahead = (cfg.runahead + 1) % (RUNAHEAD_MAX + 1);
                 let _ = cfg.save();
             }
-            2 => {
-                cfg.pad2 = !cfg.pad2;
-                let _ = cfg.save();
-            }
             _ => {}
         },
         SEC_VIDEO => match i {
@@ -553,10 +549,6 @@ fn adjust_row(cfg: &mut Config, sec: usize, sel: usize, cab: &mut Cabinet, right
             } else {
                 cfg.runahead.saturating_sub(1)
             };
-            let _ = cfg.save();
-        }
-        (SEC_JOGO, 2) => {
-            cfg.pad2 = !cfg.pad2;
             let _ = cfg.save();
         }
         (SEC_VIDEO, 0) => {
@@ -703,10 +695,6 @@ fn draw_jogo(d: &mut Screen, cfg: &Config, sel: usize) {
     let rows = [
         "Controles".to_string(),
         format!("Run-ahead: {} quadro(s)", cfg.runahead),
-        format!(
-            "Controle 2: {}",
-            if cfg.pad2 { "ligado" } else { "desligado" }
-        ),
     ];
     for (i, row) in rows.iter().enumerate() {
         draw_row(d, x, y, row, i == sel);
