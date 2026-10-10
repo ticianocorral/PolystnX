@@ -9,7 +9,7 @@
 //! - [`rom_rename`] — rename ROMs to their canonical No-Intro name (settings-screen action).
 //! - [`runner`] — the emulator run-loop (`emu-run`, and `polystnx` between games).
 //! - [`settings`] — the settings screen (`polystnx` only, opened with `O` on the shelf).
-//! - [`sfx`] — the console's embedded foley sounds (insert/eject/power/reset).
+//! - [`sfx`] — the console's embedded foley sounds (power/achievement/CD seek).
 //! - [`shelf`] — the selector grid (`selector`, and `polystnx` between games).
 //! - [`update_check`] — startup checks for a newer release/PCSX Rearmed core.
 

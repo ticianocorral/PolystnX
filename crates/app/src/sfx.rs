@@ -21,8 +21,6 @@ pub enum Sfx {
     PowerOn,
     /// Power switch flipping off — replaces the synthesized buzz cut.
     PowerOff,
-    /// Reset button press.
-    Reset,
     /// Achievement unlocked (plan revision: "coloque uma notificação sonora
     /// ao ganhar uma conquista") — a synthesized ascending chime, made
     /// in-repo (no Pixabay credit due), same fixed format as the foley set.
@@ -42,7 +40,6 @@ fn embedded(name: Sfx) -> Embedded {
     match name {
         Sfx::PowerOn => Embedded(include_bytes!("sfx/power_on.wav")),
         Sfx::PowerOff => Embedded(include_bytes!("sfx/power_off.wav")),
-        Sfx::Reset => Embedded(include_bytes!("sfx/reset.wav")),
         Sfx::Achievement => Embedded(include_bytes!("sfx/achievement.wav")),
         Sfx::CdSeek => Embedded(include_bytes!("sfx/cd_seek.wav")),
     }
@@ -55,7 +52,6 @@ fn embedded(name: Sfx) -> Embedded {
 struct Bank {
     power_on: Option<Vec<i16>>,
     power_off: Option<Vec<i16>>,
-    reset: Option<Vec<i16>>,
     achievement: Option<Vec<i16>>,
     cd_seek: Option<Vec<i16>>,
 }
@@ -66,7 +62,6 @@ fn bank() -> &'static Bank {
     BANK.get_or_init(|| Bank {
         power_on: decode(embedded(Sfx::PowerOn).0),
         power_off: decode(embedded(Sfx::PowerOff).0),
-        reset: decode(embedded(Sfx::Reset).0),
         achievement: decode(embedded(Sfx::Achievement).0),
         cd_seek: decode(embedded(Sfx::CdSeek).0),
     })
@@ -81,7 +76,6 @@ pub fn play(cab: &mut Cabinet, name: Sfx) -> bool {
     let bank_match = match name {
         Sfx::PowerOn => &b.power_on,
         Sfx::PowerOff => &b.power_off,
-        Sfx::Reset => &b.reset,
         Sfx::Achievement => &b.achievement,
         Sfx::CdSeek => &b.cd_seek,
     };
@@ -146,7 +140,6 @@ mod tests {
             // que trocou o foley SNES por ele).
             (Sfx::PowerOn, 3800, 4200),
             (Sfx::PowerOff, 650, 850),
-            (Sfx::Reset, 800, 1000),
             (Sfx::Achievement, 800, 1000),
         ] {
             let d = decode(embedded(name).0).unwrap_or_else(|| panic!("falhou o parse"));

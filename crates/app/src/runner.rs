@@ -857,38 +857,6 @@ fn live_session_time(elapsed: Duration, since: Option<Instant>) -> Duration {
     elapsed + since.map(|t| t.elapsed()).unwrap_or_default()
 }
 
-/// Ejetar with the console still on: the lock resists — a short mechanical
-/// thump, nothing else (plan §3.3, "a alavanca resiste, com um clunk seco").
-fn eject_clunk(plat: &Platform) {
-    tone_click(plat, 90.0);
-}
-
-/// A short damped tone burst at `freq` Hz — the shared shape behind every
-/// mechanical "click" in this file (`eject_clunk`'s resist-thump, and the
-/// insert/eject animations' seat/unseat clicks below): a plain sine ramping
-/// from full volume down to silence over ~90ms, via a continuous phase
-/// accumulator so it doesn't pop at the start. A no-op if no audio device is
-/// available.
-fn tone_click(plat: &Platform, freq: f32) {
-    const RATE: u32 = 22_050;
-    let Some(audio) = plat.open_audio(RATE).ok() else {
-        return;
-    };
-    let n = (RATE as f32 * 0.09) as usize;
-    let mut buf = Vec::with_capacity(n * 2);
-    let mut phase = 0f32;
-    for i in 0..n {
-        let env = 1.0 - i as f32 / n as f32;
-        phase += freq / RATE as f32;
-        let s = (phase * std::f32::consts::TAU).sin() * env * env;
-        let v = (s * 12000.0) as i16;
-        buf.push(v);
-        buf.push(v);
-    }
-    audio.queue(&buf);
-    std::thread::sleep(Duration::from_millis(100));
-}
-
 /// The cartridge sliding into the console's slot (plan revision: "a animação
 /// deveria estar onde está o cartucho durante a gameplay, não uma
 /// transição") — played in the panel's own cartridge block (`Cabinet::
@@ -2358,14 +2326,6 @@ pub fn run_game(
             match ev {
                 UiEvent::ToggleLid => {
                     lid_open = !lid_open;
-                    // Clique mecânico da tampa: o foley antigo aqui era o
-                    // som de cartucho do SNES (plano revision: "remover o
-                    // som do cartucho... é o som do snes").
-                    if lid_open {
-                        eject_clunk(plat);
-                    } else {
-                        tone_click(plat, 180.0);
-                    }
                     // Como o console original: abrir a tampa PARA o leitor
                     // (o jogo vê a bandeja abrir e para de ler; o disco para
                     // de girar); fechar faz o disco girar de volta e o jogo
@@ -2467,11 +2427,6 @@ pub fn run_game(
                         // vê a bandeja abrir) e fechar faz o disco voltar a
                         // girar e o jogo tentar recuperar.
                         lid_open = !lid_open;
-                        if lid_open {
-                            eject_clunk(plat);
-                        } else {
-                            tone_click(plat, 180.0);
-                        }
                         drain_core!();
                         let _ = core_tx.send(CoreCmd::TrayEject { ejected: lid_open });
                         cab.set_drive(lid_open, true);
@@ -2490,7 +2445,6 @@ pub fn run_game(
                     if powered {
                         drain_core!();
                         let _ = core_tx.send(CoreCmd::Reset);
-                        crate::sfx::play(cab, crate::sfx::Sfx::Reset);
                         // Momentary rocker (plan revision) — springs back on
                         // its own next frame via `reset_pressed`/`RESET_SPRING`,
                         // same clock as the "feito!" flashes.
