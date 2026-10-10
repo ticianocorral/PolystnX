@@ -4,6 +4,31 @@ Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/);
 versionamento por [SemVer 2.0.0](https://semver.org/lang/pt-BR/). O workspace
 inteiro compartilha uma versão (`[workspace.package]` em `Cargo.toml`).
 
+## [1.1.1-beta] - 2026-10-10
+
+### Adicionado
+- **Site oficial no GitHub Pages**, no estilo do manual do proprietário do
+  SixteeN: <https://ticianocorral.github.io/PolystnX/> — capa, sumário,
+  seções numeradas e contracapa, com telas 100% sintéticas (o homebrew
+  fictício *Mundo do Tomate* rendido dentro do app real), o GIF do disco
+  assentando no spindle e o selo que puxa a versão da última release.
+  Nenhum jogo comercial, nenhuma ROM.
+
+### Removido
+- **O som do Reset e do open/close da tampa**: as duas ações ficam mudas —
+  seguem como feedback o movimento real da tampa (o disco para e retoma
+  pelo disk control), o OSD "TAMPA ABERTA/FECHADA" e o flash do botão. O
+  foley `reset.wav` sai do binário com a variante `Sfx::Reset`; os cliques
+  sintetizados do abrir/fechar (`eject_clunk`/`tone_click`) saem órfãos.
+
+### Corrigido
+- **Painel de jogo na Steam Deck (1280×800/720p)**: o console sobe (a logo
+  reserva menos) e o bloco ganha altura; o slot do controle quebra o status
+  em duas linhas — "CONTROLE 1" / "CONECTADO" em escala cheia (a linha
+  única saía cortada no "…CONECT"); os botões recolhem para as bordas ao
+  redor de um **disco ~20% maior**; o **Reset cresce** (raio 24→29); a
+  lista de comandos sobe. FHD+ não muda nada.
+
 ## [1.1.0-beta] - 2026-10-09
 
 ### Adicionado
