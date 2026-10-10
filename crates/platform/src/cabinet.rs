@@ -4318,9 +4318,16 @@ fn draw_slot_furniture(
     // direita") — e a entrada 2 saiu com o suporte ao segundo controle
     // (removido "no momento").
     let gap = 4;
-    // 56 px de altura para os DOIS boxes: os botões redondos de cima
-    // precisam da face.
-    let box_h = 56;
+    // Tela apertada (Steam Deck: painel de jogo com menos de 360 px úteis —
+    // 1280×800/720p dão ~280). Lá o console sobe (logo mais baixa), ganha
+    // bloco mais alto, slot de controle em duas linhas, botões recolhidos
+    // pras bordas, Reset maior e disco maior. FHD+ não muda (plan revision:
+    // "na resolução normal nao mexer — está perfeito").
+    let tight = block.width() < 360;
+    // 56 px de altura para os DOIS boxes (76 nas apertadas: o status do
+    // controle quebra em duas linhas e o ANALOG precisa caber no furo); os
+    // botões redondos de cima precisam da face.
+    let box_h = if tight { 76 } else { 56 };
     let box_w = (block.width() as f32 * 0.46).round() as i32;
     let grid_top = block.bottom() - (box_h + 4);
     let analog_rect;
@@ -4483,8 +4490,15 @@ fn draw_slot_furniture(
             Rect::new(hole.x(), hole.y(), hole.width(), 2),
         );
 
-        // Conectado: status em verde + os botões ANALOG e RUMBLE.
-        let l1 = "CONTROLE 1 CONECTADO".to_string();
+        // Conectado: status em verde + o botão ANALOG. Nas telas apertadas o
+        // status quebra em DUAS linhas — "CONTROLE 1 CONECTADO" em linha
+        // única estourava o furo e saía cortado ("…CONECT"); com o slot mais
+        // alto, as duas linhas cabem em escala cheia.
+        let (l1, l2) = if tight {
+            ("CONTROLE 1", Some("CONECTADO"))
+        } else {
+            ("CONTROLE 1 CONECTADO", None)
+        };
         let l1w = l1.chars().count() as i32 * GLYPH_W as i32;
         let scale = ((hole.width() as i32 - 12) as f32 / l1w as f32).clamp(0.75, 1.0);
         let sh = (GLYPH_H as f32 * scale).round() as i32;
@@ -4495,9 +4509,23 @@ fn draw_slot_furniture(
             hole.x() + 6,
             l1y,
             TextStyle::new(scale, (120, 220, 140)),
-            &l1,
+            l1,
             usize::MAX,
         );
+        let status_bottom = if let Some(l2) = l2 {
+            draw_text_bold(
+                canvas,
+                font,
+                hole.x() + 6,
+                l1y + sh,
+                TextStyle::new(scale, (120, 220, 140)),
+                l2,
+                usize::MAX,
+            );
+            l1y + sh * 2
+        } else {
+            l1y + sh
+        };
         let analog_on = analog;
         let copy_h = (GLYPH_H as f32 * 0.85).round() as i32;
         let mut tag = |x: i32, y: i32, w: i32, h: i32, copy: &str, on: bool| {
@@ -4528,22 +4556,26 @@ fn draw_slot_furniture(
         // SÓ o ANALOG (plan revision: "deixar apenas o botão de analog") —
         // ele é o botão do DualShock: liga o analógico E a vibração. O LED
         // fala o modo: vermelho = desligado (digital), verde = ligado.
-        let l2y = l1y + sh + 2;
+        let l2y = status_bottom + 2;
         let w_t = hole.width() as i32 - 12;
         tag(hole.x() + 6, l2y, w_t, sh, "ANALOG", analog_on);
         analog_rect = Rect::new(hole.x() + 6, l2y, w_t as u32, sh as u32);
     }
 
     // Os três botões redondos, centrados na altura útil acima das portas.
+    // Nas telas apertadas eles recolhem pras bordas — é o vão central que
+    // dá o tamanho do disco.
     let face_top = block.y() + 6;
     let face_bottom = mc1.y() - 2;
     let face_h = (face_bottom - face_top).max(1);
     let btn_r =
         ((face_h as f32 * 0.30).round() as i32).min(if block.width() < 640 { 34 } else { 46 });
-    let col_l = block.x() + 10 + btn_r;
-    let col_r = block.right() - 10 - btn_r;
+    let face_inset = if tight { 4 } else { 10 };
+    let col_l = block.x() + face_inset + btn_r;
+    let col_r = block.right() - face_inset - btn_r;
 
-    let reset_r = (btn_r as f32 * 0.70).round() as i32;
+    // Reset maior nas apertadas: 24 px de raio eram difíceis de mirar.
+    let reset_r = (btn_r as f32 * if tight { 0.85 } else { 0.70 }).round() as i32;
     let led_h = 13;
     let power_cy = face_top + face_h * 7 / 10;
     let reset_cy = face_top
@@ -4629,12 +4661,15 @@ fn draw_slot_furniture(
         let dy = (cy - by) as f32;
         (dx * dx + dy * dy).sqrt() - br as f32
     };
+    // Nas apertadas o disco come a folga inteira: sem a margem extra dos
+    // 4 px e com o divisor mais justo — combinado com os botões recolhidos,
+    // o vão sobe de ~128 px para ~160 px de lado.
     let reach = clearance(col_l, reset_cy, reset_r)
         .min(clearance(col_l, power_cy, btn_r))
         .min(clearance(col_r, power_cy, btn_r))
-        - 4.0;
+        - if tight { 0.0 } else { 4.0 };
     let side_v = ((disc_bot_lim - disc_top_lim) as f32 / 1.145) as i32;
-    let side_w = (reach * 2.0 / 1.13) as i32;
+    let side_w = (reach * 2.0 / if tight { 1.08 } else { 1.13 }) as i32;
     let side = side_v.min(side_w).max(24);
     let mut disc = Rect::new(
         block.x() + (block.width() as i32 - side) / 2,
@@ -5388,9 +5423,13 @@ fn draw_panel(
     };
 
     // 1. Logo, or the title if there isn't one (plan §3.2, item 1).
+    // Steam Deck (painel < 360 px úteis): a logo reserva menos altura — é o
+    // console que sobe; FHD+ segue em 110.
+    let tight_panel = inner_w < 360;
+    let logo_h: i32 = if tight_panel { 84 } else { 110 };
     let mut cy = if panel.has_logo {
-        draw_image_absolute(canvas, images, PANEL_LOGO_IMG, x, y, inner_w, 110);
-        y + 110
+        draw_image_absolute(canvas, images, PANEL_LOGO_IMG, x, y, inner_w, logo_h as u32);
+        y + logo_h
     } else {
         draw_text_wrapped_absolute(
             canvas,
@@ -5413,13 +5452,17 @@ fn draw_panel(
     let mut console_face_hits: Option<FaceHits> = None;
     {
         cy += 4;
-        const CARTRIDGE_H: u32 = 316;
+        // 316 px de console nas telas folgadas; nas apertadas o bloco é mais
+        // alto — é onde cabem o slot de controle em duas linhas e o disco
+        // maior (os 44 px extras vêm da logo mais baixa e do vão menor
+        // acima da lista de comandos).
+        let cartridge_h: u32 = if tight_panel { 360 } else { 316 };
         let (t, ejecting) = panel.cartridge_motion.unwrap_or((1.0, false));
         let face_hits = draw_panel_slot(
             canvas,
             font,
             images,
-            Rect::new(x, cy, inner_w, CARTRIDGE_H),
+            Rect::new(x, cy, inner_w, cartridge_h),
             t,
             ejecting,
             panel.powered,
@@ -5431,7 +5474,7 @@ fn draw_panel(
             panel.analog1,
         );
         console_face_hits = Some(face_hits);
-        cy += CARTRIDGE_H as i32;
+        cy += cartridge_h as i32;
     }
 
     // Below this y, stop — leave the session clock's own band (item 6)
@@ -5481,7 +5524,9 @@ fn draw_panel(
         // revision: "colocar o bloco de comandos mais pra baixo, pra deixar
         // o memory card mais visível") — o vão é a pista da label do card
         // (adesivo + "Trocar/Ejetar"), que desce além do pé da face.
-        cy += 80;
+        // Nas apertadas o vão encolhe para o mínimo da label do card (ela
+        // desce 60 px além do pé da face) — a lista de comandos sobe junto.
+        cy += if tight_panel { 62 } else { 80 };
         draw_text_absolute(
             canvas,
             font,
