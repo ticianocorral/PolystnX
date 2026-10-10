@@ -1,46 +1,56 @@
-// Retro Xperience — site estático: pouco JavaScript de propósito.
-
-// Marca JS para o CSS só animar quando dá para animar.
-document.documentElement.classList.add('js');
+// PolyStnX — manual: interações mínimas.
 
 // Ano do rodapé.
-const ano = document.getElementById('ano');
-if (ano) ano.textContent = String(new Date().getFullYear());
+document.getElementById("ano").textContent = new Date().getFullYear();
 
-// Revela cartões ao entrar na tela.
-const reveals = document.querySelectorAll('.reveal');
-if ('IntersectionObserver' in window && reveals.length > 0) {
-  const observador = new IntersectionObserver(
-    (entradas) => {
-      for (const entrada of entradas) {
-        if (entrada.isIntersecting) {
-          entrada.target.classList.add('on');
-          observador.unobserve(entrada.target);
-        }
+// Revelação sutil ao rolar (figuras, cartões e cabeçalhos de seção).
+const alvos = document.querySelectorAll(
+  ".figura, .passo, .lateral, .aviso, .sumario-lista, .tabela"
+);
+alvos.forEach((el) => el.classList.add("reveal-in"));
+const io = new IntersectionObserver(
+  (entradas) => {
+    for (const e of entradas) {
+      if (e.isIntersecting) {
+        e.target.classList.add("reveal-ok");
+        io.unobserve(e.target);
       }
-    },
-    { threshold: 0.15 }
-  );
-  reveals.forEach((el) => observador.observe(el));
-} else {
-  reveals.forEach((el) => el.classList.add('on'));
+    }
+  },
+  { threshold: 0.15 }
+);
+alvos.forEach((el) => io.observe(el));
+
+// Versão real da última release (o texto fixo no HTML é o fallback).
+const selo = document.querySelector("[data-release]");
+if (selo) {
+  fetch(
+    "https://api.github.com/repos/ticianocorral/PolystnX/releases/latest"
+  )
+    .then((r) => (r.ok ? r.json() : Promise.reject(r.status)))
+    .then((r) => {
+      const tag = String(r.tag_name || "").replace(/^v/, "");
+      if (tag) selo.textContent = tag;
+    })
+    .catch(() => {}); // sem rede ou rate limit: fica o valor do HTML
 }
 
-// O tubo liga e desliga com clique, como um CRT de verdade.
-const tubo = document.querySelector('.crt.hero-midia');
-if (tubo) {
-  tubo.setAttribute('role', 'button');
-  tubo.setAttribute('tabindex', '0');
-  tubo.setAttribute('aria-pressed', 'false');
-  const alternar = () => {
-    const off = tubo.classList.toggle('off');
-    tubo.setAttribute('aria-pressed', String(off));
-  };
-  tubo.addEventListener('click', alternar);
-  tubo.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter' || e.key === ' ') {
-      e.preventDefault();
-      alternar();
+// Código Konami no site também — claro que sim. O bannerzinho fica lá
+// embaixo convidando; quem completa vê a mensagem virar.
+const konami = [
+  "ArrowUp", "ArrowUp", "ArrowDown", "ArrowDown",
+  "ArrowLeft", "ArrowRight", "ArrowLeft", "ArrowRight", "b", "a",
+];
+let passo = 0;
+document.addEventListener("keydown", (ev) => {
+  const ok = ev.key === konami[passo] || ev.key.toLowerCase() === konami[passo];
+  passo = ok ? passo + 1 : ev.key === konami[0] ? 1 : 0;
+  if (passo === konami.length) {
+    passo = 0;
+    const banner = document.getElementById("konami");
+    if (banner) {
+      banner.textContent = "código Konami aceito — no app, isso libera o devmode ↑↑↓↓←→←→BA";
+      banner.classList.add("konami-ok");
     }
-  });
-}
+  }
+});

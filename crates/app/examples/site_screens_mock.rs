@@ -28,7 +28,7 @@ fn main() -> anyhow::Result<()> {
     let mut cab = plat
         .create_cabinet("PolystnX", 1280, 800, false)
         .map_err(|e| anyhow::anyhow!(e.to_string()))?;
-    cab.set_nameplate("PolystnX v1.0.0-beta\nPCSX Rearmed r26");
+    cab.set_nameplate("PolystnX v1.1.0-beta\nPCSX Rearmed r26");
 
     // A logo oficial do RA (o favicon embutido no app) para o badge, e a
     // conta "ativa" — como no app real, o badge acompanha todas as telas.
@@ -86,7 +86,9 @@ fn main() -> anyhow::Result<()> {
     }
     println!("wrote cart frames");
 
-    // --- Hero: o jogo fake rodando no tubo, painel de verdade. ---
+    // --- Hero: o jogo fake rodando no tubo, painel de verdade. A capa do
+    //     site fica LIMPA — sem badge do RA no queixo (o badge é a foto da
+    //     seção de conquistas, como no site do irmão). ---
     cab.set_powered(true);
     cab.set_session_time(Duration::from_secs(1_493));
     let pixels = scene(512, 448);
@@ -97,6 +99,7 @@ fn main() -> anyhow::Result<()> {
         format: PixelFormat::Xrgb8888,
         pixels: &pixels,
     };
+    cab.set_ra_status(None);
     cab.capture_bmp(&frame, 4.0 / 3.0, &out.join("hero.bmp"))
         .map_err(|e| anyhow::anyhow!(e.to_string()))?;
     println!("wrote hero.bmp");
@@ -108,7 +111,6 @@ fn main() -> anyhow::Result<()> {
     cab.set_ra_status(Some(polystnx_platform::RaStatus { hardcore: false }));
     cab.capture_bmp(&frame, 4.0 / 3.0, &out.join("ra-badge-softcore.bmp"))
         .map_err(|e| anyhow::anyhow!(e.to_string()))?;
-    cab.set_ra_status(None);
     println!("wrote ra-badge shots");
 
     // --- Conquistas: notificação no queixo da TV, badge sintético. ---
@@ -135,7 +137,7 @@ fn main() -> anyhow::Result<()> {
         let mut cab = plat
             .create_cabinet("PolystnX", 1280, 800, false)
             .map_err(|e| anyhow::anyhow!(e.to_string()))?;
-        cab.set_nameplate("PolystnX v1.0.0-beta\nPCSX Rearmed r26");
+        cab.set_nameplate("PolystnX v1.1.0-beta\nPCSX Rearmed r26");
         if let Ok(icon) = image::load_from_memory(polystnx_app::RA_ICON_PNG) {
             let icon = icon.to_rgba8();
             cab.set_image(
