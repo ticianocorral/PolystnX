@@ -345,6 +345,9 @@ struct PadSnapshot {
 enum CoreCmd {
     Run {
         input: PadSnapshot,
+        /// Run-ahead deste frame — a main desliga sozinho quando o core
+        /// não fecha o budget (auto-ajuste por máquina).
+        runahead: u32,
     },
     /// Snapshot do SAVE_RAM (o card do slot 1 vivo no core) — troca quente
     /// salva o card que sai ANTES de mexer na memória, e o flush periódico
@@ -416,7 +419,6 @@ struct CoreRunning(Option<Core>);
 unsafe impl Send for CoreRunning {}
 fn spawn_core_worker(
     core: Core,
-    runahead: usize,
     want_ram: bool,
 ) -> (
     std::sync::mpsc::Sender<CoreCmd>,
@@ -444,7 +446,7 @@ fn spawn_core_worker(
                     break; // core morto (falha de recriação): a sessão acaba
                 };
                 match cmd {
-                    CoreCmd::Run { input } => {
+                    CoreCmd::Run { input, runahead } => {
                         for (port, btn, held) in &input.buttons {
                             core.set_button(*port, *btn, *held);
                         }
@@ -1915,9 +1917,13 @@ pub fn run_game(
     log::info!("running: rf ntsc + crt tube, run-ahead {runahead}");
     // O core mora na thread dele; a interface continua a 60 fps com o
     // último quadro enquanto o PCSX Rearmed bloqueia (boot, FMV).
-    let (core_tx, core_rx, worker_handle) =
-        spawn_core_worker(core, runahead as usize, ra_session.is_some());
+    let (core_tx, core_rx, worker_handle) = spawn_core_worker(core, ra_session.is_some());
     let mut in_flight = false;
+    // Run-ahead efetivo (a main desliga sozinho sob carga) e o
+    // relógio do Run em voo (a medida do serviço do core).
+    let mut runahead_eff = runahead_cfg;
+    let mut run_sent: Option<Instant> = None;
+    let mut lentos = 0u32;
     // Som do leitor de CD (plano revision: "na hesitação do core ou atraso
     // do quadro, inserir o som de leitura do cd"): a última vez que um
     // quadro REAL chegou — `None` desde o ligar (o drive lê no boot). E o
@@ -2417,7 +2423,11 @@ pub fn run_game(
                             } else {
                                 snap.analog.push((0, 0, 0, 0, 0));
                             }
-                            let _ = core_tx.send(CoreCmd::Run { input: snap });
+                            run_sent = Some(Instant::now());
+                            let _ = core_tx.send(CoreCmd::Run {
+                                input: snap,
+                                runahead: runahead_eff,
+                            });
                             in_flight = true;
                         }
                         power_on_burst(plat, cab);
@@ -3175,6 +3185,27 @@ pub fn run_game(
             if in_flight {
                 if let Ok(out) = core_rx.try_recv() {
                     in_flight = false;
+                    // Auto-ajuste do run-ahead: o tempo entre o envio do Run
+                    // e o quadro pronto é o serviço do core (ele fica preso
+                    // no Run). Acima do budget de 16,7 ms por vários frames
+                    // seguidos, o run-ahead desliga na hora — em máquinas
+                    // rápidas ninguém percebe, nas lentas o jogo volta à
+                    // velocidade cheia.
+                    if let Some(t) = run_sent.map(|t| t.elapsed()) {
+                        if t > Duration::from_millis(16) {
+                            lentos += 1;
+                        } else {
+                            lentos = 0;
+                        }
+                        if lentos >= 30 && runahead_eff > 0 {
+                            runahead_eff = 0;
+                            log::info!(
+                                "run-ahead desligado: o core não fecha o budget ({:.1} ms/frame)",
+                                t.as_secs_f64() * 1e3
+                            );
+                        }
+                    }
+                    run_sent = None;
                     frames += 1;
                     if spec.debug_note_capture && frames == debug_note_frame {
                         note_request = Some(note_slot);
@@ -3395,7 +3426,10 @@ pub fn run_game(
                 } else {
                     snap.analog.push((0, 0, 0, 0, 0));
                 }
-                let _ = core_tx.send(CoreCmd::Run { input: snap });
+                let _ = core_tx.send(CoreCmd::Run {
+                    input: snap,
+                    runahead: 0,
+                });
                 in_flight = true;
             }
             // Flush periódico do card 1 (a cada ~10 s ligado): crash perde
