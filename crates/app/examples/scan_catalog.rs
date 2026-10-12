@@ -23,6 +23,25 @@ fn main() -> anyhow::Result<()> {
             e.rom.size / (1024 * 1024),
             hash,
         );
+        if let Some(i) = polystnx_domain::infos::lookup(&e.rom.sha1) {
+            let tempo = |m: Option<u64>| match m {
+                Some(m) if m >= 60 => format!("{}h {}min", m / 60, m % 60),
+                Some(m) => format!("{m}min"),
+                None => "—".to_string(),
+            };
+            println!(
+                "  infos   : ano {} | editora {} | região {} | nota {}",
+                i.year.as_deref().unwrap_or("—"),
+                i.publisher.as_deref().unwrap_or("—"),
+                i.region.as_deref().unwrap_or("—"),
+                i.nota.as_deref().unwrap_or("—"),
+            );
+            println!(
+                "  hltb    : zerar {} | + extras {}",
+                tempo(i.hltb_main),
+                tempo(i.hltb_extra),
+            );
+        }
     }
     Ok(())
 }

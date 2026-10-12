@@ -17,7 +17,7 @@
 use std::fs;
 use std::path::Path;
 
-use polystnx_domain::{library, nointro::NoIntroDat, psx};
+use polystnx_domain::{infos, library, nointro::NoIntroDat};
 
 use crate::runner::sanitize_dir_name;
 
@@ -40,7 +40,7 @@ pub enum RenameOutcome {
 fn canonical_name(dat: Option<&NoIntroDat>, serial: &str) -> Option<String> {
     dat.and_then(|d| d.lookup_serial(serial))
         .map(|i| i.name.clone())
-        .or_else(|| psx::lookup(serial).map(|i| i.title.clone()))
+        .or_else(|| infos::lookup(serial).map(|i| i.name.clone()))
 }
 
 /// Scan `roms_dir`, rename every disc whose serial resolves to a canonical
@@ -203,8 +203,12 @@ mod tests {
             canonical_name(dat.as_ref(), "slus_004.02").as_deref(),
             Some("Tekken 3 (USA)")
         );
-        // Sem DAT, a tabela embutida (aqui vazia) não resolve.
-        assert_eq!(canonical_name(None, "SLUS-00402"), None);
+        // Sem DAT, a tabela única embutida resolve (infos_data.txt tem o
+        // serial com o nome canônico — nada de baixar nada).
+        assert_eq!(
+            canonical_name(None, "SLUS-00402").as_deref(),
+            Some("Tekken 3 (USA)")
+        );
         let _ = std::fs::remove_file(&path);
     }
 

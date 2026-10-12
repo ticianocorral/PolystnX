@@ -30,11 +30,11 @@ fn main() -> anyhow::Result<()> {
         None,
         "Super Mario World (USA)",
         &[
-            (PanelButton::Notebook, "Anotações".to_string()),
-            (PanelButton::Cheats, "Cheats".to_string()),
-            (PanelButton::PrintScreen, "Printscreen".to_string()),
-            (PanelButton::SaveState, "Salvar".to_string()),
-            (PanelButton::LoadState, "Carregar".to_string()),
+            (PanelButton::Notebook, "Anotações".to_string(), true),
+            (PanelButton::Cheats, "Cheats".to_string(), true),
+            (PanelButton::PrintScreen, "Printscreen".to_string(), true),
+            (PanelButton::SaveState, "Salvar".to_string(), true),
+            (PanelButton::LoadState, "Carregar".to_string(), true),
         ],
     );
     cab.set_powered(true);

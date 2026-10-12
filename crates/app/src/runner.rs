@@ -717,15 +717,20 @@ fn reset_pressed(flash: &HashMap<PanelButton, Instant>) -> bool {
 /// the label just names the action. Cheats (plan revision — split out of
 /// the notebook) is absent entirely when `has_cheats` is false — this
 /// cartridge has no curated codes, so a button that always opened an empty
-/// checklist would just be clutter. Games are only ever picked from the
-/// shelf (plan revision: the in-panel insert/eject/m3u commands are gone),
-/// so there's nothing disc-shaped left to list here.
+/// checklist would just be clutter. Conquistas (plan revision: "mostre o
+/// botão mas mostre desativado") is the opposite policy: present whenever
+/// the RA account is configured, `enabled: false` when the game has no set
+/// (the click still lands — the runner answers with an OSD). Games are
+/// only ever picked from the shelf (plan revision: the in-panel
+/// insert/eject/m3u commands are gone), so there's nothing disc-shaped
+/// left to list here.
 fn command_rows(
     flash: &HashMap<PanelButton, Instant>,
     has_cheats: bool,
+    ra_on: bool,
     has_achievements: bool,
     all_slots_pinned: bool,
-) -> Vec<(PanelButton, String)> {
+) -> Vec<(PanelButton, String, bool)> {
     let label = |b: PanelButton, base: &str| -> String {
         if flashed(flash, b) {
             format!("{base} (feito!)")
@@ -733,12 +738,16 @@ fn command_rows(
             base.to_string()
         }
     };
-    let mut rows = vec![(PanelButton::Notebook, "Anotações".to_string())];
-    if has_achievements {
-        rows.push((PanelButton::Achievements, "Conquistas".to_string()));
+    let mut rows = vec![(PanelButton::Notebook, "Anotações".to_string(), true)];
+    if ra_on {
+        rows.push((
+            PanelButton::Achievements,
+            "Conquistas".to_string(),
+            has_achievements,
+        ));
     }
     if has_cheats {
-        rows.push((PanelButton::Cheats, "Cheats".to_string()));
+        rows.push((PanelButton::Cheats, "Cheats".to_string(), true));
     }
     rows.push((
         PanelButton::PrintScreen,
@@ -750,14 +759,17 @@ fn command_rows(
         } else {
             label(PanelButton::PrintScreen, "Printscreen")
         },
+        true,
     ));
     rows.push((
         PanelButton::SaveState,
         label(PanelButton::SaveState, "Salvar"),
+        true,
     ));
     rows.push((
         PanelButton::LoadState,
         label(PanelButton::LoadState, "Carregar"),
+        true,
     ));
     rows
 }
@@ -1631,6 +1643,7 @@ pub fn run_game(
     let commands = command_rows(
         &flash,
         !cheat_defs.is_empty(),
+        ra_on,
         ra_session.is_some(),
         all_slots_pinned(&notes_meta),
     );
@@ -2575,7 +2588,18 @@ pub fn run_game(
                     cab.set_modal("Carregar estado", &load_slot_rows(&spec.save_dir, &title));
                 }
                 UiEvent::OpenAchievementsModal if powered => {
-                    let Some(ra) = &ra_session else { continue };
+                    let Some(ra) = &ra_session else {
+                        // O botão desativado (jogo sem set — plan revision:
+                        // "mostre o botão mas mostre desativado") continua
+                        // clicável de propósito: o OSD conta o porquê em vez
+                        // de o clique morrer em silêncio.
+                        cab.push_osd(
+                            &["CONQUISTAS", "sem conquistas neste jogo"],
+                            None,
+                            Duration::from_secs(3),
+                        );
+                        continue;
+                    };
                     let (total, earned) = ra.earned_snapshot();
                     // Cada linha diz o modo do ganho: [HC] hardcore,
                     // [SC] softcore, [ ] não ganha (plan revision: "como
@@ -3118,6 +3142,7 @@ pub fn run_game(
             cab.set_commands(&command_rows(
                 &flash,
                 !cheat_defs.is_empty(),
+                ra_on,
                 ra_session.is_some(),
                 all_pinned,
             ));

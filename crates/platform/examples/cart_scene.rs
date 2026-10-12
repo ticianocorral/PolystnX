@@ -87,7 +87,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         None,
         Some((w, h, &rgba)),
         "Exemplo",
-        &[(PanelButton::Power, "Ligar".into())],
+        &[(PanelButton::Power, "Ligar".into(), true)],
     );
 
     // 5% steps for both motions — dense enough to assemble a smooth GIF.
