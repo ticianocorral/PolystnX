@@ -12,6 +12,10 @@ fn main() -> anyhow::Result<()> {
     let mut it = std::env::args().skip(1);
     let w: u32 = it.next().unwrap_or_else(|| "1280".into()).parse().unwrap();
     let h: u32 = it.next().unwrap_or_else(|| "800".into()).parse().unwrap();
+    // 3º arg opcional: nameplate de teste (QA da fonte — chars fora do atlas).
+    let plate = it
+        .next()
+        .unwrap_or_else(|| "PolystnX v1.1.0-beta\nPCSX Rearmed r26".into());
     let out = PathBuf::from("/tmp/deck-probe");
     std::fs::create_dir_all(&out)?;
 
@@ -19,17 +23,18 @@ fn main() -> anyhow::Result<()> {
     let mut cab = plat
         .create_cabinet("PolystnX", w, h, false)
         .map_err(|e| anyhow::anyhow!(e.to_string()))?;
-    cab.set_nameplate("PolystnX v1.1.0-beta\nPCSX Rearmed r26");
+    cab.set_nameplate(&plate);
 
     let logo = flat(480, 120, (150, 40, 40, 255));
     let label = disc_art();
     let (lw, lh) = (256u32, 256u32);
     let commands = vec![
-        (PanelButton::Notebook, "Anotações".to_string()),
-        (PanelButton::Cheats, "Cheats".to_string()),
-        (PanelButton::PrintScreen, "Printscreen".to_string()),
-        (PanelButton::SaveState, "Salvar".to_string()),
-        (PanelButton::LoadState, "Carregar".to_string()),
+        (PanelButton::Notebook, "Anotações".to_string(), true),
+        (PanelButton::Achievements, "Conquistas".to_string(), false),
+        (PanelButton::Cheats, "Cheats".to_string(), true),
+        (PanelButton::PrintScreen, "Printscreen".to_string(), true),
+        (PanelButton::SaveState, "Salvar".to_string(), true),
+        (PanelButton::LoadState, "Carregar".to_string(), true),
     ];
     cab.set_panel(
         Some((480, 120, &logo)),

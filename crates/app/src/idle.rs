@@ -655,7 +655,7 @@ fn draw_update_view(
     let mut y = UPDATE_MARGIN + 60;
     for line in &lines {
         if y > h - 150 {
-            d.text(x, y, 1, SETUP_DIM, "…");
+            d.text(x, y, 1, SETUP_DIM, "...");
             break;
         }
         d.text_wrapped(x, y, (w - UPDATE_MARGIN * 2) as u32, 1, SETUP_TEXT, line);

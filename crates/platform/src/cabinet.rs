@@ -134,11 +134,35 @@ const GLYPH_COLS: u32 = GLYPH_LAST - GLYPH_FIRST + 1;
 /// Map a char to its column in the font atlas; anything outside the covered
 /// range (or with no glyph in the font) falls back to `?`.
 fn glyph_index(ch: char) -> u32 {
-    let c = ch as u32;
+    let c = atlas_char(ch) as u32;
     if (GLYPH_FIRST..=GLYPH_LAST).contains(&c) {
         c - GLYPH_FIRST
     } else {
         '?' as u32 - GLYPH_FIRST
+    }
+}
+
+/// Copies fixas e strings dinâmicas (changelog do GitHub, títulos de jogo,
+/// status) trazem pontuação tipográfica e setas fora do atlas — cada uma vira
+/// o glifo ASCII mais próximo em vez do `?` (plan revision: "corrigir copy
+/// com ? que estao aparecendo no app"). Só mapeia o que está FORA de
+/// 0x20..=0xFF: o que o Latin-1 já cobre usa o glifo de verdade.
+fn atlas_char(ch: char) -> char {
+    match ch {
+        '–' | '—' | '•' => '-',
+        '…' => '.',
+        '‹' | '←' => '<',
+        '›' | '→' => '>',
+        '↑' => '^',
+        '↓' => 'v',
+        '‘' | '’' => '\'',
+        '“' | '”' => '"',
+        '\u{3000}' => ' ',
+        // full-width (Ａ→A, １→1): espelho fixo do ASCII, 0xFEE0 abaixo.
+        c if (0xFF01..=0xFF5E).contains(&(c as u32)) => {
+            char::from_u32(c as u32 - 0xFEE0).unwrap_or('?')
+        }
+        c => c,
     }
 }
 
@@ -428,8 +452,9 @@ pub enum PanelButton {
     /// the old separate "Pausar" button; "Nota" moved to `PrintScreen`).
     Notebook,
     /// Opens the achievements list modal (plan:
-    /// `docs/plano-retroachievements.md`, fase 4) — only drawn while an RA
-    /// session is active for the loaded game.
+    /// `docs/plano-retroachievements.md`, fase 4) — drawn whenever the RA
+    /// account is configured, desativado (row apagada) quando o jogo não
+    /// tem set (plan revision: "mostre o botão mas mostre desativado").
     Achievements,
     /// Opens the achievements list on the shelf (plan fase 2/4) — inside
     /// the tube, like the back-cover zoom. Only drawn while the focused
@@ -719,7 +744,11 @@ struct PanelInfo {
     #[allow(dead_code)]
     has_cartridge: bool,
     title: String,
-    commands: Vec<(PanelButton, String)>,
+    /// `(kind, label, enabled)` — `enabled: false` draws the row apagada
+    /// (plan revision: "mostre o botão mas mostre desativado", o Conquistas
+    /// de jogo sem set) e o clique nela continua chegando ao caller, que
+    /// decide o que fazer (o runner mostra o porquê no OSD).
+    commands: Vec<(PanelButton, String, bool)>,
     /// Whether the console is on right now — dims/brightens the command
     /// buttons (Eject only clunks while powered, Reset and everything past
     /// it only act while powered), and which way the Power rocker sits. Set
@@ -771,6 +800,39 @@ struct PanelInfo {
     card_motion: Option<(f32, bool)>,
 }
 
+/// Uma barra do bloco HowLongToBeat do painel — o rótulo dim em cima
+/// ("história principal") e a barra colorida com o tempo dentro, largura
+/// proporcional ao duration (`frac` 0..1 contra o maior tempo do jogo; o
+/// desenho impõe um mínimo visível).
+#[derive(Clone)]
+pub struct HltbBar {
+    pub label: String,
+    /// O tempo formatado ("1h 59min") — escrito dentro da barra quando
+    /// cabe, logo depois dela quando não cabe.
+    pub text: String,
+    pub frac: f32,
+    pub color: (u8, u8, u8),
+}
+
+/// O bloco HowLongToBeat da aba informações — as 4 barras de tempo (como o
+/// card do site: história, + extras, completista, todos os estilos) sob um
+/// cabeçalho com o ícone "H". `icon` é a textura registrada pelo caller via
+/// `Cabinet::set_image`; sem ela o cabeçalho fica só com o texto.
+#[derive(Clone)]
+pub struct HltbBars {
+    pub icon: u64,
+    pub rows: Vec<HltbBar>,
+}
+
+/// A seção de nota da IGDB na aba informações — cabeçalho com a logo e o
+/// valor centrado. `icon` é a textura registrada pelo caller.
+#[derive(Clone)]
+pub struct IgdbSection {
+    pub icon: u64,
+    /// A nota formatada ("68 / 100").
+    pub nota: String,
+}
+
 /// What the shelf's flat side panel shows for the currently-selected game
 /// (plan revision — moved out of the warped screen buffer so its text reads
 /// crisp and its logo doesn't bow with the tube curvature, same as the
@@ -815,7 +877,9 @@ pub struct ShelfPanelInfo {
     pub favorite: Option<bool>,
     /// The focused game is identified on RetroAchievements (plan fase 2) —
     /// draws a "Conquistas" button (`ShelfButton::ShelfAchievements`)
-    /// between "Favoritar" and "Configurações".
+    /// between "Favoritar" and "Configurações". Desativado quando
+    /// `achievements_reason` é `Some` (plan revision: "mostre o botão mas
+    /// mostre desativado") — identificado sem set conta como identificado.
     pub achievements: bool,
     /// A primeira página do manual em PDF (plan revision: o corpo da aba
     /// manual a mostra como as artes, e o clique nela abre o leitor).
@@ -823,14 +887,22 @@ pub struct ShelfPanelInfo {
     pub manual_first_page: Option<u64>,
     /// O motivo pelo qual o botão Conquistas aparece **desativado** (plan
     /// revision: "avisar o usuário com tooltip no botão conquistas,
-    /// mostrar mas deixar desativado") — o RA marcou o hash como versão
-    /// não suportada, então o botão desenha apagado com o motivo no
-    /// rótulo e o clique nele não faz nada. `None` = destravado.
+    /// mostrar mas deixar desativado") — impresso no rótulo entre
+    /// parênteses ("versão sem suporte" para hash marcado pelo RA, "sem
+    /// conquistas" para set vazio) e o clique nele não faz nada. `None` =
+    /// destravado.
     pub achievements_reason: Option<String>,
     /// A medalha de prêmio do jogo (plan fase 4) — textura já registrada
     /// pelo caller (`set_image`), desenhada à esquerda do número da linha
     /// "conquistas".
     pub award_img: Option<u64>,
+    /// O bloco HowLongToBeat (as 4 barras de tempo com o ícone "H") no fim
+    /// da aba informações — `None` e o jogo não ganha bloco nenhum (o site
+    /// não conhece o jogo; tabela embutida, nada de rede).
+    pub hltb: Option<HltbBars>,
+    /// A seção de nota da IGDB (logo + valor) na aba informações — `None`
+    /// e o jogo não ganha seção (sem nota na IGDB para ele).
+    pub igdb: Option<IgdbSection>,
 }
 
 /// Medalha + respiro antes do número — compartilhados pela medida da
@@ -872,6 +944,11 @@ struct ImgTex {
     tex: Texture,
     w: u32,
     h: u32,
+    /// A arte tem transparência de verdade (algum pixel com alpha abaixo de
+    /// 250 — render 3D em ângulo, fundo vazado). Carregada NA textura, não
+    /// num registro paralelo: a textura sobrevive entre visitas à estante,
+    /// e a flag tem que sobreviver junto.
+    vazado: bool,
 }
 
 /// The bounding box of pixels with any alpha, in texture pixels — an
@@ -1244,7 +1321,7 @@ impl Cabinet {
         logo: Option<(u32, u32, &[u8])>,
         cartridge: Option<(u32, u32, &[u8])>,
         title: &str,
-        commands: &[(PanelButton, String)],
+        commands: &[(PanelButton, String, bool)],
     ) {
         let has_logo = if let Some((w, h, rgba)) = logo {
             self.set_image(PANEL_LOGO_IMG, w, h, rgba);
@@ -1287,7 +1364,7 @@ impl Cabinet {
     /// Refresh the command legend's labels (plan revision: a "(feito!)"
     /// flash on a silent action is live state, so the caller rebuilds and
     /// passes this every frame instead of once). A no-op before `set_panel`.
-    pub fn set_commands(&mut self, commands: &[(PanelButton, String)]) {
+    pub fn set_commands(&mut self, commands: &[(PanelButton, String, bool)]) {
         if let Some(panel) = &mut self.panel {
             panel.commands = commands.to_vec();
         }
@@ -2244,6 +2321,56 @@ impl Cabinet {
         if w == 0 || h == 0 || rgba.len() < (w * h * 4) as usize {
             return;
         }
+        let vazado = rgba.chunks_exact(4).any(|p| p[3] < 250);
+        // Arte vazada (render 3D em ângulo): a matte do render —
+        // anti-aliasing CINZA em volta da caixa — vira franja cinza quando a
+        // textura é reduzida com filtro linear. No upload, limpa: semi cinza
+        // sai do todo. Em seguida, SANGRIA DE BORDA: o rgb dos texels
+        // vazados herda a cor do conteúdo vizinho — com filtro linear, o
+        // contorno mistura caixa com caixa (e não com preto/cinza), e quem
+        // faz o fade é só o alpha: transparência de verdade, sem halo
+        // escuro na volta nem sombra na base.
+        let rgba_limpa;
+        let rgba = if vazado {
+            let mut limpa = rgba.to_vec();
+            for p in limpa.chunks_exact_mut(4) {
+                let (r, g, b, a) = (p[0], p[1], p[2], p[3]);
+                if a > 0 && a < 250 && r.abs_diff(g) < 24 && g.abs_diff(b) < 24 {
+                    p[3] = 0;
+                }
+            }
+            let (wu, hu) = (w as usize, h as usize);
+            for _ in 0..2 {
+                let fonte = limpa.clone();
+                for y in 0..hu {
+                    for x in 0..wu {
+                        let i = (y * wu + x) * 4;
+                        if fonte[i + 3] != 0 {
+                            continue;
+                        }
+                        let vizinho = [
+                            x.checked_sub(1).map(|nx| (nx, y)),
+                            Some((x + 1, y)).filter(|&(nx, _)| nx < wu),
+                            y.checked_sub(1).map(|ny| (x, ny)),
+                            Some((x, y + 1)).filter(|&(_, ny)| ny < hu),
+                        ]
+                        .into_iter()
+                        .flatten()
+                        .find(|&(nx, ny)| fonte[(ny * wu + nx) * 4 + 3] > 0);
+                        if let Some((nx, ny)) = vizinho {
+                            let j = (ny * wu + nx) * 4;
+                            limpa[i] = fonte[j];
+                            limpa[i + 1] = fonte[j + 1];
+                            limpa[i + 2] = fonte[j + 2];
+                        }
+                    }
+                }
+            }
+            rgba_limpa = limpa;
+            &rgba_limpa
+        } else {
+            rgba
+        };
         let mut tex = match self.canvas.create_texture_static(SdlFormat::RGBA32, w, h) {
             Ok(t) => t,
             Err(e) => {
@@ -2256,7 +2383,13 @@ impl Cabinet {
         }
         tex.set_blend_mode(BlendMode::Blend);
         tex.set_scale_mode(SdlScaleMode::Linear);
-        self.images.insert(id, ImgTex { tex, w, h });
+        self.images.insert(id, ImgTex { tex, w, h, vazado });
+    }
+
+    /// A imagem `id` tem transparência de verdade (fundo vazado) — ver
+    /// [`ImgTex::vazado`]. Imagem desconhecida: `false`.
+    pub fn image_vazado(&self, id: u64) -> bool {
+        self.images.get(&id).is_some_and(|img| img.vazado)
     }
 
     /// Draw a 2D frame: `draw` renders into a screen-sized buffer (coords
@@ -3482,6 +3615,12 @@ impl Screen<'_> {
         self.images.contains_key(&id)
     }
 
+    /// A imagem `id` tem transparência de verdade (fundo vazado) — o gêmeo
+    /// do [`Cabinet::image_vazado`] para o desenho da estante.
+    pub fn image_vazado(&self, id: u64) -> bool {
+        self.images.get(&id).is_some_and(|img| img.vazado)
+    }
+
     /// Draw image `id` letterboxed inside the box, centered. No-op if unknown.
     pub fn image_fit(&mut self, id: u64, x: i32, y: i32, bw: u32, bh: u32) {
         let Some(img) = self.images.get(&id) else {
@@ -3493,6 +3632,26 @@ impl Screen<'_> {
         let dh = (ih * scale).round() as i32;
         let dx = x + (bw as i32 - dw) / 2;
         let dy = y + (bh as i32 - dh) / 2;
+        let _ = self.canvas.copy(
+            &img.tex,
+            None::<sdl3::render::FRect>,
+            Rect::new(dx, dy, dw.max(1) as u32, dh.max(1) as u32),
+        );
+    }
+
+    /// Como [`Screen::image_fit`], com a arte ancorada na BASE do rect —
+    /// para capa vazada (render 3D em ângulo, fundo transparente): a caixa
+    /// pousa com a base na prateleira em vez de flutuar centrada.
+    pub fn image_fit_bottom(&mut self, id: u64, x: i32, y: i32, bw: u32, bh: u32) {
+        let Some(img) = self.images.get(&id) else {
+            return;
+        };
+        let (iw, ih) = (img.w as f32, img.h as f32);
+        let scale = (bw as f32 / iw).min(bh as f32 / ih);
+        let dw = (iw * scale).round() as i32;
+        let dh = (ih * scale).round() as i32;
+        let dx = x + (bw as i32 - dw) / 2;
+        let dy = y + bh as i32 - dh;
         let _ = self.canvas.copy(
             &img.tex,
             None::<sdl3::render::FRect>,
@@ -4570,7 +4729,7 @@ fn draw_slot_furniture(
     let face_h = (face_bottom - face_top).max(1);
     let btn_r =
         ((face_h as f32 * 0.30).round() as i32).min(if block.width() < 640 { 34 } else { 46 });
-    let face_inset = if tight { 4 } else { 10 };
+    let face_inset = if tight { 2 } else { 10 };
     let col_l = block.x() + face_inset + btn_r;
     let col_r = block.right() - face_inset - btn_r;
 
@@ -4661,15 +4820,20 @@ fn draw_slot_furniture(
         let dy = (cy - by) as f32;
         (dx * dx + dy * dy).sqrt() - br as f32
     };
-    // Nas apertadas o disco come a folga inteira: sem a margem extra dos
-    // 4 px e com o divisor mais justo — combinado com os botões recolhidos,
-    // o vão sobe de ~128 px para ~160 px de lado.
+    // A folga de 4 px vale nas DUAS larguras, e o divisor 1.13 é o mesmo: ele
+    // é o raio do aro do LEITOR (side × 0.565 — a placa de PSX_SHELL em volta
+    // do disco, `side_reader` × 1.06 mais o lábio de 0.035), não o do quad do
+    // disco. Nas apertadas o vão era medido pelo raio do disco (1.08) e sem
+    // margem: o aro do leitor passava dos 4 px calculados e encostava no
+    // POWER/OPEN e no RESET (plan revision: "os botões estão encostando no
+    // disco, coloque uma leve separação") — agora o vão cede 11 px de lado e
+    // a folga de 4 px do FHD fica igual nas telas apertadas.
     let reach = clearance(col_l, reset_cy, reset_r)
         .min(clearance(col_l, power_cy, btn_r))
         .min(clearance(col_r, power_cy, btn_r))
-        - if tight { 0.0 } else { 4.0 };
+        - 4.0;
     let side_v = ((disc_bot_lim - disc_top_lim) as f32 / 1.145) as i32;
-    let side_w = (reach * 2.0 / if tight { 1.08 } else { 1.13 }) as i32;
+    let side_w = (reach * 2.0 / 1.13) as i32;
     let side = side_v.min(side_w).max(24);
     let mut disc = Rect::new(
         block.x() + (block.width() as i32 - side) / 2,
@@ -4725,14 +4889,20 @@ fn draw_slot_furniture(
         let label_h = 56i32;
         let lip_y = recess.y();
         let bottom_lim = label_y + label_h + 2;
-        // encaixado (t=1): o corpo desce só até deixar 10 px de língua fora
-        // da boca — a copy "MEMORY CARD" e a logo ficam TODAS acima da
-        // linha da carcaça (o card entra fundo: plan revision "entre um
-        // pouco mais... deve aparecer apenas a label inteira e o botao de
-        // trocar ejetar"). início (t=0): o card nasce DE BAIXO do console —
-        // o corpo INTEIRO abaixo da banda visível, escondido — e SOBE,
-        // igual ao cartucho do SNES entrando por baixo.
-        let seated_y = mc1.bottom() - body_h - 19;
+        // encaixado (t=1): a boca tem que cortar o corpo ACIMA da copy
+        // "MEMORY CARD" moldada (tinta nas linhas 59–76 do corpo) — nas
+        // apertadas o box é mais alto (76 px), então o -19 do FHD deixava a
+        // copy inteira aparecendo em tarja entre o rebaixo e o adesivo (plan
+        // revision: "encaixe mais o memory card, nao deve mostrar apenas a
+        // label e o botao de trocar e ejetar"). -42 px põe a linha de corte na
+        // linha 81 do corpo: logo e copy somem sob a carcaça; de fora ficam o
+        // rebaixo escuro da boca, a língua do plástico e a label inteira
+        // (adesivo com o nome + "Trocar/Ejetar" impresso). O FHD fica no -19
+        // de sempre (corte na linha 76 — plan revision: "na resolução FHD ou
+        // maior nao mexer"). início (t=0): o card nasce DE BAIXO do console —
+        // o corpo INTEIRO abaixo da banda visível, escondido — e SOBE, igual
+        // ao cartucho do SNES entrando por baixo.
+        let seated_y = mc1.bottom() - body_h - if tight { 42 } else { 19 };
         let travel = (bottom_lim - seated_y).max(1);
         let card_y = seated_y + ((1.0 - t) * travel as f32).round() as i32;
         let total_h = body_h + label_h;
@@ -5118,11 +5288,25 @@ fn draw_panel_slot(
 struct TextStyle {
     scale: f32,
     color: (u8, u8, u8),
+    /// Negrito da fonte mono: cada glifo desenhado duas vezes, 1px ao
+    /// lado — duplo impacto, o jeito clássico de engrossar bitmap.
+    bold: bool,
 }
 
 impl TextStyle {
     fn new(scale: f32, color: (u8, u8, u8)) -> Self {
-        Self { scale, color }
+        Self {
+            scale,
+            color,
+            bold: false,
+        }
+    }
+    fn bold(scale: f32, color: (u8, u8, u8)) -> Self {
+        Self {
+            scale,
+            color,
+            bold: true,
+        }
     }
 }
 
@@ -5150,8 +5334,16 @@ fn draw_text_absolute(
         let idx = glyph_index(ch);
         if ch != ' ' {
             let src = Rect::new(idx as i32 * GLYPH_W as i32, 0, GLYPH_W, GLYPH_H);
-            let dst = Rect::new(pen.round() as i32, y, dw, dh);
-            let _ = canvas.copy(font, src, dst);
+            let strikes = if style.bold { 2 } else { 1 };
+            for strike in 0..strikes {
+                let dst = Rect::new(
+                    pen.round() as i32 + (strike as f32 * style.scale).round() as i32,
+                    y,
+                    dw,
+                    dh,
+                );
+                let _ = canvas.copy(font, src, dst);
+            }
         }
         pen += dw as f32;
     }
@@ -5508,10 +5700,10 @@ fn draw_panel(
     // only acts while powered — Power/Eject/Reset are drawn separately
     // above (item 2) with their own dim rules, so they're filtered out of
     // this list rather than drawn twice.
-    let other_commands: Vec<&(PanelButton, String)> = panel
+    let other_commands: Vec<&(PanelButton, String, bool)> = panel
         .commands
         .iter()
-        .filter(|(k, _)| {
+        .filter(|(k, _, _)| {
             !matches!(
                 k,
                 PanelButton::Power | PanelButton::Eject | PanelButton::Reset
@@ -5525,8 +5717,9 @@ fn draw_panel(
         // o memory card mais visível") — o vão é a pista da label do card
         // (adesivo + "Trocar/Ejetar"), que desce além do pé da face.
         // Nas apertadas o vão encolhe para o mínimo da label do card (ela
-        // desce 60 px além do pé da face) — a lista de comandos sobe junto.
-        cy += if tight_panel { 62 } else { 80 };
+        // desce 60 px além do pé da face) — a lista de comandos sobe junto
+        // (plan revision: "suba um pouco mais o bloco de comandos").
+        cy += if tight_panel { 26 } else { 80 };
         draw_text_absolute(
             canvas,
             font,
@@ -5538,7 +5731,7 @@ fn draw_panel(
         );
         cy += GLYPH_H as i32 + 6;
     }
-    for (kind, label) in other_commands {
+    for (kind, label, enabled) in other_commands {
         // Check the row's projected bottom, not just its top — otherwise
         // the last row drawn can still poke into the session clock's band.
         if cy + 4 + (GLYPH_H + 6) as i32 > limit {
@@ -5548,7 +5741,11 @@ fn draw_panel(
         // Tighter than a lone idle-screen button (plan revision: nine of
         // these stack now, not three — every extra pixel per row adds up).
         let btn = Rect::new(x, cy, inner_w, GLYPH_H + 6);
-        let drawn = draw_button(canvas, font, btn, label, panel.powered);
+        // A row can ser desativada por conta própria (o Conquistas de jogo
+        // sem set — plan revision: "mostre o botão mas mostre desativado"):
+        // apagada mesmo com o console ligado. O hit continua valendo — o
+        // caller conta o porquê no OSD.
+        let drawn = draw_button(canvas, font, btn, label, panel.powered && *enabled);
         cy = drawn.bottom();
         buttons.push((*kind, drawn));
     }
@@ -5883,8 +6080,11 @@ fn draw_shelf_panel(
         .map(|id| vec![PanelBlock::Image(id, 210)])
         .unwrap_or_default();
     let mut info_blocks: Vec<PanelBlock> = Vec::new();
+    if panel.release.is_some() || !panel.info.is_empty() {
+        info_blocks.push(PanelBlock::Title("Informações Gerais"));
+    }
     if let Some(release) = &panel.release {
-        info_blocks.push(PanelBlock::Release(release));
+        info_blocks.push(PanelBlock::Field("lançamento", release));
     }
     for (label, value) in &panel.info {
         // A linha de conquistas ganha a medalha de prêmio do RA quando o
@@ -5892,6 +6092,22 @@ fn draw_shelf_panel(
         match panel.award_img.filter(|_| label == "conquistas") {
             Some(medal) => info_blocks.push(PanelBlock::RaField(label, value, medal)),
             None => info_blocks.push(PanelBlock::Field(label, value)),
+        }
+    }
+    // O bloco HowLongToBeat fecha a aba: o cabeçalho com o ícone e uma
+    // barra por estilo — em blocos separados para o scroll encaixar o que
+    // couber (o bloco inteiro não cabia e o `break` o pulava inteiro).
+    // A seção de nota da IGDB, entre as infos gerais e o HowLongToBeat.
+    if let Some(igdb) = &panel.igdb {
+        info_blocks.push(PanelBlock::SectionHead(igdb.icon, "IGDB"));
+        info_blocks.push(PanelBlock::Field("nota", &igdb.nota));
+    }
+    if let Some(hltb) = &panel.hltb {
+        if !hltb.rows.is_empty() {
+            info_blocks.push(PanelBlock::SectionHead(hltb.icon, "HowLongToBeat"));
+            for bar in &hltb.rows {
+                info_blocks.push(PanelBlock::Field(&bar.label, &bar.text));
+            }
         }
     }
     let manual_blocks: Vec<PanelBlock> = panel
@@ -5908,7 +6124,9 @@ fn draw_shelf_panel(
     let has = |s: PanelSection| match s {
         PanelSection::CapaTraseira => panel.backcover_img.is_some(),
         PanelSection::Cartucho => panel.cartridge_img.is_some(),
-        PanelSection::Informacoes => panel.release.is_some() || !panel.info.is_empty(),
+        PanelSection::Informacoes => {
+            panel.release.is_some() || !panel.info.is_empty() || panel.hltb.is_some()
+        }
         PanelSection::Manual => panel.manual_first_page.is_some(),
     };
 
@@ -6045,11 +6263,14 @@ fn draw_shelf_panel(
 /// headline stat), unlike `Field`'s stacked label-then-value.
 enum PanelBlock<'a> {
     Image(u64, u32),
-    Release(&'a str),
+    /// Título de seção da aba ("Informações Gerais"), centralizado.
+    Title(&'a str),
     /// label/valor com a medalha de prêmio à esquerda do valor — a linha
     /// "conquistas" quando o servidor concedeu um prêmio ao jogo.
     RaField(&'a str, &'a str, u64),
     Field(&'a str, &'a str),
+    /// Cabeçalho de seção: ícone + título em negrito (IGDB, HowLongToBeat).
+    SectionHead(u64, &'a str),
 }
 
 /// `block`'s height in pixels, gap included — must match `draw_panel_block`
@@ -6058,13 +6279,48 @@ enum PanelBlock<'a> {
 fn panel_block_height(inner_w: u32, block: &PanelBlock) -> i32 {
     match block {
         PanelBlock::Image(_, h) => 8 + *h as i32,
-        PanelBlock::Release(_) => 8 + GLYPH_H as i32,
+        PanelBlock::Title(_) => 10 + GLYPH_H as i32,
         PanelBlock::RaField(label, value, _) => {
             10 + wrapped_height(inner_w, 1, label) + wrapped_height(inner_w, 1, value)
         }
         PanelBlock::Field(label, value) => {
             10 + wrapped_height(inner_w, 1, label) + wrapped_height(inner_w, 1, value)
         }
+        PanelBlock::SectionHead(_, _) => 8 + HLTB_ICON + 4,
+    }
+}
+
+/// Ícone do HowLongToBeat no cabeçalho do bloco (quadrado, com o glifo da
+/// legenda dentro) e altura da barra de tempo (o glifo + respiro em cima e
+/// embaixo para o tempo caber escrito dentro).
+const HLTB_ICON: i32 = 40;
+
+/// Texto de painel centralizado na largura útil — o que estourar cai no
+/// wrap alinhado à esquerda de sempre. Devolve o y logo abaixo do texto.
+fn draw_text_centered_absolute(
+    canvas: &mut WindowCanvas,
+    font: &mut Texture,
+    x: i32,
+    y: i32,
+    inner_w: u32,
+    style: TextStyle,
+    s: &str,
+) -> i32 {
+    let per = GLYPH_W as i32 + if style.bold { 1 } else { 0 };
+    let tw = s.chars().count() as i32 * per - if style.bold { 1 } else { 0 };
+    if tw <= inner_w as i32 {
+        draw_text_absolute(
+            canvas,
+            font,
+            x + (inner_w as i32 - tw) / 2,
+            y,
+            style,
+            s,
+            usize::MAX,
+        );
+        y + GLYPH_H as i32
+    } else {
+        draw_text_wrapped_absolute(canvas, font, x, y, inner_w, style, s)
     }
 }
 
@@ -6084,31 +6340,21 @@ fn draw_panel_block(
             draw_image_absolute(canvas, images, *id, x, cy, inner_w, *h);
             cy + *h as i32
         }
-        PanelBlock::Release(value) => {
-            let cy = cy + 8;
-            draw_text_absolute(
+        PanelBlock::Title(t) => {
+            let cy = cy + 10;
+            draw_text_centered_absolute(
                 canvas,
                 font,
                 x,
                 cy,
-                TextStyle::new(1.0, PANEL_DIM),
-                "lançamento",
-                usize::MAX,
-            );
-            draw_text_absolute(
-                canvas,
-                font,
-                x + (GLYPH_W * 11) as i32,
-                cy,
-                TextStyle::new(1.0, PANEL_TEXT),
-                value,
-                usize::MAX,
-            );
-            cy + GLYPH_H as i32
+                inner_w,
+                TextStyle::bold(1.0, PANEL_TEXT),
+                t,
+            )
         }
         PanelBlock::RaField(label, value, medal) => {
             let cy = cy + 10;
-            let cy = draw_text_wrapped_absolute(
+            let cy = draw_text_centered_absolute(
                 canvas,
                 font,
                 x,
@@ -6117,24 +6363,30 @@ fn draw_panel_block(
                 TextStyle::new(1.0, PANEL_DIM),
                 label,
             );
-            // Número primeiro, medalha logo depois — a fonte é monoespaçada
-            // (GLYPH_W por caractere no size 1), então o fim do texto é
-            // conhecido sem medição.
-            draw_text_wrapped_absolute(
+            // Número + medalha como uma unidade, centrados — a fonte é
+            // monoespaçada (GLYPH_W por caractere no size 1), então o fim do
+            // texto é conhecido sem medição.
+            let value_w = value.chars().count() as i32 * GLYPH_W as i32;
+            let total = value_w + AWARD_MEDAL_GAP + AWARD_MEDAL_W;
+            let vx = if total <= inner_w as i32 {
+                x + (inner_w as i32 - total) / 2
+            } else {
+                x
+            };
+            draw_text_absolute(
                 canvas,
                 font,
-                x,
+                vx,
                 cy,
-                inner_w,
                 TextStyle::new(1.0, PANEL_TEXT),
                 value,
+                usize::MAX,
             );
-            let text_w = value.chars().count() as i32 * GLYPH_W as i32;
             draw_image_absolute(
                 canvas,
                 images,
                 *medal,
-                x + text_w + AWARD_MEDAL_GAP,
+                vx + value_w + AWARD_MEDAL_GAP,
                 cy + (GLYPH_H as i32 - AWARD_MEDAL_H) / 2,
                 AWARD_MEDAL_W as u32,
                 AWARD_MEDAL_H as u32,
@@ -6143,7 +6395,7 @@ fn draw_panel_block(
         }
         PanelBlock::Field(label, value) => {
             let cy = cy + 10;
-            let cy = draw_text_wrapped_absolute(
+            let cy = draw_text_centered_absolute(
                 canvas,
                 font,
                 x,
@@ -6152,7 +6404,7 @@ fn draw_panel_block(
                 TextStyle::new(1.0, PANEL_DIM),
                 label,
             );
-            draw_text_wrapped_absolute(
+            draw_text_centered_absolute(
                 canvas,
                 font,
                 x,
@@ -6161,6 +6413,33 @@ fn draw_panel_block(
                 TextStyle::new(1.0, PANEL_TEXT),
                 value,
             )
+        }
+        PanelBlock::SectionHead(icon, titulo) => {
+            // Cabeçalho de seção centrado: o ícone + o título em negrito
+            // como uma unidade.
+            let cy = cy + 8;
+            let legenda = *titulo;
+            let total = HLTB_ICON as i32 + 6 + legenda.len() as i32 * (GLYPH_W as i32 + 1) - 1;
+            let hx = x + (inner_w as i32 - total) / 2;
+            draw_image_absolute(
+                canvas,
+                images,
+                *icon,
+                hx,
+                cy,
+                HLTB_ICON as u32,
+                HLTB_ICON as u32,
+            );
+            draw_text_absolute(
+                canvas,
+                font,
+                hx + HLTB_ICON + 8,
+                cy + (HLTB_ICON - GLYPH_H as i32) / 2,
+                TextStyle::bold(1.0, PANEL_TEXT),
+                legenda,
+                usize::MAX,
+            );
+            cy + HLTB_ICON + 4
         }
     }
 }
@@ -7208,6 +7487,34 @@ mod tests {
         assert_eq!(wrapped_height(90, 1, "hello you"), row);
         // A single word longer than the line is hard-split.
         assert_eq!(wrapped_height(90, 1, &"x".repeat(25)), 3 * row);
+    }
+
+    #[test]
+    fn atlas_char_traduz_o_que_o_atlas_nao_tem() {
+        use super::{atlas_char, glyph_index};
+        // pontuação tipográfica e setas viram o ASCII mais próximo — nada de
+        // "?" na copy (plan revision: "corrigir copy com ?")
+        assert_eq!(atlas_char('—'), '-');
+        assert_eq!(atlas_char('–'), '-');
+        assert_eq!(atlas_char('•'), '-');
+        assert_eq!(atlas_char('…'), '.');
+        assert_eq!(atlas_char('←'), '<');
+        assert_eq!(atlas_char('→'), '>');
+        assert_eq!(atlas_char('↑'), '^');
+        assert_eq!(atlas_char('↓'), 'v');
+        assert_eq!(atlas_char('‘'), '\'');
+        assert_eq!(atlas_char('“'), '"');
+        assert_eq!(atlas_char('\u{3000}'), ' ');
+        // full-width é o espelho ASCII do bloco U+FF01..U+FF5E
+        assert_eq!(atlas_char('Ａ'), 'A');
+        assert_eq!(atlas_char('１'), '1');
+        // o Latin-1 que o atlas TEM passa intocado — acento usa o glifo real
+        assert_eq!(atlas_char('ç'), 'ç');
+        assert_eq!(atlas_char('Õ'), 'Õ');
+        // e o que não tem tradução cai no '?' de sempre, desenhável
+        assert_eq!(glyph_index('—'), glyph_index('-'));
+        assert_ne!(glyph_index('—'), glyph_index('?'));
+        assert_eq!(glyph_index('⌘'), glyph_index('?'));
     }
 }
 

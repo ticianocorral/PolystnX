@@ -36,3 +36,12 @@ pub mod update_check;
 /// para o badge do queixo. Vermelho/dourado/azul: a marca lida na própria
 /// TV.
 pub const RA_ICON_PNG: &[u8] = include_bytes!("../assets/ra-icon.png");
+
+/// O "H" do HowLongToBeat (o favicon do site, embutida) — a estante registra
+/// no `Cabinet` ao lado do badge do RA para o cabeçalho do bloco de tempos
+/// (as barras "zerar / + extras / 100% / todos" da aba informações).
+pub const HLTB_ICON_PNG: &[u8] = include_bytes!("../assets/hltb-icon.png");
+
+/// A logo da IGDB (o quadrado roxo do press kit, embutida) — a estante
+/// registra no `Cabinet` para o cabeçalho da seção de nota.
+pub const IGDB_ICON_PNG: &[u8] = include_bytes!("../assets/igdb-icon.png");

@@ -196,15 +196,15 @@ impl Catalog {
                 // Título: primeiro o DAT (No-Intro/Redump, pelo serial — o
                 // nome canônico "Tekken 3 (USA)"); sem DAT, a tabela PSX
                 // embutida, também pelo serial; sem ambos, o nome do arquivo.
-                let psx_hit = crate::psx::lookup(&r.id.serial);
+                let infos_hit = crate::infos::lookup(&r.id.serial);
                 let dat_hit = dat.and_then(|d| d.lookup_serial(&r.id.serial));
                 let nointro_name = dat_hit
                     .map(|p| p.name.clone())
-                    .or_else(|| psx_hit.as_ref().map(|p| p.title.clone()));
+                    .or_else(|| infos_hit.as_ref().map(|p| p.name.clone()));
                 let mut nointro_extra = Vec::new();
                 if let Some(region) = dat_hit
                     .and_then(|p| p.category.clone())
-                    .or_else(|| psx_hit.as_ref().and_then(|p| p.region.clone()))
+                    .or_else(|| infos_hit.as_ref().and_then(|p| p.region.clone()))
                 {
                     nointro_extra.push(("região".to_string(), region));
                 }

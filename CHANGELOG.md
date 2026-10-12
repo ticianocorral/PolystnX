@@ -4,6 +4,42 @@ Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/);
 versionamento por [SemVer 2.0.0](https://semver.org/lang/pt-BR/). O workspace
 inteiro compartilha uma versão (`[workspace.package]` em `Cargo.toml`).
 
+## [1.2.0-beta] - 2026-10-11
+
+### Adicionado
+- **Infos unificadas embutidas, offline** — nome canônico, lançamento,
+  editora, região, **nota (IGDB)** e os tempos do HowLongToBeat numa
+  tabela única por serial (10.638 jogos de PS1), gerada do DAT No-Intro +
+  DuckStation + IGDB e compilada dentro do binário: instala, solta a ROM
+  e as infos estão lá — **sem DAT e sem rede**. Os módulos `psx`, `tosec`
+  e `hltb` saem, absorvidos pela tabela (`infos.rs`).
+- **Seções no painel de infos** — **Informações Gerais**, **IGDB** (com a
+  logo do press kit) e **HowLongToBeat** (com o ícone do site), títulos em
+  negrito e todo o conteúdo centralizado; ano como campo normal e as notas
+  onde existem (a IGDB só as tem para os jogos com votos da comunidade).
+- **Botão de play no hover** — ícone de CD com seta no canto inferior
+  direito da capa sob o cursor; o contorno amarelo de seleção sai.
+- **Cobertura opcional pela API da IGDB** — com credenciais gratuitas da
+  Twitch (`IGDB_CLIENT_ID`/`IGDB_CLIENT_SECRET`), o gerador baixa a
+  plataforma 7 inteira e completa as notas que o espelho não tem.
+
+### Modificado
+- **A estante virou estante de verdade** — prateleiras de madeira com fita
+  LED e mão francesa sob a grade "todos os jogos", capas 3D transparentes
+  pousadas com um suporte de acrílico na base; as faixas de favoritos e
+  jogados recentemente ficam planas, sem prateleira.
+- **3 caixas grandes por prateleira no Steam Deck** (720p/800p) e 5 nas
+  telas maiores, com a largura do item mandando no desenho (e não mais as
+  constantes de tile).
+- Linha de conquistas com a medalha centralizada junto ao valor.
+
+### Corrigido
+- Capa 3D transparente: a matte cinza do render não vira mais franja
+  alrededor da caixa (limpeza no upload + sangria de borda), e a
+  transparência sobrevive a voltar de um jogo.
+- Ruído do tubo não atravessa mais a estante (assenta opaca) — com capas
+  vazadas, a estática aparecia como "borda cinza" sob as capas.
+
 ## [1.1.1-beta] - 2026-10-10
 
 ### Adicionado

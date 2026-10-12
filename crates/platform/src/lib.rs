@@ -7,9 +7,9 @@ mod input;
 
 pub use audio::AudioOut;
 pub use cabinet::{
-    Cabinet, FrameRef, ModalBackdrop, PanelButton, PanelSection, PixelFormat, RaStatus, Screen,
-    SettingsButton, SettingsPanelInfo, ShelfButton, ShelfPanelInfo, UpdateArrow, BRAND,
-    DEMO_BADGE_IMG, RA_LOGO_IMG,
+    Cabinet, FrameRef, HltbBar, HltbBars, IgdbSection, ModalBackdrop, PanelButton, PanelSection,
+    PixelFormat, RaStatus, Screen, SettingsButton, SettingsPanelInfo, ShelfButton, ShelfPanelInfo,
+    UpdateArrow, BRAND, DEMO_BADGE_IMG, RA_LOGO_IMG,
 };
 pub use input::{Input, KeyMap, PadButton, PadMap, UiEvent, MAX_PORTS};
 // The SDL gamepad button enum, for callers that hold a captured press
@@ -204,6 +204,10 @@ pub struct MenuInput {
     pub click: Option<(i32, i32)>,
     /// Right click this frame, in window coordinates — the screens use it
     /// only where right-click means something (the text fields' "colar").
+    /// A posição atual do cursor em coordenadas de janela — o hover da
+    /// estante (o botão de play na capa sob o mouse) é contínuo, não um
+    /// evento. `None` só quando nada sabe dizer onde o cursor está.
+    pub pointer: Option<(i32, i32)>,
     pub right_click: Option<(i32, i32)>,
 }
 
@@ -287,6 +291,12 @@ pub struct Platform {
     devices_pending: bool,
     /// Rising-edge tracking for `poll_menu`'s gamepad buttons.
     menu_prev: [bool; MENU_PAD_MAP.len()],
+    /// A última posição conhecida do cursor (janela), para o hover da
+    /// estante — estado contínuo, atualizado a cada `poll_menu`.
+    menu_pointer: Option<(i32, i32)>,
+    /// Testing hook headless: quando `Some`, sobrepõe a posição real do
+    /// cursor que o `poll_menu` reporta (não há mouse de verdade lá).
+    debug_pointer: Option<(i32, i32)>,
     /// SNES-button layout of the gamepads — the pair table `sample_gamepads`
     /// walks. Defaults to the factory layout; the settings screen swaps pairs
     /// through `set_pad_map` (persisted by the app).
@@ -381,6 +391,8 @@ impl Platform {
             seen_ids: Vec::new(),
             devices_pending: false,
             menu_prev: [false; MENU_PAD_MAP.len()],
+            menu_pointer: None,
+            debug_pointer: None,
             pad_map: PadMap::defaults(),
             konami_watch: false,
             konami_step: 0,
@@ -616,7 +628,19 @@ impl Platform {
             }
             self.menu_prev[i] = down;
         }
+        // A posição do cursor é estado contínuo (o hover da estante lê a
+        // cada frame), não evento — e o override headless tem precedência.
+        let ms = self.event_pump.mouse_state();
+        self.menu_pointer = Some((ms.x() as i32, ms.y() as i32));
+        out.pointer = self.debug_pointer.or(self.menu_pointer);
         out
+    }
+
+    /// Testing hook: força a posição do cursor que o [`MenuInput`] reporta
+    /// (o caminho headless não tem mouse de verdade). `None` volta ao real.
+    #[doc(hidden)]
+    pub fn debug_set_pointer(&mut self, pos: Option<(i32, i32)>) {
+        self.debug_pointer = pos;
     }
 
     /// Turn on OS text composition (IME, dead keys, the works) for `cab`'s
