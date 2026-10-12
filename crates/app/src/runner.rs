@@ -66,8 +66,6 @@ pub struct GameSpec {
     /// (both fixed at 15, plan revision — numbered independently of each
     /// other) (plan §3.4).
     pub notes_dir: PathBuf,
-    /// Speculative frames past the shown one; `None` = take the config value.
-    pub runahead: Option<u32>,
     /// Headless self-check: `(path, frame)` — run to `frame`, dump a BMP, exit.
     pub shot: Option<(PathBuf, u32)>,
     /// Local logo art (`assets/logo/<rom>.*`) for the top of the side panel.
@@ -345,9 +343,6 @@ struct PadSnapshot {
 enum CoreCmd {
     Run {
         input: PadSnapshot,
-        /// Run-ahead deste frame — a main desliga sozinho quando o core
-        /// não fecha o budget (auto-ajuste por máquina).
-        runahead: u32,
     },
     /// Snapshot do SAVE_RAM (o card do slot 1 vivo no core) — troca quente
     /// salva o card que sai ANTES de mexer na memória, e o flush periódico
@@ -438,7 +433,6 @@ fn spawn_core_worker(
                 libc::setpriority(libc::PRIO_DARWIN_THREAD, 0, 12);
             }
             let mut running = CoreRunning(Some(core));
-            let mut spec_state = Vec::new();
             while let Ok(cmd) = rx.recv() {
                 // None só DENTRO do ReseedCards (a lib descarrega entre um core
                 // e outro — dlopen refcounted); fora dele, sempre Some.
@@ -446,7 +440,7 @@ fn spawn_core_worker(
                     break; // core morto (falha de recriação): a sessão acaba
                 };
                 match cmd {
-                    CoreCmd::Run { input, runahead } => {
+                    CoreCmd::Run { input } => {
                         for (port, btn, held) in &input.buttons {
                             core.set_button(*port, *btn, *held);
                         }
@@ -463,20 +457,7 @@ fn spawn_core_worker(
                             })
                             .flatten();
                         let aspect = core.av_info().aspect_ratio;
-                        // Frames especulativos de run-ahead: áudio e RAM
-                        // capturados do quadro real acima; o frame exibido é
-                        // o que o core reporta depois deles, e o estado volta
-                        // ao real em seguida — exatamente o fluxo antigo.
-                        let speculated = runahead > 0 && core.save_state_into(&mut spec_state);
-                        if speculated {
-                            for _ in 0..runahead {
-                                core.run();
-                            }
-                        }
                         let frame = core.take_frame();
-                        if speculated {
-                            core.load_state(&spec_state);
-                        }
                         let _ = otx.send(CoreOut {
                             frame,
                             aspect,
@@ -1424,8 +1405,6 @@ pub fn run_game(
     spec: &GameSpec,
     cfg: &mut Config,
 ) -> Result<GameExit> {
-    let runahead_cfg = spec.runahead.unwrap_or(cfg.runahead);
-
     // --- load + identify -------------------------------------------------
     // IGUAL AO SNES: nada é apresentado aqui — a tela atual (a estante ou
     // a tela inicial) fica CONGELADA durante o carregar do core/disco
@@ -1859,17 +1838,6 @@ pub fn run_game(
     // Don't let the audio queue run more than ~0.15 s ahead (latency creep).
     let audio_cap = (av.sample_rate / 6.0) as usize;
 
-    // Run-ahead: only if the core actually serializes; hardcore also rules
-    // it out (a speculative frame would validate a hit the rewind undoes).
-    let mut runahead = runahead_cfg;
-    if ra_hardcore_active && runahead > 0 {
-        log::info!("ra hardcore: run-ahead disabled");
-        runahead = 0;
-    }
-    if runahead > 0 && core.save_state().is_none() {
-        log::warn!("core has no save state — run-ahead disabled");
-        runahead = 0;
-    }
     // Which note slot to save into once the next frame is ready — set at
     // click time, consumed after `core.run()` produces a real frame.
     let mut note_request: Option<u8> = None;
@@ -1914,16 +1882,11 @@ pub fn run_game(
     // and held there until the player finishes naming it (or cancels).
     let mut print_pending = false;
     let mut print_capture: Option<EmuFrame> = None;
-    log::info!("running: rf ntsc + crt tube, run-ahead {runahead}");
+    log::info!("running: rf ntsc + crt tube");
     // O core mora na thread dele; a interface continua a 60 fps com o
     // último quadro enquanto o PCSX Rearmed bloqueia (boot, FMV).
     let (core_tx, core_rx, worker_handle) = spawn_core_worker(core, ra_session.is_some());
     let mut in_flight = false;
-    // Run-ahead efetivo (a main desliga sozinho sob carga) e o
-    // relógio do Run em voo (a medida do serviço do core).
-    let mut runahead_eff = runahead_cfg;
-    let mut run_sent: Option<Instant> = None;
-    let mut lentos = 0u32;
     // Som do leitor de CD (plano revision: "na hesitação do core ou atraso
     // do quadro, inserir o som de leitura do cd"): a última vez que um
     // quadro REAL chegou — `None` desde o ligar (o drive lê no boot). E o
@@ -2423,11 +2386,7 @@ pub fn run_game(
                             } else {
                                 snap.analog.push((0, 0, 0, 0, 0));
                             }
-                            run_sent = Some(Instant::now());
-                            let _ = core_tx.send(CoreCmd::Run {
-                                input: snap,
-                                runahead: runahead_eff,
-                            });
+                            let _ = core_tx.send(CoreCmd::Run { input: snap });
                             in_flight = true;
                         }
                         power_on_burst(plat, cab);
@@ -3185,27 +3144,6 @@ pub fn run_game(
             if in_flight {
                 if let Ok(out) = core_rx.try_recv() {
                     in_flight = false;
-                    // Auto-ajuste do run-ahead: o tempo entre o envio do Run
-                    // e o quadro pronto é o serviço do core (ele fica preso
-                    // no Run). Acima do budget de 16,7 ms por vários frames
-                    // seguidos, o run-ahead desliga na hora — em máquinas
-                    // rápidas ninguém percebe, nas lentas o jogo volta à
-                    // velocidade cheia.
-                    if let Some(t) = run_sent.map(|t| t.elapsed()) {
-                        if t > Duration::from_millis(16) {
-                            lentos += 1;
-                        } else {
-                            lentos = 0;
-                        }
-                        if lentos >= 30 && runahead_eff > 0 {
-                            runahead_eff = 0;
-                            log::info!(
-                                "run-ahead desligado: o core não fecha o budget ({:.1} ms/frame)",
-                                t.as_secs_f64() * 1e3
-                            );
-                        }
-                    }
-                    run_sent = None;
                     frames += 1;
                     if spec.debug_note_capture && frames == debug_note_frame {
                         note_request = Some(note_slot);
@@ -3426,10 +3364,7 @@ pub fn run_game(
                 } else {
                     snap.analog.push((0, 0, 0, 0, 0));
                 }
-                let _ = core_tx.send(CoreCmd::Run {
-                    input: snap,
-                    runahead: 0,
-                });
+                let _ = core_tx.send(CoreCmd::Run { input: snap });
                 in_flight = true;
             }
             // Flush periódico do card 1 (a cada ~10 s ligado): crash perde

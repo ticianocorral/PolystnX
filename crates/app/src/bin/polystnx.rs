@@ -18,7 +18,7 @@
 //! Usage:
 //!   polystnx [--core path/to/pcsx_rearmed_libretro.{dylib,so,dll}]
 //!             [--config polystnx.cfg] [--save-dir DIR] [--system-dir DIR]
-//!             [--order shelf|name] [--runahead N]
+//!             [--order shelf|name]
 //!
 //! No `--core`/`$PSX_XPERIENCE_CORE`? Looks for one already downloaded into
 //! `core/` (see the settings screen, "Núcleo") — not included in the app
@@ -49,8 +49,6 @@ struct Args {
     system_dir: PathBuf,
     notes_dir: PathBuf,
     order: Order,
-    #[allow(dead_code)] // o run-ahead do jogo é do processo filho (--runahead)
-    runahead: Option<u32>,
     /// Headless: render one settings screen ("main"|"controls") to `--shot`
     /// and exit, instead of starting the shelf (dev/testing).
     debug_settings: Option<String>,
@@ -76,7 +74,6 @@ fn parse_args() -> Result<Args> {
     let mut system_dir = None;
     let mut notes_dir = None;
     let mut order = Order::Shelf;
-    let mut runahead = None;
     let mut debug_settings = None;
     let mut autoplay_rom = None;
     let mut autoplay_cartridge = None;
@@ -116,13 +113,6 @@ fn parse_args() -> Result<Args> {
                     other => anyhow::bail!("--order wants shelf|name, got {other:?}"),
                 }
             }
-            "--runahead" => {
-                runahead = Some(
-                    val()?
-                        .parse()
-                        .map_err(|_| anyhow!("--runahead wants a number (0 disables)"))?,
-                )
-            }
             "-h" | "--help" => {
                 println!("{HELP}");
                 std::process::exit(0);
@@ -142,7 +132,6 @@ fn parse_args() -> Result<Args> {
         system_dir,
         notes_dir,
         order,
-        runahead,
         debug_settings,
         debug_idle,
         shot,
@@ -153,7 +142,7 @@ fn parse_args() -> Result<Args> {
 
 const HELP: &str = "polystnx [--core <lib>] [--config polystnx.cfg]\n\
        [--save-dir DIR] [--system-dir DIR] [--notes-dir DIR]\n\
-       [--order shelf|name] [--runahead N]\n\
+       [--order shelf|name]\n\
        [--debug-settings main|controls --shot out.bmp]\n\
 \n\
 Idle (TV off) → selector → game → idle, one process. Mouse/gamepad only —\n\
@@ -295,7 +284,6 @@ fn main() -> Result<()> {
                 .join("bios"),
             save_dir: polystnx_app::dirs::saves_dir(),
             notes_dir: polystnx_app::dirs::notes_dir(),
-            runahead: None,
             shot: None,
             logo: None,
             // Lançamento nasce sem card — inserção é manual pelo modal
@@ -521,7 +509,6 @@ fn main() -> Result<()> {
                 system_dir: effective_system_dir.clone(),
                 save_dir: args.save_dir.clone(),
                 notes_dir: args.notes_dir.clone(),
-                runahead: args.runahead,
                 shot: None,
                 logo,
                 card1: None,

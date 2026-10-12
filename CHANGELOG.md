@@ -4,6 +4,17 @@ Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/);
 versionamento por [SemVer 2.0.0](https://semver.org/lang/pt-BR/). O workspace
 inteiro compartilha uma versão (`[workspace.package]` em `Cargo.toml`).
 
+## [1.2.2-beta] - 2026-10-12
+
+### Removido
+- **Run-ahead** — o recurso rodava o core um frame especulativo à frente
+  (serializando um savestate de 2 MB por frame) para esconder ~16 ms de
+  lag de input. Custo de CPU/energia alto e benefício imperceptível: nas
+  máquinas lentas derrubava o FPS (o travamento do AppImage no Steam
+  Deck). O jogo agora roda sempre à velocidade cheia, com o menor gasto
+  possível; a opção `runahead` sai do `polystnx.cfg`, da CLI e da tela
+  de configurações.
+
 ## [1.2.1-beta] - 2026-10-12
 
 ### Corrigido

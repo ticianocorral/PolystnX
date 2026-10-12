@@ -4,7 +4,7 @@
 //!
 //! Usage:
 //!   emu-run --core <path/to/pcsx_rearmed_libretro.{dylib,so,dll}> --rom <game.sfc>
-//!           [--system-dir DIR] [--save-dir DIR] [--runahead N]
+//!           [--system-dir DIR] [--save-dir DIR]
 //!
 //! The core path also reads from $PSX_XPERIENCE_CORE. See docs/fase-0.md for where
 //! to get the core, docs/fase-1.md for save states / SRAM / run-ahead. The
@@ -28,7 +28,6 @@ struct Args {
     /// o conteúdo vira o `SAVE_RAM` da sessão e o flush volta para o arquivo.
     card1: Option<PathBuf>,
     /// Speculative frames past the shown one; `None` = take the config value.
-    runahead: Option<u32>,
     /// Headless self-check: run N frames, save the composited window, exit.
     shot: Option<PathBuf>,
     shot_frame: u32,
@@ -56,7 +55,6 @@ fn parse_args() -> Result<Args> {
     let mut notes_dir = None;
     let mut config = None;
     let mut card1 = None;
-    let mut runahead = None;
     let mut shot = None;
     let mut shot_frame = 180u32;
     let mut logo = None;
@@ -110,14 +108,6 @@ fn parse_args() -> Result<Args> {
                     it.next()
                         .ok_or_else(|| anyhow!("--card1 needs a path (.mcr)"))?
                         .into(),
-                )
-            }
-            "--runahead" => {
-                runahead = Some(
-                    it.next()
-                        .ok_or_else(|| anyhow!("--runahead needs a number"))?
-                        .parse()
-                        .map_err(|_| anyhow!("--runahead wants a number (0 disables)"))?,
                 )
             }
             "--shot" => {
@@ -196,7 +186,6 @@ fn parse_args() -> Result<Args> {
         notes_dir,
         config,
         card1,
-        runahead,
         shot,
         shot_frame,
         logo,
@@ -210,7 +199,7 @@ fn parse_args() -> Result<Args> {
 }
 
 const HELP: &str = "emu-run --core <lib> --rom <game.sfc> [--system-dir D] [--save-dir D]\n\
-       [--config config.toml] [--runahead N]\n\
+       [--config config.toml]\n\
        [--shot out.bmp [--shot-frame N]]   headless: run N frames, dump one, exit\n\
        [--logo img.png]                    show a logo atop the side panel\n\
        [--cartridge img.png]               show cartridge art below the logo\n\
@@ -268,7 +257,6 @@ fn main() -> Result<()> {
         system_dir: args.system_dir,
         save_dir: args.save_dir,
         notes_dir: args.notes_dir,
-        runahead: args.runahead,
         shot: args.shot.map(|p| (p, args.shot_frame)),
         logo: args.logo,
         card1: args
