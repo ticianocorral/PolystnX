@@ -4,6 +4,16 @@ Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/);
 versionamento por [SemVer 2.0.0](https://semver.org/lang/pt-BR/). O workspace
 inteiro compartilha uma versão (`[workspace.package]` em `Cargo.toml`).
 
+## [1.2.1-beta] - 2026-10-12
+
+### Corrigido
+- **Jogo rodando lento no Steam Deck (AppImage)** — o run-ahead (default 1)
+  serializa um savestate de 2 MB por frame a mais; no APU do Deck o core
+  estourava o budget de 16,7 ms e o FPS despencava. O run-ahead agora é
+  **auto-ajustável**: a main cronometra o serviço do core (Run → quadro
+  pronto) e, após 30 frames seguidos acima do budget, desliga o run-ahead
+  na hora (registro INFO no log). Em máquinas rápidas nada muda.
+
 ## [1.2.0-beta] - 2026-10-11
 
 ### Adicionado
