@@ -4,6 +4,16 @@ Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/);
 versionamento por [SemVer 2.0.0](https://semver.org/lang/pt-BR/). O workspace
 inteiro compartilha uma versão (`[workspace.package]` em `Cargo.toml`).
 
+## [1.2.6-beta] - 2026-10-13
+
+### Adicionado
+- **Aviso de abertura no chin: versão + renderer** — toda inicialização
+  mostra "{Marca} vX.Y.Z" no verde do OSD e o renderer ativo abaixo, por
+  5 s, em todas as telas e capturas (o aviso degradado de software toma o
+  lugar e os 10 s quando for o caso). "Em qual binário eu estou?" tem
+  resposta na TV, não no log — relatos de "continuou lento" começam
+  sabendo com o que.
+
 ## [1.2.5-beta] - 2026-10-13
 
 ### Corrigido

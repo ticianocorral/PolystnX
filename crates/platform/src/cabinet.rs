@@ -371,11 +371,10 @@ pub struct Cabinet {
     /// while it lives, and the badge comes back when it expires. `None`
     /// draws nothing (account off, or no cartridge in).
     ra_status: Option<RaStatus>,
-    /// Deadline do aviso de renderer em software (`SW_NOTICE_TTL` contando
-    /// da criação): o renderer caiu em software (nenhum driver de hardware
-    /// da lista do hint subiu) e o usuário precisa saber — o gabinete CRT em
-    /// CPU derruba o FPS e compete com o core. `None` = hardware, sem aviso.
-    sw_notice_until: Option<Instant>,
+    /// O aviso residente do chin na abertura — "em qual binário eu estou?"
+    /// (versão + renderer ativo) tem resposta na TV, não no log; caindo em
+    /// software, o aviso degradado toma o lugar. `None` = prazo vencido.
+    chin_notice: Option<ChinNotice>,
     /// Whether the top-left "fechar app" button is drawn/clickable this
     /// screen (plan revision: "criar botao de fechar app no canto superior
     /// esquerdo") — the idle/shelf/settings/history screens turn it on;
@@ -1025,6 +1024,7 @@ impl Cabinet {
                  (o ambiente pode forçar um driver via SDL_RENDER_DRIVER)"
             );
         }
+        let renderer_name = canvas.renderer_name.clone();
         canvas.set_blend_mode(BlendMode::Blend);
         canvas.set_draw_color(Color::RGB(RECESS.0, RECESS.1, RECESS.2));
         canvas.clear();
@@ -1083,7 +1083,11 @@ impl Cabinet {
             update_arrows: (None, None),
             osd_queue: VecDeque::new(),
             ra_status: None,
-            sw_notice_until: sw_notice.then(|| Instant::now() + SW_NOTICE_TTL),
+            chin_notice: Some(if sw_notice {
+                sw_boot_notice()
+            } else {
+                boot_notice(&renderer_name)
+            }),
             close_button: Rect::new(0, 0, 0, 0),
             minimize_button: Rect::new(0, 0, 0, 0),
         })
@@ -3830,6 +3834,9 @@ fn draw_minimize_button(canvas: &mut WindowCanvas, font: &mut Texture) -> Rect {
 /// TV applies to its own on-screen display — no PSX é "AV 1": entrada
 /// composta (cabos RCA), não RF (plano §6, revisão do usuário).
 const OSD_GREEN: (u8, u8, u8) = (60, 230, 70);
+/// O cinza claro das linhas secundárias do chin (aviso de abertura, OSD de
+/// conquistas) — constante nomeada para o teste parear o contrato.
+const LIGHT_GREY_ROW: (u8, u8, u8) = (235, 235, 225);
 
 /// The channel banner ("AV 1" no PSX: a TV fica na entrada composta; o
 /// selo aparece na troca de entrada e na ausência de sinal) —
@@ -3909,12 +3916,10 @@ impl Cabinet {
                 badge: e.badge,
             };
         }
-        if self.sw_notice_live() {
+        if self.chin_notice_live() {
+            let notice = self.chin_notice.as_ref().expect("live implies some");
             return ChinOsd::Notify {
-                lines: sw_notice_rows()
-                    .iter()
-                    .map(|(l, _)| l.to_string())
-                    .collect(),
+                lines: notice.lines.iter().map(|(l, _)| l.clone()).collect(),
                 badge: None,
             };
         }
@@ -3937,16 +3942,18 @@ impl Cabinet {
     }
 
     /// `draw_chin_persistent`'s body, shared with `draw_osd_front` (whose
-    /// `out_h` is already in hand): the notice while it lives, the RA badge
-    /// after.
+    /// `out_h` is already in hand): the boot notice while it lives, the RA
+    /// badge after.
     fn draw_chin_persistent_inner(&mut self, out_h: u32) {
-        if self.sw_notice_live() {
-            draw_chin_sw_notice(
+        if self.chin_notice_live() {
+            let notice = self.chin_notice.as_ref().expect("live implies some");
+            draw_chin_notice(
                 &mut self.canvas,
                 &mut self.font,
                 self.screen,
                 out_h,
                 &self.nameplate,
+                notice,
             );
             return;
         }
@@ -3964,11 +3971,11 @@ impl Cabinet {
         );
     }
 
-    /// Is the degraded-mode (software renderer) notice still holding the
-    /// chin — the first seconds after launch, when no hardware driver came
-    /// up?
-    fn sw_notice_live(&self) -> bool {
-        self.sw_notice_until.is_some_and(|until| Instant::now() < until)
+    /// O aviso de abertura ainda vive?
+    fn chin_notice_live(&self) -> bool {
+        self.chin_notice
+            .as_ref()
+            .is_some_and(|n| Instant::now() < n.until)
     }
 }
 
@@ -3989,10 +3996,19 @@ fn ra_badge_rows(hardcore: bool) -> [(&'static str, (u8, u8, u8)); 2] {
     ]
 }
 
-/// Quanto tempo o aviso de renderer em software segura o chin depois da
-/// criação — tempo de ler quando o app abre, curto o bastante para devolver
-/// o canto ao selo de RA.
+/// Quanto tempo cada aviso de abertura segura o chin: a identificação 5 s
+/// (ler e sumir), o degradado 10 s (a consequência merece ser lida com
+/// calma).
+const BOOT_NOTICE_TTL: Duration = Duration::from_secs(5);
 const SW_NOTICE_TTL: Duration = Duration::from_secs(10);
+
+/// O aviso residente do chin na abertura — linhas já pareadas com cor e o
+/// prazo. Identificação (versão + renderer) e degradação (renderer
+/// software) são os dois usos.
+struct ChinNotice {
+    lines: Vec<(String, (u8, u8, u8))>,
+    until: Instant,
+}
 
 /// As linhas do aviso degradado — pura para o teste fixar o contrato: o
 /// título no âmbar de aviso (o mesmo do hardcore do RA), a consequência no
@@ -4000,30 +4016,58 @@ const SW_NOTICE_TTL: Duration = Duration::from_secs(10);
 fn sw_notice_rows() -> [(&'static str, (u8, u8, u8)); 2] {
     [
         ("SEM ACELERAÇÃO DE GPU", (240, 180, 60)),
-        ("DESEMPENHO REDUZIDO", (235, 235, 225)),
+        ("DESEMPENHO REDUZIDO", LIGHT_GREY_ROW),
     ]
 }
 
-/// O aviso de renderer em software — o mesmo canto do chin, sem tile: duas
-/// linhas alinhadas à direita com a sombra de 2px de todo vidro, truncando
-/// contra o nameplate como os demais blocos do chin.
-fn draw_chin_sw_notice(
+/// O aviso de abertura: identificação — a versão do binário no verde do OSD
+/// e o renderer ativo abaixo no cinza claro. Toda inicialização mostra; o
+/// "continuou lento" passa a começar sabendo COM O QUE.
+fn boot_notice(renderer: &str) -> ChinNotice {
+        ChinNotice {
+            lines: vec![
+                (
+                    format!("{BRAND} v{}", env!("CARGO_PKG_VERSION")),
+                    OSD_GREEN,
+                ),
+                (renderer.to_string(), LIGHT_GREY_ROW),
+            ],
+            until: Instant::now() + BOOT_NOTICE_TTL,
+        }
+}
+
+/// O aviso de abertura quando o renderer caiu em software (nenhum driver de
+/// hardware da lista do hint subiu).
+fn sw_boot_notice() -> ChinNotice {
+    ChinNotice {
+        lines: sw_notice_rows()
+            .iter()
+            .map(|(l, c)| (l.to_string(), *c))
+            .collect(),
+        until: Instant::now() + SW_NOTICE_TTL,
+    }
+}
+
+/// O aviso residente do chin (abertura) — linhas alinhadas à direita com a
+/// sombra de 2px de todo vidro, truncando contra o nameplate como os demais
+/// blocos do chin.
+fn draw_chin_notice(
     canvas: &mut WindowCanvas,
     font: &mut Texture,
     screen: Rect,
     out_h: u32,
     nameplate: &str,
+    notice: &ChinNotice,
 ) {
     const MARGIN: i32 = 24;
     let chin_top = screen.bottom();
     let chin_h = out_h as i32 - chin_top;
-    if chin_h < 24 {
+    if chin_h < 24 || notice.lines.is_empty() {
         return;
     }
     let cell = GLYPH_W as i32;
     let row = GLYPH_H as i32;
     let gap = 4i32;
-    let rows = sw_notice_rows();
     // Mesmo limite esquerdo dos outros blocos: a linha mais larga do
     // nameplate.
     let nameplate_w = nameplate
@@ -4034,7 +4078,8 @@ fn draw_chin_sw_notice(
     let right = screen.right() - MARGIN;
     let left_limit = screen.left() + nameplate_w + MARGIN * 2;
     let max_cols = ((right - left_limit).max(cell) / cell) as usize;
-    let shown: Vec<(String, (u8, u8, u8))> = rows
+    let shown: Vec<(String, (u8, u8, u8))> = notice
+        .lines
         .iter()
         .map(|(l, c)| (truncate_to_cols(l, max_cols), *c))
         .collect();
@@ -7564,6 +7609,18 @@ mod tests {
         assert_eq!(rows[0].0, "SEM ACELERAÇÃO DE GPU");
         assert_ne!(rows[0].1, OSD_GREEN);
         assert_eq!(rows[1], ("DESEMPENHO REDUZIDO", (235, 235, 225)));
+    }
+
+    #[test]
+    fn boot_notice_identifies_the_binary_on_screen() {
+        use super::{boot_notice, LIGHT_GREY_ROW, BRAND};
+        let n = boot_notice("opengl");
+        // Linha 0: "Marca vX.Y.Z" no verde do OSD — a resposta a "qual
+        // binário está rodando?" fica na TV, não no log.
+        assert!(n.lines[0].0.starts_with(&format!("{BRAND} v")));
+        assert_eq!(n.lines[0].1, OSD_GREEN);
+        // Linha 1: o renderer ativo, no cinza claro.
+        assert_eq!(n.lines[1], ("opengl".to_string(), LIGHT_GREY_ROW));
     }
 
     #[test]
