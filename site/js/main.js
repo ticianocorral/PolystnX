@@ -1,4 +1,4 @@
-// PolyStnX — manual: interações mínimas.
+// PolystnX — manual de instruções: interações mínimas.
 
 // Ano do rodapé.
 document.getElementById("ano").textContent = new Date().getFullYear();

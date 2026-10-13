@@ -1,9 +1,13 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
-  <rect width="64" height="64" fill="#f2ede3"/>
-  <rect x="4" y="4" width="56" height="56" fill="none" stroke="#211d18" stroke-width="4"/>
-  <circle cx="32" cy="29" r="17" fill="#211d18"/>
-  <circle cx="32" cy="29" r="13" fill="#6a5fc9"/>
-  <circle cx="32" cy="29" r="4" fill="#f2ede3"/>
-  <circle cx="20" cy="52" r="4" fill="#b3382e"/>
-  <circle cx="44" cy="52" r="4" fill="#4a3f8f"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
+  <!-- Losango do PolystnX: as quatro cores dos botões do controle de PS1 -->
+  <g transform="translate(64 64) rotate(45)">
+    <rect x="-38" y="-38" width="34" height="34" fill="#2f6bbf"/>
+    <rect x="4"   y="-38" width="34" height="34" fill="#b3382e"/>
+    <rect x="-38" y="4"   width="34" height="34" fill="#2e7d46"/>
+    <rect x="4"   y="4"   width="34" height="34" fill="#d98cab"/>
+  </g>
+  <!-- O "P" da marca: caixa alta itálico, como no wordmark PolystnX -->
+  <text x="64" y="78" font-family="Archivo Black, Arial Black, sans-serif"
+        font-size="44" font-style="italic" font-weight="900" fill="#f2ede3"
+        text-anchor="middle">P</text>
 </svg>

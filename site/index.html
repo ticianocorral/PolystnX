@@ -3,44 +3,55 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>PolyStnX — manual do proprietário</title>
-  <meta name="description" content="PolyStnX: um PlayStation inteiro na sua TV — leitor de disco, memory card e DualShock de verdade. Emulador de PlayStation para macOS, Windows e Linux, com estante de jogos, manual em PDF e RetroAchievements.">
-  <meta property="og:title" content="PolyStnX">
+  <title>PolystnX — manual de instruções</title>
+  <meta name="description" content="PolystnX: um frontend de console para o PCSX Rearmed — a sala inteira ao redor do emulador de PlayStation, para macOS, Windows e Linux, com estante de jogos, manual em PDF e RetroAchievements.">
+  <meta property="og:title" content="PolystnX">
   <meta property="og:description" content="Um PlayStation inteiro na sua TV — leitor de disco, memory card e DualShock de verdade.">
-  <meta property="og:image" content="assets/screenshot.jpg">
+  <meta property="og:image" content="assets/screenshot.jpg?v=2">
   <link rel="icon" type="image/svg+xml" href="favicon.svg">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;600;700&family=Archivo+Black&family=IBM+Plex+Mono:wght@400;500;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="css/style.css">
+  <link rel="stylesheet" href="css/style.css?v=2">
 </head>
 <body>
   <a class="pular" href="#conteudo">Pular para o conteúdo</a>
 
-  <div class="espiral" aria-hidden="true">
+  <!-- Lombada de PS1: faixa escura com os quadradinhos das quatro cores
+       dos botões do controle (triângulo, círculo, cross e quadrado). -->
+  <div class="lombada" aria-hidden="true">
     <span></span><span></span><span></span><span></span><span></span><span></span>
     <span></span><span></span><span></span><span></span><span></span><span></span>
   </div>
 
   <header class="cabecalho">
-    <p class="cabecalho-ref">PSX-1000 · MANUAL DO PROPRIETÁRIO</p>
-    <p class="cabecalho-ref">REV. 1.1.0-beta</p>
+    <p class="cabecalho-ref">PSX-1000 · MANUAL DE INSTRUÇÕES</p>
+    <p class="cabecalho-ref">REV. 1.2.2-beta</p>
     <a class="cabecalho-link" href="https://github.com/ticianocorral/PolystnX">github.com/ticianocorral/PolystnX</a>
   </header>
 
   <main id="conteudo">
 
-    <!-- ===== Capa ===== -->
+    <!-- ===== Capa — preta, como a caixa longa de PS1 ===== -->
     <section class="capa">
-      <div class="pagina">
+      <div class="capa-cartao">
+        <header class="capa-marca" aria-label="PolystnX">
+          <span class="capa-marca-regua" aria-hidden="true"></span>
+          <img src="assets/console-logo.png?v=2" width="594" height="553"
+               alt="PolystnX">
+          <span class="capa-marca-regua" aria-hidden="true"></span>
+        </header>
         <div class="capa-grid">
           <div class="capa-texto">
-            <p class="kicker">manual do proprietário</p>
-            <h1>PolyStnX</h1>
+            <h1 class="capa-titulo">
+              <span class="capa-titulo-l1">manual de</span>
+              <span class="capa-titulo-l2">instruções</span>
+            </h1>
             <p class="capa-lema">
               Um <strong>PlayStation inteiro na sua TV</strong> — leitor de
               disco, memory card e DualShock de verdade — em vez de só uma
-              janela com o jogo.
+              janela com o jogo. E não é um emulador novo: <strong>quem emula
+              é o PCSX Rearmed</strong>; o PolystnX é o console ao redor dele.
             </p>
             <div class="capa-acoes">
               <a class="botao" href="https://github.com/ticianocorral/PolystnX/releases/latest">
@@ -50,18 +61,17 @@
                 <a href="https://github.com/ticianocorral/PolystnX/releases/latest">macOS · dmg</a>
                 <a href="https://github.com/ticianocorral/PolystnX/releases/latest">Windows · zip</a>
                 <a href="https://github.com/ticianocorral/PolystnX/releases/latest">Linux · AppImage</a>
-                <a href="https://github.com/ticianocorral/PolystnX/releases/latest">Flatpak</a>
               </p>
             </div>
             <p class="capa-selo">
-              <span class="carimbo" title="última release publicada">v<span data-release>1.1.0-beta</span></span>
+              <span class="carimbo" title="última release publicada">v<span data-release>1.2.2-beta</span></span>
               <span class="capa-selo-txt">SDL3 embutida · macOS / Windows / Linux / Steam Deck</span>
             </p>
           </div>
           <figure class="figura capa-figura">
-            <img src="assets/screenshot.jpg" width="1280" height="800" loading="eager"
-                 alt="O Mundo do Tomate — homebrew fictício — rodando no tubo curvado, com o painel lateral: logotipo do jogo, disco no leitor entre Power e Open, memory card e comandos">
-            <figcaption><span>Fig. 1</span> o console ligado: tubo, painel e disco no leitor</figcaption>
+            <img src="assets/screenshot.jpg?v=2" width="1280" height="800" loading="eager"
+                 alt="Resident Evil 3 rodando na intro, no tubo curvado, com o painel lateral: logotipo do jogo, disco no leitor entre Power e Open, memory card e comandos">
+            <figcaption><span>Fig. 1</span> o console ligado: a intro do Resident Evil 3 no tubo, disco no leitor</figcaption>
           </figure>
         </div>
       </div>
@@ -92,11 +102,13 @@
         <div class="secao-grid">
           <div class="secao-texto">
             <p>
-              A maioria dos emuladores te dá uma janela. O PolyStnX te dá o
+              A maioria dos emuladores te dá uma janela. O PolystnX te dá o
               <strong>aparelho</strong>: a tela acorda no <strong>AV 1</strong>,
               você escolhe o jogo na estante, o disco desce e assenta no
               spindle com um clique — e o console só liga quando você aperta o
-              <strong>Power</strong>, igual ao hardware.
+              <strong>Power</strong>, igual ao hardware. A tampa abre, o disco
+              entra com a etiqueta impressa, os memory cards ocupam os slots
+              de verdade.
             </p>
             <p>
               O tubo curva a imagem com scanlines e vinheta, e abre em tela
@@ -104,6 +116,13 @@
               Deck. Tudo se opera com <strong>mouse e gamepad</strong>; a
               única exceção é escrever uma anotação, que precisa de teclado
               por natureza.
+            </p>
+            <p>
+              Importante: <strong>o PolystnX não é um emulador novo</strong>.
+              Quem roda os jogos é o <strong>PCSX Rearmed</strong> (port
+              libretro), baixado e atualizado pelo próprio app — o PolystnX é
+              o frontend de console ao redor: vídeo, áudio, estante, disco,
+              memory card, manual e conquistas.
             </p>
             <p>
               E é portátil de verdade, zero nuvem: sem banco de dados e sem
@@ -119,6 +138,7 @@
               <li>disco que desce, assenta no spindle e gira sob a tampa translúcida</li>
               <li>memory card com corpo: adesivo com o nome e os gestos Trocar/Ejetar</li>
               <li>vibração DualShock direto no seu gamepad</li>
+              <li>boot real da BIOS quando você aperta o Power</li>
               <li>nameplate com a versão do app e a do núcleo PCSX Rearmed em uso</li>
             </ul>
           </aside>
@@ -140,9 +160,8 @@
             <p>
               <a href="https://github.com/ticianocorral/PolystnX/releases/latest">Última release</a>:
               <strong>DMG</strong> para macOS, <strong>zip</strong> para
-              Windows, <strong>AppImage</strong> e <strong>Flatpak</strong>
-              para Linux — todos com a SDL3 embutida, sem instalar
-              dependência nenhuma.
+              Windows e <strong>AppImage</strong> para Linux — todos com a
+              SDL3 embutida, sem instalar dependência nenhuma.
             </p>
           </li>
           <li class="passo">
@@ -151,10 +170,9 @@
             <p>
               Arraste seus discos <code>.chd</code> para a pasta
               <code>roms/</code> ao lado do app — um
-              <code>.m3u</code> lista os discos de um jogo multi-disco. Um
-              botão na estante resolve o nome canônico
-              <a href="https://datomatic.no-intro.org/">No-Intro</a> se você
-              tiver o DAT.
+              <code>.m3u</code> lista os discos de um jogo multi-disco. A
+              conversão de <code>cue/bin</code> fica por conta do
+              <code>chdman</code>, fora do app.
             </p>
           </li>
           <li class="passo">
@@ -162,8 +180,9 @@
             <h3>Coloque a BIOS</h3>
             <p>
               O app não distribui BIOS (arquivo proprietário): copie a da sua
-              própria console para a pasta <code>system/</code>. É ela que
-              dá o boot de verdade — logo, tela de memory card e tudo.
+              própria console para a pasta <code>bios/</code>. É ela que dá o
+              boot de verdade — logo da Sony, tela de memory card e tudo. O
+              setup de primeiro uso valida por MD5.
             </p>
           </li>
           <li class="passo">
@@ -181,8 +200,9 @@
           <tbody>
             <tr><th>macOS</th><td>Apple silicon (arm64), macOS 12+</td></tr>
             <tr><th>Windows</th><td>x86_64, Windows 10+</td></tr>
-            <tr><th>Linux</th><td>x86_64 — AppImage autônomo e Flatpak; Steam Deck testado</td></tr>
+            <tr><th>Linux</th><td>x86_64 — AppImage autônomo; Steam Deck testado</td></tr>
             <tr><th>discos</th><td>CHD (único formato aceito); <code>.m3u</code> para multi-disco</td></tr>
+            <tr><th>BIOS</th><td>a da sua própria console, em <code>bios/</code> — nunca distribuída nem baixada pelo app</td></tr>
             <tr><th>controles</th><td>mouse + gamepad (DualShock vibra); teclado só para anotações</td></tr>
           </tbody>
         </table>
@@ -197,9 +217,9 @@
           <h2>A estante de jogos</h2>
         </header>
         <figure class="figura">
-          <img src="assets/estante.jpg" width="1280" height="800" loading="lazy"
-               alt="A estante de jogos: os tiles no tubo curvado e o painel do jogo com logo, abas de informações, disco e conquistas do RetroAchievements">
-          <figcaption><span>Fig. 2</span> a estante: tiles do jogo à esquerda, painel com logo, abas e conquistas à direita</figcaption>
+          <img src="assets/estante.jpg?v=2" width="1280" height="800" loading="lazy"
+               alt="A estante de jogos real: a biblioteca do autor com seis discos de PlayStation nas prateleiras de madeira com fita LED, e o painel do Duke Nukem com ano, editora, nota da IGDB e tempos do HowLongToBeat">
+          <figcaption><span>Fig. 2</span> a estante de verdade: a biblioteca real, prateleiras de madeira e o painel do jogo</figcaption>
         </figure>
         <div class="secao-grid">
           <div class="secao-texto">
@@ -207,7 +227,9 @@
               A estante é a prateleira da sala: busca instantânea, faixa de
               favoritos, “jogados recentemente” e histórico — com
               <strong>tempo de jogo por jogo</strong>, contando só com o
-              console ligado, e por sessão.
+              console ligado, e por sessão. Na grade, prateleiras de madeira
+              com fita LED seguram as capas 3D, e o botão de play aparece no
+              hover da capa.
             </p>
             <p>
               No painel do jogo, abas de informação, capa traseira e
@@ -225,8 +247,10 @@
               “Jogo (USA)”), via DAT Redump “Sony - PlayStation” (espelho
               libretro); um DAT local do
               <a href="https://datomatic.no-intro.org/">No-Intro</a> tem
-              prioridade quando concorda — e um botão renomeia os discos
-              para o padrão canônico.
+              prioridade quando concorda. E a tabela embutida no binário
+              (10.638 títulos de PS1) traz ano, editora, notas da IGDB e os
+              tempos do <a href="https://howlongtobeat.com/">HowLongToBeat</a>
+              offline — sem DAT e sem rede.
             </p>
           </aside>
         </div>
@@ -241,9 +265,9 @@
           <h2>O disco e o memory card</h2>
         </header>
         <figure class="figura">
-          <img src="assets/disco.gif" width="800" height="500" loading="lazy"
-               alt="O disco do jogo descendo e assentando no spindle do leitor, entre as chaves Power e Open">
-          <figcaption><span>Fig. 3</span> o disco desce e assenta no spindle, entre as chaves Power e Open</figcaption>
+          <img src="assets/disco.gif?v=2" width="800" height="500" loading="lazy"
+               alt="O disco do Resident Evil 3 descendo e assentando no spindle do leitor, entre as chaves Power e Open">
+          <figcaption><span>Fig. 3</span> o disco do jogo desce e assenta no spindle, entre as chaves Power e Open</figcaption>
         </figure>
         <div class="secao-grid">
           <div class="secao-texto">
@@ -283,13 +307,13 @@
         </header>
         <div class="galeria-2">
           <figure class="figura">
-            <img src="assets/ra-notificacao.jpg" width="1280" height="800" loading="lazy"
-                 alt="Notificação de conquista desbloqueada com badge, nome e pontos no queixo da TV, com o Mundo do Tomate no tubo">
+            <img src="assets/ra-notificacao.jpg?v=2" width="1280" height="800" loading="lazy"
+                 alt="Notificação de conquista desbloqueada com badge, nome e pontos no queixo da TV, com Resident Evil 3 no tubo">
             <figcaption><span>Fig. 4</span> “CONQUISTA DESBLOQUEADA” no queixo da TV — badge e pontos</figcaption>
           </figure>
           <figure class="figura">
-            <img src="assets/ra-badge.jpg" width="1280" height="800" loading="lazy"
-                 alt="Badge fixo RA ATIVADO no queixo da TV, indicando o modo hardcore, com o Mundo do Tomate no tubo">
+            <img src="assets/ra-badge.jpg?v=2" width="1280" height="800" loading="lazy"
+                 alt="Badge fixo RA ATIVADO no queixo da TV, indicando o modo hardcore, com Resident Evil 3 no tubo">
             <figcaption><span>Fig. 5</span> sem desbloqueio na fila, o badge RA ATIVADO fica no lugar</figcaption>
           </figure>
         </div>
@@ -317,12 +341,12 @@
         </header>
         <table class="tabela tabela-larga">
           <tbody>
-            <tr><th>núcleo</th><td><a href="https://github.com/libretro/pcsx_rearmed">PCSX Rearmed</a> (port libretro) — baixado e atualizado pelo app</td></tr>
+            <tr><th>emulação</th><td><a href="https://github.com/libretro/pcsx_rearmed">PCSX Rearmed</a> (port libretro) — baixado e atualizado pelo app; o PolystnX é um frontend de console ao redor, <strong>não um emulador novo</strong></td></tr>
             <tr><th>vídeo</th><td>filtro NTSC RF do blargg, scanlines, tela cheia na resolução nativa do monitor</td></tr>
             <tr><th>áudio</th><td>48 kHz estéreo, com o som do leitor deduzido do conteúdo</td></tr>
             <tr><th>vibração</th><td>DualShock no gamepad — a interface de rumble do libretro, drenada a cada quadro</td></tr>
             <tr><th>código</th><td><a href="https://www.rust-lang.org/">Rust</a> sobre <a href="https://wiki.libsdl.org/SDL3/README/README">SDL3</a>, em seis camadas de crates: apresentação, domínio, emulação, plataforma, RA e NTSC</td></tr>
-            <tr><th>pacotes</th><td>DMG / zip / AppImage / Flatpak com SDL3 embutida, gerados a cada release</td></tr>
+            <tr><th>pacotes</th><td>DMG / zip / AppImage com SDL3 embutida, gerados a cada release</td></tr>
             <tr><th>dados</th><td>100% locais — sem banco de dados, sem nuvem, sem telemetria</td></tr>
           </tbody>
         </table>
@@ -339,27 +363,31 @@
         <div class="aviso">
           <p class="aviso-titulo">aviso importante</p>
           <p>
-            Nenhum jogo comercial aparece neste site e <strong>nenhuma ROM,
-            BIOS ou núcleo é distribuído</strong> com o app: seus discos são
-            seus, a BIOS é o arquivo da sua própria console, e o núcleo PCSX
-            Rearmed é baixado direto do buildbot oficial da libretro.
+            As telas vêm do console do autor em uso real — mas
+            <strong>nenhum jogo, BIOS ou núcleo é distribuído</strong> com o
+            app: seus discos são seus, a BIOS é o arquivo da sua própria
+            console, e o núcleo PCSX Rearmed é baixado direto do buildbot
+            oficial da libretro.
           </p>
         </div>
         <div class="secao-grid">
           <div class="secao-texto">
             <h3>sobre as telas de jogo</h3>
             <p>
-              As imagens mostram o <strong>Mundo do Tomate</strong>, um
-              homebrew fictício desenhado pixel a pixel em código, dentro do
-              próprio app, só para estas fotos — o gerador vive no
-              repositório como o exemplo <code>site_screens_mock</code>.
-              Nenhum jogo comercial à vista, de propósito.
+              Todas as imagens são <strong>prints de verdade do app</strong>,
+              capturados do console em funcionamento com a biblioteca real do
+              autor — os seis discos na estante e a intro do
+              <strong>Resident Evil 3</strong> no tubo. Os jogos comerciais e
+              as suas capas pertencem aos seus donos e
+              <strong>nenhum disco é distribuído</strong>; o texto da
+              notificação de conquista é ilustrativo (o badge e o aviso na TV
+              são os do app).
             </p>
           </div>
           <div class="secao-texto">
             <h3>licenças</h3>
             <p>
-              PolyStnX é um projeto pessoal, sem fins comerciais, sob
+              PolystnX é um projeto pessoal, sem fins comerciais, sob
               licença <a href="https://github.com/ticianocorral/PolystnX/blob/main/LICENSE">MIT</a>.
               O PCSX Rearmed tem licença própria (GPL) — é por isso que o
               núcleo nunca vem no pacote. Terceiros listados em
@@ -376,7 +404,7 @@
     <!-- ===== Contracapa ===== -->
     <footer class="contracapa">
       <div class="pagina">
-        <p class="contracapa-marca">PolyStnX</p>
+        <p class="contracapa-marca">PolystnX</p>
         <p class="contracapa-lema">um PlayStation inteiro na sua TV</p>
         <ul class="contracapa-links">
           <li><a href="https://github.com/ticianocorral/PolystnX">código</a></li>
