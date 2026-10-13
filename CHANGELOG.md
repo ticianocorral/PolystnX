@@ -4,6 +4,17 @@ Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/);
 versionamento por [SemVer 2.0.0](https://semver.org/lang/pt-BR/). O workspace
 inteiro compartilha uma versão (`[workspace.package]` em `Cargo.toml`).
 
+## [1.2.7-beta] - 2026-10-13
+
+### Corrigido
+- **Linux: vídeo x11 sempre** — a detecção do gamescope por
+  `GAMESCOPE_WAYLAND_DISPLAY` (1.2.5) não é confiável no SteamOS: o env nem
+  sempre chega ao app, e o gaming mode seguia no caminho wayland do SDL
+  (loop interno nominal, exibição desabando). Agora o hint
+  `SDL_VIDEO_DRIVER=x11` vale em todo Linux — XWayland no Plasma e no
+  gamescope, o caminho batido de todo emulador Steam. Um
+  `SDL_VIDEODRIVER` no ambiente vence.
+
 ## [1.2.6-beta] - 2026-10-13
 
 ### Adicionado
