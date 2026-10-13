@@ -1837,6 +1837,19 @@ pub fn run_game(
     let mut last_dims: Option<(u32, u32)> = None;
     // Don't let the audio queue run more than ~0.15 s ahead (latency creep).
     let audio_cap = (av.sample_rate / 6.0) as usize;
+    // Vigia da câmera lenta: o jogo corre à velocidade do tick da UI (um
+    // Run do core por tick) — se o core entregar menos de ~55 quadros/s por
+    // 3 s seguidos (fora do boot e das janelas furadas por pausa/modal),
+    // o jogo está em câmera lenta e o usuário PRECISA ver isso: OSD no chin
+    // + WARN no log com o nome do renderer ativo, no máximo uma vez por
+    // minuto. `audio_dropped` conta os quadros de áudio barrados pelo cap no
+    // mesmo período — o par (fps baixo, áudio descartado) distingue "loop
+    // lento" de "apenas áudio barrado" no diagnóstico.
+    let mut fps_window_start = Instant::now();
+    let mut fps_window_frames: u32 = 0;
+    let mut slow_streak: u32 = 0;
+    let mut slow_warned_at: Option<Instant> = None;
+    let mut audio_dropped: u32 = 0;
 
     // Which note slot to save into once the next frame is ready — set at
     // click time, consumed after `core.run()` produces a real frame.
@@ -3145,11 +3158,58 @@ pub fn run_game(
                 if let Ok(out) = core_rx.try_recv() {
                     in_flight = false;
                     frames += 1;
+                    // Vigia da câmera lenta: janela de 1 s de quadros
+                    // consumidos. Janela furada (pausa/modal seguraram o
+                    // passe — vão > 2 s) não avalia, só recomeça.
+                    fps_window_frames += 1;
+                    let window = fps_window_start.elapsed();
+                    if window >= Duration::from_secs(1) {
+                        fps_window_start = Instant::now();
+                        let fps = fps_window_frames as f64 / window.as_secs_f64();
+                        fps_window_frames = 0;
+                        // Boot de BIOS hesita de verdade — só vigia depois
+                        // do console assentar (10 s do ligar).
+                        let booted =
+                            powered_since.is_some_and(|t| t.elapsed() > Duration::from_secs(10));
+                        if booted && window < Duration::from_secs(2) && fps < 55.0 {
+                            slow_streak += 1;
+                            if slow_streak >= 3
+                                && slow_warned_at
+                                    .is_none_or(|t| t.elapsed() > Duration::from_secs(60))
+                            {
+                                slow_streak = 0;
+                                slow_warned_at = Some(Instant::now());
+                                log::warn!(
+                                    "core abaixo da velocidade real: ~{fps:.0} fps — o jogo \
+                                     roda em câmera lenta (renderer: {}, áudio descartado: \
+                                     {audio_dropped} quadros)",
+                                    cab.renderer_name()
+                                );
+                                cab.push_osd(
+                                    &[
+                                        "DESEMPENHO REDUZIDO",
+                                        &format!("JOGO EM CÂMERA LENTA (~{fps:.0} FPS)"),
+                                    ],
+                                    None,
+                                    Duration::from_secs(6),
+                                );
+                                audio_dropped = 0;
+                            }
+                        } else {
+                            slow_streak = 0;
+                        }
+                    }
                     if spec.debug_note_capture && frames == debug_note_frame {
                         note_request = Some(note_slot);
                     }
                     if audio.queued_frames() < audio_cap && !cfg.mute_game {
                         audio.queue(&out.audio);
+                    } else if !cfg.mute_game {
+                        // Cap cheio: o quadro de áudio é descartado (a
+                        // alternativa, bloquear, atrasaria o core). Conta
+                        // para o vigia da câmera lenta — descartes em massa
+                        // = produção acima do consumo real.
+                        audio_dropped += 1;
                     }
 
                     // Earned do servidor chegando: une no set da sessão.

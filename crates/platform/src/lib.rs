@@ -376,16 +376,31 @@ impl Platform {
         // janela cobre a tela na hora, sem animação. Vale para janelas
         // criadas depois do hint (o init abaixo).
         sdl3::hint::set("SDL_VIDEO_MAC_FULLSCREEN_SPACES", "0");
-        // Renderer de hardware por padrão: `gpu` é o 2D do SDL sobre SDL_GPU
-        // (Metal/Vulkan/D3D12), `opengl`/`opengles2` de reserva e `software`
-        // fecha a lista para o app nunca deixar de abrir — o SDL tenta os
-        // nomes na ordem e, se NENHUM subir, a criação do renderer falha.
-        // Em software o gabinete (warp em malha + véus de alpha por frame)
-        // satura um núcleo e compete com o core do emulador: é o travamento
-        // no gaming mode do Steam Deck, onde o SDL não acha driver de
-        // hardware sozinho. Prioridade DEFAULT: um SDL_RENDER_DRIVER no
-        // ambiente (ex.: opções de lançamento do Steam) vence este valor.
-        sdl3::hint::set("SDL_RENDER_DRIVER", "gpu,opengl,opengles2,software");
+        // Renderer de hardware por padrão, na ordem do caminho provado de
+        // cada plataforma: `gpu` é o 2D do SDL sobre SDL_GPU (Metal no
+        // macOS, D3D12 no Windows). No LINUX o OpenGL vem primeiro — no
+        // gamescope do Steam Deck (modo de jogo) o XWayland/GLX é o caminho
+        // batido de todo emulador, e o SDL_GPU/Vulkan ali é o suspeito do
+        // loop de apresentação desabar (o jogo roda à velocidade do tick da
+        // UI — ver o vigia de câmera lenta no runner). `software` fecha a
+        // lista para o app nunca deixar de abrir: o SDL tenta os nomes na
+        // ordem e, se NENHUM subir, a criação do renderer falha. Prioridade
+        // DEFAULT: um SDL_RENDER_DRIVER no ambiente (ex.: opções de
+        // lançamento do Steam) vence este valor.
+        let render_drivers = if cfg!(target_os = "linux") {
+            "opengl,opengles2,gpu,software"
+        } else {
+            "gpu,opengl,opengles2,software"
+        };
+        sdl3::hint::set("SDL_RENDER_DRIVER", render_drivers);
+        // Vsync FORA, explícito: o ritmo do jogo é o tick do loop de UI (um
+        // Run do core por tick, `pace_frame` a 60 Hz) — um `present`
+        // bloqueando em FIFO derruba o tick à metade e o jogo vai em câmera
+        // lenta com o áudio engasgando. O loop tem pacing próprio; o
+        // swapchain não precisa segurar ninguém (GL: swap interval 0 — já
+        // era o default sem hint; GPU: MAILBOX→IMMEDIATE, só FIFO se não
+        // houver outro). Um SDL_RENDER_VSYNC no ambiente vence.
+        sdl3::hint::set("SDL_RENDER_VSYNC", "0");
         let sdl = sdl3::init()?;
         let video_subsystem = sdl.video()?;
         let audio_subsystem = sdl.audio()?;

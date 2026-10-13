@@ -1198,6 +1198,13 @@ impl Cabinet {
         (ox - self.canvas_rect.x(), oy - self.canvas_rect.y())
     }
 
+    /// The active renderer's name (the boot log line's same value) — the
+    /// slow-motion watchdog logs it so a Deck report pins the renderer
+    /// without asking for the whole boot log.
+    pub fn renderer_name(&self) -> &str {
+        &self.canvas.renderer_name
+    }
+
     /// Like [`Cabinet::window_to_output`], but in the 2D screen buffer's own
     /// coordinate space (what `frame_2d`'s `draw` closure paints in — the
     /// screen is inset by the bezel inside the cabinet canvas). A screen

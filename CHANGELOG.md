@@ -4,6 +4,28 @@ Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/);
 versionamento por [SemVer 2.0.0](https://semver.org/lang/pt-BR/). O workspace
 inteiro compartilha uma versão (`[workspace.package]` em `Cargo.toml`).
 
+## [1.2.4-beta] - 2026-10-13
+
+### Corrigido
+- **Jogo em câmera lenta com som engasgado no gaming mode do Steam Deck**
+  (1.2.3-beta não resolveu) — a velocidade do jogo É o tick do loop de UI
+  (um Run do core por tick): se a apresentação desaba no gamescope, tudo
+  desaba junto. O OpenGL passa na frente do SDL_GPU/Vulkan na lista de
+  renderer no Linux (XWayland/GLX é o caminho batido do gamescope; o
+  Vulkan 2D ali é o suspeito) e o vsync sai de vez, explícito
+  (`SDL_RENDER_VSYNC=0`) — um `present` bloqueando em FIFO derruba o tick
+  à metade sozinho. Nada muda com um `SDL_RENDER_DRIVER`/`SDL_RENDER_VSYNC`
+  no ambiente (prioridade DEFAULT).
+
+### Adicionado
+- **Vigia de câmera lenta** — o core entregando menos de ~55 quadros/s por
+  3 s seguidos (fora do boot e de janelas furadas por pausa/modal) mostra
+  "DESEMPENHO REDUZIDO / JOGO EM CÂMERA LENTA (~N FPS)" no chin por 6 s e
+  registra WARN no log com o nome do renderer ativo e os quadros de áudio
+  descartados no período, no máximo uma vez por minuto. Acabou a era do
+  "não resolveu" sem dado: o aviso diz o que está acontecendo e com qual
+  renderer.
+
 ## [1.2.3-beta] - 2026-10-13
 
 ### Adicionado
