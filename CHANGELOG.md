@@ -4,6 +4,17 @@ Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/);
 versionamento por [SemVer 2.0.0](https://semver.org/lang/pt-BR/). O workspace
 inteiro compartilha uma versão (`[workspace.package]` em `Cargo.toml`).
 
+## [1.3.3-beta] - 2026-10-13
+
+### Corrigido
+- **O congelamento era a LEITURA DE RAM, não o SMC** — `sample` nos
+  processos travados cravou a main thread dentro do spawn do `ps`
+  (1.3.1: `wait4`; 1.3.2: `pipe`) — o spawn de processo a cada 2 s na
+  thread de UI era o verdugo. A RAM foi para o mesmo modelo da
+  temperatura: worker de fundo + cache atômico, a UI lê número pronto e
+  não faz spawn nunca. Nenhuma syscall de processo resta na main thread
+  com o monitoramento ligado.
+
 ## [1.3.2-beta] - 2026-10-13
 
 ### Corrigido
