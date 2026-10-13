@@ -4,6 +4,17 @@ Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/);
 versionamento por [SemVer 2.0.0](https://semver.org/lang/pt-BR/). O workspace
 inteiro compartilha uma versão (`[workspace.package]` em `Cargo.toml`).
 
+## [1.2.9-beta] - 2026-10-13
+
+### Corrigido
+- **Vigia confirmou: core estrangulado no gaming mode (~34 fps vs 60 no
+  desktop)** — o remanescente de CPU do app sai: o `pace_frame` esperava
+  girando (spin) os últimos 2 ms de CADA frame (~12% de um núcleo queimados
+  a 60 fps) — agora dorme até 1 ms do fim e gira só 200 µs; e o caminho
+  RGB565 (o nativo do Rearmed) convertia o quadro DUAS vezes por frame — a
+  segunda cópia saiu. Não é o conserto do estrangulamento (ele é externo:
+  clock/agendador do gamescope-session), mas o app deixa de ser cúmplice.
+
 ## [1.2.8-beta] - 2026-10-13
 
 ### Adicionado

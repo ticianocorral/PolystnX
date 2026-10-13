@@ -602,9 +602,11 @@ fn seat_card(tx: &std::sync::mpsc::Sender<CoreCmd>, current: &mut Option<PathBuf
 const FLASH_DURATION: Duration = Duration::from_millis(900);
 
 /// Advance `next` by one frame and wait for it: sleep the bulk of the wait,
-/// then spin the last ~2ms (a plain `thread::sleep` can overshoot by more
-/// than a frame's worth of jitter). Falls back to resyncing when the loop
-/// fell behind, so it never spirals. Shared by runner/shelf/idle/settings.
+/// then spin only the last ~200µs (a plain `thread::sleep` can overshoot;
+/// spinning 2 ms inteiros por frame era queimar ~12% de um núcleo — CPU
+/// que o core do emulador precisa quando o sistema está estrangulado, como
+/// no gaming mode). Falls back to resyncing when the loop fell behind, so
+/// it never spirals. Shared by runner/shelf/idle/settings.
 pub(crate) fn pace_frame(next: &mut Instant, frame_time: Duration) {
     *next += frame_time;
     let now = Instant::now();
@@ -622,8 +624,8 @@ pub(crate) fn pace_frame(next: &mut Instant, frame_time: Duration) {
         return;
     }
     let wait = *next - now;
-    if wait > Duration::from_millis(2) {
-        std::thread::sleep(wait - Duration::from_millis(2));
+    if wait > Duration::from_millis(1) {
+        std::thread::sleep(wait - Duration::from_millis(1));
     }
     while Instant::now() < *next {
         std::thread::yield_now();
@@ -3351,7 +3353,10 @@ pub fn run_game(
                         }
                         // XRGB8888: o FrameRef EMPRESTA os pixels do core
                         // (zero-cópia); RGB565: converte no buffer. Em ambos
-                        // o buffer fica guardado para o "reapresenta".
+                        // o buffer fica guardado para o "reapresenta" — a
+                        // cópia extra só no caminho do empréstimo (no
+                        // RGB565 o store_into de cima JÁ guardou; guardar
+                        // de novo era converter o quadro duas vezes).
                         let fref: FrameRef = if frame.format == EmuFormat::Xrgb8888 {
                             // Zero-cópia: o FrameRef EMPRESTA os pixels do
                             // core diretamente.
@@ -3374,7 +3379,9 @@ pub fn run_game(
                         };
                         cab.set_session_time(live_session_time(powered_elapsed, powered_since));
                         cab.present_frame(&fref, out.aspect);
-                        store_into(frame, &mut last_frame);
+                        if frame.format == EmuFormat::Xrgb8888 {
+                            store_into(frame, &mut last_frame);
+                        }
                         last_frame_dims = Some((frame.width, frame.height));
                         last_aspect = out.aspect;
 
