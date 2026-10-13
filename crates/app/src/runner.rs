@@ -1854,6 +1854,10 @@ pub fn run_game(
     // (runs/s, renderer, fila e descartes de áudio) que faz QUALQUER log
     // carregar o diagnóstico sem precisar reproduzir com TRACE ligado.
     let mut perf_windows: u32 = 0;
+    // Janelas desde o último retrato NA TELA: a cada 30 s de jogo, 2 s de
+    // "~N FPS / SOM DESCARTADO M" no chin — quem relata de fora lê o número
+    // direto na TV, sem terminal nem arquivo de log.
+    let mut perf_osd_windows: u32 = 0;
 
     // Which note slot to save into once the next frame is ready — set at
     // click time, consumed after `core.run()` produces a real frame.
@@ -3182,6 +3186,23 @@ pub fn run_game(
                                  quadros | descartados {audio_dropped}",
                                 cab.renderer_name(),
                                 audio.queued_frames()
+                            );
+                            audio_dropped = 0;
+                        }
+                        // Retrato NA TELA, a cada 30 s de jogo por 2 s: o
+                        // número que decide o diagnóstico (core a 60 = lado
+                        // da exibição; a 30 = core estrangulado) fica
+                        // visível na TV, sem terminal.
+                        perf_osd_windows += 1;
+                        if perf_osd_windows >= 30 {
+                            perf_osd_windows = 0;
+                            cab.push_osd(
+                                &[
+                                    &format!("~{fps:.0} FPS"),
+                                    &format!("SOM DESCARTADO {audio_dropped}"),
+                                ],
+                                None,
+                                Duration::from_secs(2),
                             );
                             audio_dropped = 0;
                         }

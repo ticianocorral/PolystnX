@@ -4,6 +4,20 @@ Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/);
 versionamento por [SemVer 2.0.0](https://semver.org/lang/pt-BR/). O workspace
 inteiro compartilha uma versão (`[workspace.package]` em `Cargo.toml`).
 
+## [1.2.8-beta] - 2026-10-13
+
+### Adicionado
+- **Retrato de desempenho NA TV** — a cada 30 s de jogo, 2 s de
+  "~N FPS / SOM DESCARTADO M" no chin. O número que decide o diagnóstico
+  (core a 60 = problema na exibição; a 30 = core estrangulado) fica
+  visível na TV, sem terminal nem arquivo de log.
+
+### Corrigido
+- **`emu-run` não gravava arquivo de log** — só stderr, que um atalho do
+  Steam engole: sessões via `emu-run` ficavam sem rastro nenhum (nem o
+  retrato "perf:" do runner). Agora grava `config/logs/emu-run-*.log`,
+  igual ao app principal.
+
 ## [1.2.7-beta] - 2026-10-13
 
 ### Corrigido

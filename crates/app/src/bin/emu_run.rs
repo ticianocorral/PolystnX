@@ -232,7 +232,26 @@ Closing the window always quits, on or off — no ceremony.";
 
 fn main() -> Result<()> {
     polystnx_app::dirs::migrate_legacy_data_root();
-    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
+    // Mesmo log-em-arquivo do polystnx: num atalho do Steam o stderr se
+    // perde — e uma sessão emulando sem log é uma sessão sem diagnóstico
+    // (o retrato "perf:" do runner ia para o limbo).
+    {
+        let dir = polystnx_app::dirs::config_dir().join("logs");
+        let _ = std::fs::create_dir_all(&dir);
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        let path = dir.join(format!("emu-run-{stamp}.log"));
+        if let Ok(file) = std::fs::File::create(&path) {
+            env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info"))
+                .target(env_logger::Target::Pipe(Box::new(file)))
+                .init();
+        } else {
+            env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info"))
+                .init();
+        }
+    }
     let args = parse_args()?;
 
     let mut cfg = Config::load(args.config.as_deref())?;
