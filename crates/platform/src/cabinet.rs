@@ -371,6 +371,11 @@ pub struct Cabinet {
     /// while it lives, and the badge comes back when it expires. `None`
     /// draws nothing (account off, or no cartridge in).
     ra_status: Option<RaStatus>,
+    /// Deadline do aviso de renderer em software (`SW_NOTICE_TTL` contando
+    /// da criação): o renderer caiu em software (nenhum driver de hardware
+    /// da lista do hint subiu) e o usuário precisa saber — o gabinete CRT em
+    /// CPU derruba o FPS e compete com o core. `None` = hardware, sem aviso.
+    sw_notice_until: Option<Instant>,
     /// Whether the top-left "fechar app" button is drawn/clickable this
     /// screen (plan revision: "criar botao de fechar app no canto superior
     /// esquerdo") — the idle/shelf/settings/history screens turn it on;
@@ -405,9 +410,10 @@ pub struct RaStatus {
     pub hardcore: bool,
 }
 
-/// What the chin draws this frame: a queued notification wins over the
-/// persistent RA badge — which is what makes the badge "cede the spot" to
-/// each unlock and come back when the notification expires.
+/// What the chin draws this frame: a queued notification wins, then the
+/// degraded-mode boot notice, then the persistent RA badge — which is what
+/// makes the badge "cede the spot" to each unlock and come back when the
+/// notification expires.
 enum ChinOsd {
     Notify {
         lines: Vec<String>,
@@ -1008,6 +1014,17 @@ impl Cabinet {
             video.current_video_driver(),
             canvas.renderer_name
         );
+        // Software é o último nome da lista do hint — chegar aqui significa
+        // que NENHUM driver de hardware subiu. O gabinete (warp em malha +
+        // véus de alpha por frame) em CPU satura um núcleo e compete com o
+        // core do emulador: loga WARN e arma o aviso no chin.
+        let sw_notice = canvas.renderer_name.eq_ignore_ascii_case("software");
+        if sw_notice {
+            log::warn!(
+                "renderer software — sem aceleração de GPU, desempenho reduzido \
+                 (o ambiente pode forçar um driver via SDL_RENDER_DRIVER)"
+            );
+        }
         canvas.set_blend_mode(BlendMode::Blend);
         canvas.set_draw_color(Color::RGB(RECESS.0, RECESS.1, RECESS.2));
         canvas.clear();
@@ -1066,6 +1083,7 @@ impl Cabinet {
             update_arrows: (None, None),
             osd_queue: VecDeque::new(),
             ra_status: None,
+            sw_notice_until: sw_notice.then(|| Instant::now() + SW_NOTICE_TTL),
             close_button: Rect::new(0, 0, 0, 0),
             minimize_button: Rect::new(0, 0, 0, 0),
         })
@@ -2714,7 +2732,7 @@ impl Cabinet {
             self.nameplate_updates,
         );
         draw_ch3_osd(&mut self.canvas, &mut self.font, self.screen);
-        self.draw_ra_badge();
+        self.draw_chin_persistent();
         if self.static_hiss {
             self.queue_static_hiss(level);
         } else if let Some(h) = &self.hiss {
@@ -2805,7 +2823,7 @@ impl Cabinet {
         draw_ch3_osd(&mut self.canvas, &mut self.font, self.screen);
         // A conta ativa marca presença até na estática: o badge do RA no
         // queixo, do lado oposto ao nameplate.
-        self.draw_ra_badge();
+        self.draw_chin_persistent();
         // The ambient hiss (opt-in via settings): follows the same level as
         // the visual snow, so a burst hisses loud and the resting hiss stays
         // a quiet background shhh.
@@ -3230,7 +3248,7 @@ impl Cabinet {
             &self.nameplate,
             self.nameplate_updates,
         );
-        self.draw_ra_badge();
+        self.draw_chin_persistent();
         self.close_button = draw_close_button(&mut self.canvas, &mut self.font);
         self.minimize_button = draw_minimize_button(&mut self.canvas, &mut self.font);
         self.canvas.set_viewport(None);
@@ -3850,7 +3868,8 @@ pub const RA_LOGO_IMG: u64 = u64::MAX - 7;
 
 impl Cabinet {
     /// Drop expired fronts, then draw the front block — or, with the queue
-    /// empty, the persistent RetroAchievements badge (when armed).
+    /// empty, the degraded-mode notice / the persistent RetroAchievements
+    /// badge (when armed).
     fn draw_osd_front(&mut self) {
         let now = Instant::now();
         while self.osd_queue.front().is_some_and(|e| e.until <= now) {
@@ -3858,17 +3877,7 @@ impl Cabinet {
         }
         let (_, out_h) = self.canvas.output_size().unwrap_or((1280, 720));
         let Some(entry) = self.osd_queue.front() else {
-            if let Some(status) = self.ra_status {
-                draw_chin_ra(
-                    &mut self.canvas,
-                    &mut self.font,
-                    &self.images,
-                    self.screen,
-                    out_h,
-                    &self.nameplate,
-                    status.hardcore,
-                );
-            }
+            self.draw_chin_persistent_inner(out_h);
             return;
         };
         draw_chin_osd(
@@ -3893,6 +3902,15 @@ impl Cabinet {
                 badge: e.badge,
             };
         }
+        if self.sw_notice_live() {
+            return ChinOsd::Notify {
+                lines: sw_notice_rows()
+                    .iter()
+                    .map(|(l, _)| l.to_string())
+                    .collect(),
+                badge: None,
+            };
+        }
         match self.ra_status {
             Some(s) => ChinOsd::Ra {
                 hardcore: s.hardcore,
@@ -3901,14 +3919,33 @@ impl Cabinet {
         }
     }
 
-    /// The persistent RA badge, for every chin that isn't the gameplay one
-    /// (`composite_screen` covers início/estante/configurações; the idle's
-    /// `present_static` and its capture call it directly).
-    fn draw_ra_badge(&mut self) {
+    /// The chin's persistent block on every screen that isn't the gameplay
+    /// one: the degraded-mode notice in its first seconds after launch, then
+    /// the RA badge (`composite_screen` covers
+    /// início/estante/configurações; the idle's `present_static` and its
+    /// capture call it directly).
+    fn draw_chin_persistent(&mut self) {
+        let (_, out_h) = self.canvas.output_size().unwrap_or((1280, 720));
+        self.draw_chin_persistent_inner(out_h);
+    }
+
+    /// `draw_chin_persistent`'s body, shared with `draw_osd_front` (whose
+    /// `out_h` is already in hand): the notice while it lives, the RA badge
+    /// after.
+    fn draw_chin_persistent_inner(&mut self, out_h: u32) {
+        if self.sw_notice_live() {
+            draw_chin_sw_notice(
+                &mut self.canvas,
+                &mut self.font,
+                self.screen,
+                out_h,
+                &self.nameplate,
+            );
+            return;
+        }
         let Some(status) = self.ra_status else {
             return;
         };
-        let (_, out_h) = self.canvas.output_size().unwrap_or((1280, 720));
         draw_chin_ra(
             &mut self.canvas,
             &mut self.font,
@@ -3918,6 +3955,13 @@ impl Cabinet {
             &self.nameplate,
             status.hardcore,
         );
+    }
+
+    /// Is the degraded-mode (software renderer) notice still holding the
+    /// chin — the first seconds after launch, when no hardware driver came
+    /// up?
+    fn sw_notice_live(&self) -> bool {
+        self.sw_notice_until.is_some_and(|until| Instant::now() < until)
     }
 }
 
@@ -3936,6 +3980,73 @@ fn ra_badge_rows(hardcore: bool) -> [(&'static str, (u8, u8, u8)); 2] {
             },
         ),
     ]
+}
+
+/// Quanto tempo o aviso de renderer em software segura o chin depois da
+/// criação — tempo de ler quando o app abre, curto o bastante para devolver
+/// o canto ao selo de RA.
+const SW_NOTICE_TTL: Duration = Duration::from_secs(10);
+
+/// As linhas do aviso degradado — pura para o teste fixar o contrato: o
+/// título no âmbar de aviso (o mesmo do hardcore do RA), a consequência no
+/// cinza claro do chin. Degradado, não morto.
+fn sw_notice_rows() -> [(&'static str, (u8, u8, u8)); 2] {
+    [
+        ("SEM ACELERAÇÃO DE GPU", (240, 180, 60)),
+        ("DESEMPENHO REDUZIDO", (235, 235, 225)),
+    ]
+}
+
+/// O aviso de renderer em software — o mesmo canto do chin, sem tile: duas
+/// linhas alinhadas à direita com a sombra de 2px de todo vidro, truncando
+/// contra o nameplate como os demais blocos do chin.
+fn draw_chin_sw_notice(
+    canvas: &mut WindowCanvas,
+    font: &mut Texture,
+    screen: Rect,
+    out_h: u32,
+    nameplate: &str,
+) {
+    const MARGIN: i32 = 24;
+    let chin_top = screen.bottom();
+    let chin_h = out_h as i32 - chin_top;
+    if chin_h < 24 {
+        return;
+    }
+    let cell = GLYPH_W as i32;
+    let row = GLYPH_H as i32;
+    let gap = 4i32;
+    let rows = sw_notice_rows();
+    // Mesmo limite esquerdo dos outros blocos: a linha mais larga do
+    // nameplate.
+    let nameplate_w = nameplate
+        .lines()
+        .map(|l| l.chars().count() as i32 * cell)
+        .max()
+        .unwrap_or(0);
+    let right = screen.right() - MARGIN;
+    let left_limit = screen.left() + nameplate_w + MARGIN * 2;
+    let max_cols = ((right - left_limit).max(cell) / cell) as usize;
+    let shown: Vec<(String, (u8, u8, u8))> = rows
+        .iter()
+        .map(|(l, c)| (truncate_to_cols(l, max_cols), *c))
+        .collect();
+    let block_h = shown.len() as i32 * row + (shown.len() as i32 - 1) * gap;
+    let mut y = chin_top + (chin_h - block_h) / 2;
+    for (line, color) in &shown {
+        let x = right - line.chars().count() as i32 * cell;
+        draw_text_absolute(
+            canvas,
+            font,
+            x + 2,
+            y + 2,
+            TextStyle::new(1.0, (12, 14, 12)),
+            line,
+            usize::MAX,
+        );
+        draw_text_absolute(canvas, font, x, y, TextStyle::new(1.0, *color), line, usize::MAX);
+        y += row + gap;
+    }
 }
 
 /// The persistent RetroAchievements badge — the same chin corner as the
@@ -7419,7 +7530,10 @@ fn build_font_atlas(canvas: &mut WindowCanvas) -> Result<Texture, PlatformError>
 
 #[cfg(test)]
 mod tests {
-    use super::{fit_aspect_in, ra_badge_rows, screen_area, wrapped_height, GLYPH_H, OSD_GREEN};
+    use super::{
+        fit_aspect_in, ra_badge_rows, screen_area, sw_notice_rows, wrapped_height, GLYPH_H,
+        OSD_GREEN,
+    };
     use sdl3::rect::Rect;
 
     #[test]
@@ -7433,6 +7547,16 @@ mod tests {
         assert_eq!(hardcore[1].0, "HARDCORE");
         assert_eq!(softcore[1].0, "SOFTCORE");
         assert_ne!(hardcore[1].1, softcore[1].1);
+    }
+
+    #[test]
+    fn sw_notice_rows_pin_the_degraded_contract() {
+        let rows = sw_notice_rows();
+        // Título no âmbar de aviso (jamais o verde do OSD — degradado não é
+        // "tudo certo"), consequência no cinza claro do chin.
+        assert_eq!(rows[0].0, "SEM ACELERAÇÃO DE GPU");
+        assert_ne!(rows[0].1, OSD_GREEN);
+        assert_eq!(rows[1], ("DESEMPENHO REDUZIDO", (235, 235, 225)));
     }
 
     #[test]

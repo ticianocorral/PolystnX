@@ -376,6 +376,16 @@ impl Platform {
         // janela cobre a tela na hora, sem animação. Vale para janelas
         // criadas depois do hint (o init abaixo).
         sdl3::hint::set("SDL_VIDEO_MAC_FULLSCREEN_SPACES", "0");
+        // Renderer de hardware por padrão: `gpu` é o 2D do SDL sobre SDL_GPU
+        // (Metal/Vulkan/D3D12), `opengl`/`opengles2` de reserva e `software`
+        // fecha a lista para o app nunca deixar de abrir — o SDL tenta os
+        // nomes na ordem e, se NENHUM subir, a criação do renderer falha.
+        // Em software o gabinete (warp em malha + véus de alpha por frame)
+        // satura um núcleo e compete com o core do emulador: é o travamento
+        // no gaming mode do Steam Deck, onde o SDL não acha driver de
+        // hardware sozinho. Prioridade DEFAULT: um SDL_RENDER_DRIVER no
+        // ambiente (ex.: opções de lançamento do Steam) vence este valor.
+        sdl3::hint::set("SDL_RENDER_DRIVER", "gpu,opengl,opengles2,software");
         let sdl = sdl3::init()?;
         let video_subsystem = sdl.video()?;
         let audio_subsystem = sdl.audio()?;

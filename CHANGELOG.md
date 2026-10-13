@@ -4,6 +4,19 @@ Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/);
 versionamento por [SemVer 2.0.0](https://semver.org/lang/pt-BR/). O workspace
 inteiro compartilha uma versão (`[workspace.package]` em `Cargo.toml`).
 
+## [1.2.3-beta] - 2026-10-13
+
+### Adicionado
+- **Renderer de hardware por padrão + aviso de modo degradado** — o app pede
+  ao SDL a lista `gpu,opengl,opengles2,software` (hint `SDL_RENDER_DRIVER`,
+  prioridade DEFAULT: o que o ambiente definir vence). Em software o gabinete
+  CRT (warp em malha + véus de alpha por frame) satura a CPU e compete com o
+  core do emulador — era o travamento do app no gaming mode do Steam Deck,
+  onde o SDL não achava driver de hardware sozinho. Se ainda assim o renderer
+  subir em software (último nome da lista), o app registra WARN no log e
+  mostra "SEM ACELERAÇÃO DE GPU / DESEMPENHO REDUZIDO" no chin por 10 s
+  depois de abrir, em todas as telas e nas capturas.
+
 ## [1.2.2-beta] - 2026-10-12
 
 ### Removido
