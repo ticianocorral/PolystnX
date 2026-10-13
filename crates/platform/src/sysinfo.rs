@@ -33,7 +33,32 @@ pub fn cpu_temp_celsius() -> Option<f32> {
     }
     #[cfg(target_os = "macos")]
     {
-        mac::smc_cpu_temp()
+        use std::sync::atomic::{AtomicI32, Ordering};
+        // A leitura do SMC NUNCA roda na thread de UI: uma chamada IOKit que
+        // decida segurar travava o app inteiro (o congelamento ao abrir o
+        // jogo com o monitoramento ligado). Um worker de fundo lê a cada 5 s
+        // e publica em décimos de grau num atomic; a UI só lê o cache.
+        // i32::MIN = primeira leitura ainda não voltou; -1 = este modelo não
+        // expõe temperatura por essas chaves (segmento some do painel).
+        static CACHE: AtomicI32 = AtomicI32::new(i32::MIN);
+        static STARTED: std::sync::OnceLock<()> = std::sync::OnceLock::new();
+        STARTED.get_or_init(|| {
+            let _ = std::thread::Builder::new()
+                .name("smc-temp".into())
+                .spawn(|| loop {
+                    let value = match mac::smc_cpu_temp() {
+                        Some(c) => (c * 10.0) as i32,
+                        None => -1,
+                    };
+                    CACHE.store(value, Ordering::Relaxed);
+                    std::thread::sleep(std::time::Duration::from_secs(5));
+                });
+        });
+        match CACHE.load(Ordering::Relaxed) {
+            i32::MIN => None,
+            -1 => None,
+            tenths => Some(tenths as f32 / 10.0),
+        }
     }
     #[cfg(not(any(target_os = "linux", target_os = "macos")))]
     {
@@ -198,6 +223,7 @@ mod mac {
             output: *mut c_void,
             output_size: *mut usize,
         ) -> IOReturn;
+        fn CFRelease(cf: *mut c_void);
     }
 
     extern "C" {
@@ -228,6 +254,9 @@ mod mac {
                     return None;
                 }
                 let service = IOServiceGetMatchingService(master, matching);
+                // IOServiceMatching devolve +1 (CF) — solta na hora; o
+                // serviço foi consumido pelo GetMatchingService.
+                CFRelease(matching);
                 if service == 0 {
                     return None;
                 }

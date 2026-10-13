@@ -4,6 +4,17 @@ Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/);
 versionamento por [SemVer 2.0.0](https://semver.org/lang/pt-BR/). O workspace
 inteiro compartilha uma versão (`[workspace.package]` em `Cargo.toml`).
 
+## [1.3.2-beta] - 2026-10-13
+
+### Corrigido
+- **App congelava ao abrir o jogo com o monitoramento ligado (macOS)** — a
+  leitura do SMC rodava na thread de UI: uma chamada IOKit que decidisse
+  segurar travava o app inteiro. A leitura foi para um worker de fundo (a
+  cada 5 s, publicando em cache atômico) — a UI só lê o valor pronto; se a
+  chamada segurar, o pior caso é o segmento CPU congelar no último valor
+  ou ficar ausente, o app segue. O dicionário do IOServiceMatching agora é
+  solto (CFRelease) em vez de vazar por leitura.
+
 ## [1.3.1-beta] - 2026-10-13
 
 ### Adicionado
