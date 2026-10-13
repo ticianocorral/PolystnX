@@ -4,6 +4,19 @@ Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/);
 versionamento por [SemVer 2.0.0](https://semver.org/lang/pt-BR/). O workspace
 inteiro compartilha uma versão (`[workspace.package]` em `Cargo.toml`).
 
+## [1.3.4-beta] - 2026-10-13
+
+### Corrigido
+- **macOS: remove a leitura do SMC e dá OpenGL antes do Metal** — o laudo
+  do `sample` mostrou a thread do SMC presa DENTRO de uma chamada IOKit
+  no kernel (processo virava imortal em TX — nem kill -9 colhia) e a main
+  thread congelada no update da textura do jogo pelo caminho SDL_GPU/
+  Metal. O FFI artesanal do SMC sai (temperatura no macOS fica de fora
+  até adotar um crate consagrado) e o macOS passa a abrir em OpenGL como
+  o Linux — o mesmo caminho GL já provado no handheld. Quem tiver os
+  processos zumbis em TX precisa reiniciar o Mac para limpar (o kernel
+  não os colhe).
+
 ## [1.3.3-beta] - 2026-10-13
 
 ### Corrigido

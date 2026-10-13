@@ -388,7 +388,13 @@ impl Platform {
         // ordem e, se NENHUM subir, a criação do renderer falha. Prioridade
         // DEFAULT: um SDL_RENDER_DRIVER no ambiente (ex.: opções de
         // lançamento do Steam) vence este valor.
-        let render_drivers = if cfg!(target_os = "linux") {
+        let render_drivers = if cfg!(target_os = "macos") {
+            // macOS: OpenGL na frente também — o caminho SDL_GPU/Metal
+            // travou dentro do update da textura do jogo (main thread em
+            // memmove no driver, processo imortal em TX) no Mac de
+            // desenvolvimento, e o GL 4.1 dá conta sobrando do gabinete 2D.
+            "opengl,opengles2,gpu,software"
+        } else if cfg!(target_os = "linux") {
             "opengl,opengles2,gpu,software"
         } else {
             "gpu,opengl,opengles2,software"
