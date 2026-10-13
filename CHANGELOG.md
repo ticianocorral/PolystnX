@@ -4,6 +4,20 @@ Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/);
 versionamento por [SemVer 2.0.0](https://semver.org/lang/pt-BR/). O workspace
 inteiro compartilha uma versão (`[workspace.package]` em `Cargo.toml`).
 
+## [1.3.0-beta] - 2026-10-13
+
+### Adicionado
+- **Painel de desempenho no modo dev** — nova opção "infos de
+  desempenho" no menu dev (Konami code na tela inicial → Dev): liga um
+  painel no TOPO CENTRAL da TV, na borda dela, com **fps do jogo**,
+  **temperatura da CPU** (zonas térmicas do sysfs, preferindo zonas
+  cpu/soc) e **RAM usada pelo app** (VmRSS de /proc) — atualizados a cada
+  1 s (temperatura/RAM no máximo a cada 2 s). Fundo escuro translúcido
+  para ler sobre qualquer cena; segmento com leitura indisponível sai da
+  linha (macOS/Windows mostram só o fps). O estado vive na sessão, como
+  o modo dev: não é persistido. O botão tem seleção por setas (Up/Down)
+  além do clique, e o menu ganhou o segundo botão.
+
 ## [1.2.9-beta] - 2026-10-13
 
 ### Corrigido

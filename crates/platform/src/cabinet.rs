@@ -375,6 +375,14 @@ pub struct Cabinet {
     /// (versão + renderer ativo) tem resposta na TV, não no log; caindo em
     /// software, o aviso degradado toma o lugar. `None` = prazo vencido.
     chin_notice: Option<ChinNotice>,
+    /// O painel de desempenho do modo dev ("infos de desempenho" no menu
+    /// dev): "~N FPS / CPU T / RAM M" no topo central da TV. Os números
+    /// chegam por `set_perf_readout` (runner, 1×/s, leituras de sistema
+    /// throttled); sem o painel ligado, nada é desenhado.
+    perf_overlay: bool,
+    perf_fps: u32,
+    perf_cpu: Option<u32>,
+    perf_ram_mb: Option<u32>,
     /// Whether the top-left "fechar app" button is drawn/clickable this
     /// screen (plan revision: "criar botao de fechar app no canto superior
     /// esquerdo") — the idle/shelf/settings/history screens turn it on;
@@ -1088,6 +1096,10 @@ impl Cabinet {
             } else {
                 boot_notice(&renderer_name)
             }),
+            perf_overlay: false,
+            perf_fps: 0,
+            perf_cpu: None,
+            perf_ram_mb: None,
             close_button: Rect::new(0, 0, 0, 0),
             minimize_button: Rect::new(0, 0, 0, 0),
         })
@@ -1207,6 +1219,27 @@ impl Cabinet {
     /// without asking for the whole boot log.
     pub fn renderer_name(&self) -> &str {
         &self.canvas.renderer_name
+    }
+
+    /// Liga/desliga o painel de desempenho do modo dev (o menu dev alterna;
+    /// o estado mora aqui e sobrevive estante ↔ jogo).
+    pub fn set_perf_overlay(&mut self, on: bool) {
+        self.perf_overlay = on;
+    }
+
+    /// O painel de desempenho está ligado? (o menu dev desenha o botão no
+    /// estado atual.)
+    pub fn perf_overlay(&self) -> bool {
+        self.perf_overlay
+    }
+
+    /// Alimenta o painel: fps medido pelo runner (janela de 1 s) e as
+    /// leituras de sistema (°C, MB — arredondados; `None` = leitura
+    /// indisponível, o segmento sai da linha).
+    pub fn set_perf_readout(&mut self, fps: u32, cpu: Option<f32>, ram_mb: Option<f32>) {
+        self.perf_fps = fps;
+        self.perf_cpu = cpu.map(|c| c.round() as u32);
+        self.perf_ram_mb = ram_mb.map(|m| m.round() as u32);
     }
 
     /// Like [`Cabinet::window_to_output`], but in the 2D screen buffer's own
@@ -2145,6 +2178,12 @@ impl Cabinet {
             self.dev_mode,
             self.core_status.as_deref(),
         );
+        // Painel de desempenho do modo dev: topo central da TV, por cima de
+        // tudo — por último, ainda dentro do viewport do gabinete.
+        if self.perf_overlay {
+            let line = perf_line(self.perf_fps, self.perf_cpu, self.perf_ram_mb);
+            draw_perf_overlay(&mut self.canvas, &mut self.font, self.screen, &line);
+        }
         self.canvas.set_viewport(None);
     }
 
@@ -4099,6 +4138,56 @@ fn draw_chin_notice(
         draw_text_absolute(canvas, font, x, y, TextStyle::new(1.0, *color), line, usize::MAX);
         y += row + gap;
     }
+}
+
+/// A linha do painel de desempenho — pura para o teste fixar o formato:
+/// ASCII de atlas (sem °/·), dois espaços entre segmentos e os segmentos
+/// cuja leitura falhou simplesmente omitidos.
+fn perf_line(fps: u32, cpu: Option<u32>, ram_mb: Option<u32>) -> String {
+    let mut parts = vec![format!("{fps} FPS")];
+    if let Some(c) = cpu {
+        parts.push(format!("CPU {c}C"));
+    }
+    if let Some(m) = ram_mb {
+        parts.push(format!("RAM {m} MB"));
+    }
+    parts.join("  ")
+}
+
+/// O painel de desempenho do modo dev — topo CENTRAL da TV, na borda dela:
+/// faixa escura translúcida para ler sobre qualquer cena, texto no cinza
+/// claro do chin.
+fn draw_perf_overlay(canvas: &mut WindowCanvas, font: &mut Texture, screen: Rect, line: &str) {
+    const MARGIN: i32 = 10;
+    const PAD_X: i32 = 10;
+    const PAD_Y: i32 = 6;
+    if line.is_empty() {
+        return;
+    }
+    let cell = GLYPH_W as i32;
+    let row = GLYPH_H as i32;
+    let text_w = line.chars().count() as i32 * cell;
+    let x = screen.left() + (screen.width() as i32 - text_w) / 2;
+    let y = screen.top() + MARGIN;
+    fill_rect_rgba(
+        canvas,
+        (0, 0, 0, 150),
+        Rect::new(
+            x - PAD_X,
+            y - PAD_Y,
+            (text_w + PAD_X * 2) as u32,
+            (row + PAD_Y * 2) as u32,
+        ),
+    );
+    draw_text_absolute(
+        canvas,
+        font,
+        x,
+        y,
+        TextStyle::new(1.0, LIGHT_GREY_ROW),
+        line,
+        usize::MAX,
+    );
 }
 
 /// The persistent RetroAchievements badge — the same chin corner as the
@@ -7609,6 +7698,18 @@ mod tests {
         assert_eq!(rows[0].0, "SEM ACELERAÇÃO DE GPU");
         assert_ne!(rows[0].1, OSD_GREEN);
         assert_eq!(rows[1], ("DESEMPENHO REDUZIDO", (235, 235, 225)));
+    }
+
+    #[test]
+    fn perf_line_omits_unavailable_segments_and_stays_ascii() {
+        use super::perf_line;
+        assert_eq!(
+            perf_line(34, Some(52), Some(84)),
+            "34 FPS  CPU 52C  RAM 84 MB"
+        );
+        // Sem sysfs/proc (macOS, permissão negada): só o fps — sem placeholders.
+        assert_eq!(perf_line(60, None, None), "60 FPS");
+        assert_eq!(perf_line(60, Some(61), None), "60 FPS  CPU 61C");
     }
 
     #[test]

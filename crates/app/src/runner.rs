@@ -1860,6 +1860,10 @@ pub fn run_game(
     // "~N FPS / SOM DESCARTADO M" no chin — quem relata de fora lê o número
     // direto na TV, sem terminal nem arquivo de log.
     let mut perf_osd_windows: u32 = 0;
+    // Painel do modo dev (quando ligado no menu dev): fps a cada janela e
+    // leituras de sistema throttled para 2 s (temperatura varre as zonas
+    // térmicas do sysfs; RAM lê /proc/self/status).
+    let mut sys_next = Instant::now();
 
     // Which note slot to save into once the next frame is ready — set at
     // click time, consumed after `core.run()` produces a real frame.
@@ -3190,6 +3194,16 @@ pub fn run_game(
                                 audio.queued_frames()
                             );
                             audio_dropped = 0;
+                        }
+                        // Painel do modo dev: fps fresco a cada janela; as
+                        // leituras de temperatura/RAM no máximo a cada 2 s.
+                        if cab.perf_overlay() && Instant::now() >= sys_next {
+                            sys_next = Instant::now() + Duration::from_secs(2);
+                            cab.set_perf_readout(
+                                fps.round() as u32,
+                                polystnx_platform::sysinfo::cpu_temp_celsius(),
+                                polystnx_platform::sysinfo::process_ram_mb(),
+                            );
                         }
                         // Retrato NA TELA, a cada 30 s de jogo por 2 s: o
                         // número que decide o diagnóstico (core a 60 = lado

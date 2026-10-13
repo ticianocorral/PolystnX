@@ -72,6 +72,13 @@ fn install_rect(w: u32, h: u32) -> (i32, i32, u32, u32) {
     )
 }
 
+/// O botão de alternar o painel de desempenho ("infos de desempenho"),
+/// logo abaixo do de instalar.
+fn perf_rect(w: u32, h: u32) -> (i32, i32, u32, u32) {
+    let (bw, bh) = (510u32, 44u32);
+    ((w as i32 - bw as i32) / 2, h as i32 / 2 + 10, bw, bh)
+}
+
 fn in_rect(x: i32, y: i32, r: (i32, i32, u32, u32)) -> bool {
     x >= r.0 && y >= r.1 && (x - r.0) < r.2 as i32 && (y - r.1) < r.3 as i32
 }
@@ -89,6 +96,9 @@ pub fn run(plat: &mut Platform, cab: &mut Cabinet) -> Result<bool> {
     let mut status = String::from("baixa um pacote com uma rom e os assets dela");
     let mut status_color = DIM;
     let mut busy = false;
+    // Seleção (gamepad): 0 = instalar, 1 = infos de desempenho. Clique
+    // ativa direto; Confirm/Up/Down andam a seleção.
+    let mut sel = 0usize;
 
     loop {
         if let Some(r) = &rx {
@@ -127,14 +137,23 @@ pub fn run(plat: &mut Platform, cab: &mut Cabinet) -> Result<bool> {
             return Ok(true);
         }
         let mut start = false;
+        let mut toggle_perf = false;
         if !busy {
-            // Confirm (gamepad A) tem o mesmo efeito do clique no botão — é
-            // a única ação do menu.
-            if m.nav.iter().any(|n| matches!(n, MenuNav::Confirm)) {
-                start = true;
-            }
-            if m.nav.iter().any(|n| matches!(n, MenuNav::Back)) {
-                return Ok(false);
+            // Confirm ativa o botão SELECIONADO; Up/Down alternam entre os
+            // dois (instalar / infos de desempenho).
+            for n in &m.nav {
+                match n {
+                    MenuNav::Confirm => {
+                        if sel == 0 {
+                            start = true;
+                        } else {
+                            toggle_perf = true;
+                        }
+                    }
+                    MenuNav::Up | MenuNav::Down => sel = 1 - sel,
+                    MenuNav::Back => return Ok(false),
+                    _ => {}
+                }
             }
             if let Some((x, y)) = m.click {
                 let (ox, oy) = cab.window_to_output(x, y);
@@ -146,6 +165,9 @@ pub fn run(plat: &mut Platform, cab: &mut Cabinet) -> Result<bool> {
                     if in_rect(sx, sy, install_rect(w, h)) {
                         start = true;
                     }
+                    if in_rect(sx, sy, perf_rect(w, h)) {
+                        toggle_perf = true;
+                    }
                     if in_rect(sx, sy, voltar_rect(w, h)) {
                         return Ok(false);
                     }
@@ -153,6 +175,15 @@ pub fn run(plat: &mut Platform, cab: &mut Cabinet) -> Result<bool> {
             }
         } else if m.nav.iter().any(|n| matches!(n, MenuNav::Back)) {
             return Ok(false);
+        }
+        if toggle_perf {
+            let on = !cab.perf_overlay();
+            cab.set_perf_overlay(on);
+            status_color = GREEN;
+            status = format!(
+                "infos de desempenho {} — aparece no topo da tv durante o jogo",
+                if on { "LIGADO" } else { "DESLIGADO" }
+            );
         }
         if start {
             let (tx, r) = mpsc::channel();
@@ -166,11 +197,21 @@ pub fn run(plat: &mut Platform, cab: &mut Cabinet) -> Result<bool> {
         let status = status.clone();
         let status_color = status_color;
         let busy = busy;
+        let sel = sel;
+        let perf_on = cab.perf_overlay();
         let render = move |d: &mut Screen| {
             let (w, h) = d.size();
+            // Botão selecionado acende (texto claro); o outro fica apagado —
+            // o mesmo padrão do menu de slots.
             let (ix, iy, iw, ih) = install_rect(w, h);
+            let color = if busy {
+                DIM
+            } else if sel == 0 {
+                TEXT
+            } else {
+                DIM
+            };
             let label = "instalar assets de exemplo";
-            let color = if busy { DIM } else { TEXT };
             d.outline(ix, iy, iw, ih, 2, (color.0, color.1, color.2, 255));
             d.text(
                 ix + (iw as i32 - label.chars().count() as i32 * CELL * 2) / 2,
@@ -179,19 +220,27 @@ pub fn run(plat: &mut Platform, cab: &mut Cabinet) -> Result<bool> {
                 color,
                 label,
             );
+
+            let (px, py, pw, ph) = perf_rect(w, h);
+            let pcolor = if sel == 1 { TEXT } else { DIM };
+            let plabel = format!("infos de desempenho: {}", if perf_on { "LIGADO" } else { "DESLIGADO" });
+            d.outline(px, py, pw, ph, 2, (pcolor.0, pcolor.1, pcolor.2, 255));
+            d.text(
+                px + (pw as i32 - plabel.chars().count() as i32 * CELL * 2) / 2,
+                py + (ph as i32 - 40) / 2,
+                2,
+                pcolor,
+                &plabel,
+            );
+
             // Uma linha centrada quando cabe (a dica/status são curtos); em
             // tela estreita cai para text_wrapped na margem.
             let single = status.chars().count() as i32 * CELL;
+            let status_y = (py + ph as i32).max(iy + ih as i32) + 18;
             if single <= w as i32 - 40 {
-                d.text(
-                    (w as i32 - single) / 2,
-                    iy + ih as i32 + 18,
-                    1,
-                    status_color,
-                    &status,
-                );
+                d.text((w as i32 - single) / 2, status_y, 1, status_color, &status);
             } else {
-                d.text_wrapped(40, iy + ih as i32 + 18, w - 80, 1, status_color, &status);
+                d.text_wrapped(40, status_y, w - 80, 1, status_color, &status);
             }
 
             let (bx, by, bw, bh) = voltar_rect(w, h);
