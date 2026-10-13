@@ -6,7 +6,7 @@
 //! macOS special case: the `.app` on this platform ships in `/Applications`
 //! (or wherever Finder drags it, often read-only-ish and not somewhere a
 //! user expects an app to scribble folders into). So on macOS the root
-//! isn't next to the executable at all — it's `~/Documents/PSX Xperience`,
+//! isn't next to the executable at all — it's `~/Library/Application Support/PolystnX`,
 //! created on first launch, same spirit as how a normal Mac app keeps its
 //! user data.
 //!
@@ -43,12 +43,21 @@ pub fn app_root() -> PathBuf {
     }
 }
 
-/// `~/Documents/PolystnX` — split out from `app_root` so it can be
-/// unit-tested with a synthetic home directory. Puro de propósito: a
-/// migração do legado acontece no boot, ver [`migrate_legacy_data_root`].
+/// `~/Library/Application Support/PolystnX` — split out from `app_root` so
+/// it can be unit-tested with a synthetic home directory. Puro de propósito:
+/// a migração do legado acontece no boot, ver [`migrate_legacy_data_root`].
+///
+/// POR QUE NÃO ~/Documents MAIS: Documents é sincronizado pelo iCloud Drive
+/// ("Desktop & Pastas de Documentos"), e o file provider do iCloud trava de
+/// forma intermitente — um stall no meio do streaming do .chd congela o
+/// jogo, e a thread presa em leitura ininterruptível torna o processo
+/// imortal em TX (nem kill -9 colhe; laudo do `sample` em 2026-10-13).
+/// Application Support nunca sincroniza.
 #[cfg(target_os = "macos")]
 fn macos_root_for(home: &Path) -> PathBuf {
-    home.join("Documents").join("PolystnX")
+    home.join("Library")
+        .join("Application Support")
+        .join("PolystnX")
 }
 
 /// XDG_DATA_HOME/.../PolystnX, falling back to ~/.local/share if unset.
@@ -91,10 +100,14 @@ pub fn migrate_legacy_data_root() {
             let home = std::env::var_os("HOME")
                 .map(PathBuf::from)
                 .unwrap_or_else(|| PathBuf::from("."));
-            try_migrate_legacy_root(
-                &home.join("Documents").join("PolystnX"),
-                &home.join("Documents").join("PSX Xperience"),
-            );
+            // A raiz mudou de bairro (Documents → Application Support, fora
+            // do iCloud): os legados em Documents migram para a raiz nova.
+            let support = home
+                .join("Library")
+                .join("Application Support")
+                .join("PolystnX");
+            try_migrate_legacy_root(&support, &home.join("Documents").join("PolystnX"));
+            try_migrate_legacy_root(&support, &home.join("Documents").join("PSX Xperience"));
         }
         #[cfg(target_os = "linux")]
         {
@@ -218,10 +231,10 @@ mod tests {
 
     #[cfg(target_os = "macos")]
     #[test]
-    fn macos_root_is_documents_polystnx() {
+    fn macos_root_is_application_support_polystnx() {
         assert_eq!(
             super::macos_root_for(Path::new("/Users/rex")),
-            Path::new("/Users/rex/Documents/PolystnX")
+            Path::new("/Users/rex/Library/Application Support/PolystnX")
         );
     }
 

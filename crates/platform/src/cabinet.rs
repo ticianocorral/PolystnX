@@ -1103,7 +1103,7 @@ impl Cabinet {
             } else {
                 boot_notice(&renderer_name)
             }),
-            perf_overlay: false,
+            perf_overlay: std::env::var_os("POLYSTNX_PERF").is_some(),
             perf_fps: 0,
             perf_cpu: None,
             perf_ram_mb: None,

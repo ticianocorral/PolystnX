@@ -3,7 +3,7 @@
 //! `saves/`, `notes/` and a `config/` folder (polystnx.cfg, nointro.dat,
 //! library.json, hashcache.json) all live in one root (see
 //! `polystnx_app::dirs`) — next to the executable on Windows/Linux,
-//! `~/Documents/PSX Xperience` on macOS — drop ROMs in `roms/` and go.
+//! `~/Library/Application Support/PolystnX` on macOS — drop ROMs in `roms/` and go.
 //!
 //! The idle screen (TV off, "Estante de games"/"Configurações" in place of
 //! the logo) is the app's home: it's what you see at startup, after backing
@@ -166,7 +166,8 @@ screen opens on a setup page inside the TV, one download button each.\n\
 \n\
 Portable: roms/, core/, assets/ (cover/logo art, matched by ROM file name),\n\
 saves/, notes/, polystnx.cfg, library.json all live in one root — next to\n\
-this executable on Windows/Linux, ~/Documents/PSX Xperience on macOS.\n\
+this executable on Windows/Linux, ~/Library/Application Support/PolystnX\n\
+on macOS (nunca em Documents, que o iCloud sincroniza e trava).\n\
 Drop ROMs into roms/ and go; no --core/$PSX_XPERIENCE_CORE? Use\n\
 the settings screen's \"Núcleo\" to download PCSX Rearmed automatically, or drop\n\
 it into core/ by hand (not included — non-commercial license, see\n\
@@ -695,7 +696,7 @@ fn migrate_ra_out_of_saves() {
 }
 
 /// macOS only, and only relevant for the brief window before `dirs::app_root`
-/// moved to `~/Documents/PSX Xperience`: the very first 0.4.0 DMG builds
+/// moved to `~/Library/Application Support/PolystnX`: the very first 0.4.0 DMG builds
 /// created `roms/`/`core/`/`assets/`/`saves/`/`notes/` next to the `.app`
 /// (typically inside `/Applications`, not writable/expected for user data on
 /// this platform). If that old layout exists next to the running `.app` and

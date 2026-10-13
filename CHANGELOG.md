@@ -4,6 +4,21 @@ Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/);
 versionamento por [SemVer 2.0.0](https://semver.org/lang/pt-BR/). O workspace
 inteiro compartilha uma versão (`[workspace.package]` em `Cargo.toml`).
 
+## [1.3.5-beta] - 2026-10-13
+
+### Corrigido
+- **A RAIZ DOS DADOS SAI DE ~/Documents NO macOS** — a causa de TODOS os
+  congelamentos no Mac: `~/Documents` é sincronizado pelo iCloud Drive, e
+  o file provider trava de forma intermitente. Um stall no meio do
+  streaming do .chd congela o jogo; a thread presa em leitura
+  ininterruptível torna o processo imortal em TX (nem kill -9 colhe — o
+  laudo do `sample` pegou um processo com 2 minutos preso no dyld lendo o
+  próprio binário de Documents). A raiz nova é
+  `~/Library/Application Support/PolystnX` (nunca sincroniza) e a pasta
+  antiga migra sozinha no primeiro boot — roms, saves, memcards e config
+  continuam no lugar, sem cópia. Quem tiver processos zumbis em TX:
+  reiniciar o Mac (o kernel não os colhe).
+
 ## [1.3.4-beta] - 2026-10-13
 
 ### Corrigido
