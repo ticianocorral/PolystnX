@@ -4,6 +4,29 @@ Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/);
 versionamento por [SemVer 2.0.0](https://semver.org/lang/pt-BR/). O workspace
 inteiro compartilha uma versão (`[workspace.package]` em `Cargo.toml`).
 
+## [1.3.1-beta] - 2026-10-13
+
+### Adicionado
+- **Temperatura e RAM no painel de desempenho do macOS** — CPU lida
+  direto do SMC (user client do IOKit, chaves Intel TCxx e Apple Silicon
+  Tpxx; chave inexistente no modelo é pulada) e RAM residente via `ps`;
+  cada falha vira segmento ausente, nunca erro.
+- **Tampa do CD com movimento** — o vidro de acrílico aparecia/desaparecia
+  a seco ao abrir e fechar; agora tem tween de opacidade (~0,35 s) nos
+  dois sentidos, com o disco parando/retomando por baixo como já fazia.
+
+### Modificado
+- **A entrada da TV é AV** — o rótulo "RF NTSC" saía no log e na ajuda,
+  mas nunca houve filtro RF no sinal: o vídeo é composite limpo + tubo
+  CRT, e o banner de ligar já dizia "AV 1". Rótulos agora dizem a verdade
+  ("entrada AV (composite) + tubo crt"). O filtro NTSC de verdade
+  (crates/ntsc) continua disponível para um futuro "modo CRT pesado".
+
+### Corrigido
+- **Painel de desempenho na moldura** — saiu de DENTRO da tela da TV para
+  a faixa da moldura acima dela (o "queixo de cima"), centralizado sobre
+  o televisor.
+
 ## [1.3.0-beta] - 2026-10-13
 
 ### Adicionado

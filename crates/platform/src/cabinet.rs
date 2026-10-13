@@ -383,6 +383,9 @@ pub struct Cabinet {
     perf_fps: u32,
     perf_cpu: Option<u32>,
     perf_ram_mb: Option<u32>,
+    /// Tween do vidro da tampa (abrir/fechar): início, alpha de origem e
+    /// alpha de destino. `None` = parado (o painel mostra `lid_alpha`).
+    lid_motion: Option<(Instant, f32, f32)>,
     /// Whether the top-left "fechar app" button is drawn/clickable this
     /// screen (plan revision: "criar botao de fechar app no canto superior
     /// esquerdo") — the idle/shelf/settings/history screens turn it on;
@@ -774,6 +777,10 @@ struct PanelInfo {
     lid_open: bool,
     /// Há disco no drive (some quando removido com a tampa aberta).
     disc_in: bool,
+    /// Opacidade do vidro da tampa (0..1) — tween do abrir/fechar; 1 =
+    /// fechada, 0 = aberta. O `set_drive` arma o tween e o presente do
+    /// jogo avança a cada frame (era um pop instantâneo).
+    lid_alpha: f32,
     /// Reset's rocker is momentary (plan revision): true for a short spring
     /// window right after a click, then the caller (`runner`) lets it lapse —
     /// see `Cabinet::set_reset_pressed`. Power's rocker has no such flag; its
@@ -1100,6 +1107,7 @@ impl Cabinet {
             perf_fps: 0,
             perf_cpu: None,
             perf_ram_mb: None,
+            lid_motion: None,
             close_button: Rect::new(0, 0, 0, 0),
             minimize_button: Rect::new(0, 0, 0, 0),
         })
@@ -1397,6 +1405,9 @@ impl Cabinet {
         } else {
             false
         };
+        // O vidro da tampa pode ter ficado com alpha de tween da sessão
+        // anterior — a nova (ou a ausência dela) nasce com o vidro inteiro.
+        self.set_image_alpha(LID_GLASS_IMG, 255);
         self.panel = Some(PanelInfo {
             has_logo,
             has_cartridge,
@@ -1408,6 +1419,7 @@ impl Cabinet {
             powered: false,
             lid_open: false,
             disc_in: true,
+            lid_alpha: 1.0,
             reset_pressed: false,
             card1_label: None,
 
@@ -1448,6 +1460,13 @@ impl Cabinet {
         if let Some(p) = self.panel.as_mut() {
             p.lid_open = lid_open;
             p.disc_in = disc_in;
+            // Tween do vidro: do alpha atual para o estado novo — o
+            // abrir/fechar ganha movimento em vez de um pop instantâneo.
+            let to = if lid_open { 0.0 } else { 1.0 };
+            let from = p.lid_alpha;
+            if (to - from).abs() > f32::EPSILON {
+                self.lid_motion = Some((Instant::now(), from, to));
+            }
         }
     }
 
@@ -1485,7 +1504,20 @@ impl Cabinet {
     /// the "Inserir cartucho" button instead of the previous game's stale
     /// info. A no-op if there's nothing set.
     pub fn clear_panel(&mut self) {
+        // O vidro da tampa volta inteiro para o console idle (uma sessão
+        // encerrada com a tampa aberta deixava o alpha do tween em 0).
+        self.set_image_alpha(LID_GLASS_IMG, 255);
+        self.lid_motion = None;
         self.panel = None;
+    }
+
+    /// Modula o alpha (0..255) de uma imagem registrada — o tween do vidro
+    /// da tampa usa para o abrir/fechar animado sem carregar o mapa de
+    /// imagens (&shared) nos desenhos.
+    pub(crate) fn set_image_alpha(&mut self, id: u64, alpha: u8) {
+        if let Some(img) = self.images.get_mut(&id) {
+            img.tex.set_alpha_mod(alpha);
+        }
     }
 
     /// The idle screen's console-brand logo (plan revision: the idle/root
@@ -2166,6 +2198,24 @@ impl Cabinet {
         // revision: "mostrar o fechar e minimizar em todas as telas").
         self.close_button = draw_close_button(&mut self.canvas, &mut self.font);
         self.minimize_button = draw_minimize_button(&mut self.canvas, &mut self.font);
+        // Avança o tween do vidro da tampa (~0,35 s): o alpha do painel
+        // acompanha o abrir/fechar em vez de trocar a seco — e a textura do
+        // vidro recebe a modulação (o painel desenha lendo o mapa &shared).
+        if let Some((since, from, to)) = self.lid_motion {
+            let t = (since.elapsed().as_secs_f32() / 0.35).min(1.0);
+            let alpha = from + (to - from) * t;
+            if let Some(p) = self.panel.as_mut() {
+                p.lid_alpha = alpha;
+            }
+            self.set_image_alpha(LID_GLASS_IMG, (255.0 * alpha).round() as u8);
+            if t >= 1.0 {
+                self.lid_motion = None;
+                if let Some(p) = self.panel.as_mut() {
+                    p.lid_alpha = to;
+                }
+                self.set_image_alpha(LID_GLASS_IMG, (255.0 * to).round() as u8);
+            }
+        }
         self.panel_buttons = draw_panel(
             &mut self.canvas,
             &mut self.font,
@@ -2178,11 +2228,13 @@ impl Cabinet {
             self.dev_mode,
             self.core_status.as_deref(),
         );
-        // Painel de desempenho do modo dev: topo central da TV, por cima de
-        // tudo — por último, ainda dentro do viewport do gabinete.
+        // Painel de desempenho do modo dev: NA MOLDURA, na faixa acima da
+        // tela (o "queixo de cima"), centralizado sobre a TV — por último,
+        // ainda dentro do viewport do gabinete.
         if self.perf_overlay {
             let line = perf_line(self.perf_fps, self.perf_cpu, self.perf_ram_mb);
-            draw_perf_overlay(&mut self.canvas, &mut self.font, self.screen, &line);
+            let band = (canvas_rect.top(), self.screen.top() - canvas_rect.top());
+            draw_perf_overlay(&mut self.canvas, &mut self.font, self.screen, band, &line);
         }
         self.canvas.set_viewport(None);
     }
@@ -4154,11 +4206,11 @@ fn perf_line(fps: u32, cpu: Option<u32>, ram_mb: Option<u32>) -> String {
     parts.join("  ")
 }
 
-/// O painel de desempenho do modo dev — topo CENTRAL da TV, na borda dela:
-/// faixa escura translúcida para ler sobre qualquer cena, texto no cinza
-/// claro do chin.
-fn draw_perf_overlay(canvas: &mut WindowCanvas, font: &mut Texture, screen: Rect, line: &str) {
-    const MARGIN: i32 = 10;
+/// O painel de desempenho do modo dev — NA MOLDURA da TV, na faixa acima da
+/// tela (o "queixo de cima"): centralizado sobre a TV, fundo escuro
+/// translúcido para ler sobre a carcaça. `center` é o rect da tela (para o
+/// x); `band` é a faixa da moldura (topo, altura) onde a linha assenta.
+fn draw_perf_overlay(canvas: &mut WindowCanvas, font: &mut Texture, center: Rect, band: (i32, i32), line: &str) {
     const PAD_X: i32 = 10;
     const PAD_Y: i32 = 6;
     if line.is_empty() {
@@ -4167,8 +4219,9 @@ fn draw_perf_overlay(canvas: &mut WindowCanvas, font: &mut Texture, screen: Rect
     let cell = GLYPH_W as i32;
     let row = GLYPH_H as i32;
     let text_w = line.chars().count() as i32 * cell;
-    let x = screen.left() + (screen.width() as i32 - text_w) / 2;
-    let y = screen.top() + MARGIN;
+    let x = center.left() + (center.width() as i32 - text_w) / 2;
+    let (band_top, band_h) = band;
+    let y = band_top + ((band_h - row) / 2).max(2);
     fill_rect_rgba(
         canvas,
         (0, 0, 0, 150),
@@ -5407,6 +5460,8 @@ fn draw_panel_slot(
     reset_pressed: bool,
     spin_deg: f32,
     lid_open: bool,
+    // Opacidade do vidro da tampa (0..1) — o tween do abrir/fechar.
+    lid_alpha: f32,
     card_labels: Option<&str>,
     card_motion: Option<(f32, bool)>,
     analog: bool,
@@ -5518,8 +5573,10 @@ fn draw_panel_slot(
         // FECHADA — abrir o OPEN remove o vidro. Reflexos pré-renderizados
         // com gradiente (textura RGBA com blend) — os círculos chapados
         // antigos ficavam estranhos sobre a arte.
-        if p >= 1.0 && !ejecting && !lid_open {
+        if p >= 1.0 && !ejecting && lid_alpha > 0.0 {
             if let Some(glass) = images.get(&LID_GLASS_IMG) {
+                // O alpha do vidro chega pronto (o tween do Cabinet modula a
+                // textura via `set_image_alpha` antes do painel desenhar).
                 let _ = canvas.copy(&glass.tex, None, disc);
             }
         }
@@ -5913,6 +5970,7 @@ fn draw_panel(
             panel.reset_pressed,
             spin,
             panel.lid_open,
+            panel.lid_alpha,
             panel.card1_label.as_deref(),
             panel.card_motion,
             panel.analog1,

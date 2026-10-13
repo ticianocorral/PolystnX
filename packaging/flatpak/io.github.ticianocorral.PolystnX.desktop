@@ -1,0 +1,14 @@
+[Desktop Entry]
+Type=Application
+Name=PolystnX
+GenericName=PlayStation Emulator
+GenericName[pt_BR]=Emulador de PlayStation
+Comment=A whole PSX console on your TV — CRT tube, memory cards and spinning disc
+Comment[pt_BR]=Um console de PSX inteiro na TV — tubo CRT, memory cards e disco girando
+Exec=polystnx
+Icon=io.github.ticianocorral.PolystnX
+Terminal=false
+Categories=Game;Emulator;
+Keywords=emulator;playstation;psx;ps1;retro;games
+Keywords[pt_BR]=emulador;playstation;psx;ps1;retro;jogos
+StartupWMClass=polystnx

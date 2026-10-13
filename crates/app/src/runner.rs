@@ -1909,7 +1909,7 @@ pub fn run_game(
     // and held there until the player finishes naming it (or cancels).
     let mut print_pending = false;
     let mut print_capture: Option<EmuFrame> = None;
-    log::info!("running: rf ntsc + crt tube");
+    log::info!("running: entrada AV (composite) + tubo crt");
     // O core mora na thread dele; a interface continua a 60 fps com o
     // último quadro enquanto o PCSX Rearmed bloqueia (boot, FMV).
     let (core_tx, core_rx, worker_handle) = spawn_core_worker(core, ra_session.is_some());

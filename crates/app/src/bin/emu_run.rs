@@ -1,6 +1,6 @@
 //! The bare emulator: a libretro core loads and runs, with video, sound, a pad,
 //! save states, battery SRAM and run-ahead — no bezel, no selector.
-//! Presentation is fixed: RF NTSC + CRT-tube warp.
+//! Presentation is fixed: AV composite + CRT-tube warp.
 //!
 //! Usage:
 //!   emu-run --core <path/to/pcsx_rearmed_libretro.{dylib,so,dll}> --rom <game.sfc>
@@ -209,7 +209,7 @@ const HELP: &str = "emu-run --core <lib> --rom <game.sfc> [--system-dir D] [--sa
        [--debug-shot-pause]                preview the pause book instead of gameplay (dev/testing)\n\
        [--debug-shot-modal save|load|print|cheats] preview a modal instead of gameplay (dev/testing)\n\
 \n\
-Presentation is fixed: RF NTSC + CRT-tube warp (knobs are consts in the source).\n\
+Presentation is fixed: AV composite + CRT-tube warp (knobs are consts in the source).\n\
 Battery SRAM and 10 save-state slots live in --save-dir/<game title>/, same\n\
 folder-per-game layout as the notebook (--notes-dir).\n\
 Player 1 = keyboard or gamepad 1; player 2 = gamepad 2.\n\

@@ -1,0 +1,147 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Metainfo do PolystnX para o Flathub/AppStream. O id tem que bater com o
+     do manifest (io.github.ticianocorral.PolystnX). Inglês como base (sem
+     xml:lang) e tradução pt-BR em cada elemento traduzível. -->
+<component type="desktop-application">
+  <id>io.github.ticianocorral.PolystnX</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>MIT</project_license>
+  <developer id="io.github.ticianocorral">
+    <name translatable="no">ticianocorral</name>
+  </developer>
+  <name>PolystnX</name>
+  <summary>A whole PlayStation console on your TV — CRT tube, memory cards and spinning disc</summary>
+  <summary xml:lang="pt-BR">Um console de PlayStation inteiro na sua TV — tubo CRT, memory cards e disco girando</summary>
+  <description>
+    <p>
+      PolystnX is a free, personal and non-commercial PlayStation 1
+      emulator that puts the whole console on screen: the CRT TV, the case
+      with two real memory card ports, a game shelf with covers — and the
+      real BIOS boot animation when you flip Power.
+    </p>
+    <p xml:lang="pt-BR">
+      PolystnX é um emulador de PlayStation 1 pessoal, livre e sem fins
+      comerciais que põe o console inteiro na tela: a TV de tubo, o
+      gabinete com as duas portas de memory card de verdade, a estante de
+      jogos com capas — e o boot real da BIOS quando você aciona o Power.
+    </p>
+    <p>
+      Games run through the SwanStation libretro core, downloaded by the
+      app itself on first use from the official libretro buildbot (never
+      bundled). Discs are .chd files — convert your cue/bin copies with
+      chdman, outside the app — and multi-disc games are handled by an
+      .m3u. Memory cards work like the original hardware: two physical
+      slots in the scene sharing a library of .mcr cards, hot-swappable at
+      any time. A database built into the binary (10,638 PS1 titles,
+      derived from No-Intro, DuckStation and IGDB) shows the canonical
+      name, year, publisher, IGDB ratings and HowLongToBeat times offline.
+    </p>
+    <p xml:lang="pt-BR">
+      Os jogos rodam pelo core SwanStation (libretro), baixado pelo
+      próprio app no primeiro uso, do buildbot oficial do libretro (nunca
+      embutido). Os discos são .chd — converta os seus cue/bin com o
+      chdman, fora do app — e jogos multi-disco ficam por conta de um
+      .m3u. Os memory cards funcionam como no hardware original: dois
+      slots físicos na cena dividindo uma biblioteca de cards .mcr, com
+      troca quente a qualquer momento. Um banco de dados embutido no
+      binário (10.638 títulos de PS1, derivado de No-Intro, DuckStation e
+      IGDB) mostra nome canônico, ano, editora, notas da IGDB e os tempos
+      do HowLongToBeat offline.
+    </p>
+    <p>
+      The BIOS is provided by the user in the bios/ folder and validated
+      by MD5 in the first-run setup — it is never distributed with the
+      app. You also provide your own legally dumped games: the setup
+      screen walks through the core download, the BIOS check and the game
+      folder.
+    </p>
+    <p xml:lang="pt-BR">
+      A BIOS é fornecida por quem roda, na pasta bios/, e validada por MD5
+      no setup de primeiro uso — nunca é distribuída com o app. Os jogos
+      também são por sua conta: a tela de setup guia o download do core, a
+      checagem da BIOS e a pasta de jogos.
+    </p>
+    <p>
+      Note: the user interface is currently available in Portuguese
+      (Brazil) only.
+    </p>
+    <p xml:lang="pt-BR">
+      Nota: a interface do app está disponível, por enquanto, apenas em
+      português do Brasil.
+    </p>
+  </description>
+  <launchable type="desktop-id">io.github.ticianocorral.PolystnX.desktop</launchable>
+  <icon type="stock">io.github.ticianocorral.PolystnX</icon>
+  <url type="homepage">https://github.com/ticianocorral/PolystnX</url>
+  <url type="vcs-browser">https://github.com/ticianocorral/PolystnX</url>
+  <url type="bugtracker">https://github.com/ticianocorral/PolystnX/issues</url>
+  <screenshots>
+    <screenshot type="default">
+      <image>https://raw.githubusercontent.com/ticianocorral/PolystnX/v1.2.2-beta/site/assets/screenshot.jpg</image>
+      <caption>A game running on the CRT tube, with the PSX panel beside it</caption>
+      <caption xml:lang="pt-BR">Um jogo rodando no tubo CRT, com o painel do PSX ao lado</caption>
+    </screenshot>
+    <screenshot>
+      <image>https://raw.githubusercontent.com/ticianocorral/PolystnX/v1.2.2-beta/site/assets/estante.jpg</image>
+      <caption>The game shelf with 3D boxes and wooden shelves</caption>
+      <caption xml:lang="pt-BR">A estante de jogos com capas 3D e prateleiras de madeira</caption>
+    </screenshot>
+    <screenshot>
+      <image>https://raw.githubusercontent.com/ticianocorral/PolystnX/v1.2.2-beta/packaging/flatpak/screenshots/setup.png</image>
+      <caption>First-run setup: core download and BIOS validation</caption>
+      <caption xml:lang="pt-BR">Setup de primeiro uso: download do core e validação da BIOS</caption>
+    </screenshot>
+  </screenshots>
+  <branding>
+    <color type="primary" scheme_preference="light">#348153</color>
+    <color type="primary" scheme_preference="dark">#1f4d33</color>
+  </branding>
+  <content_rating type="oars-1.1" />
+  <requires>
+    <control>pointing</control>
+    <display_length compare="ge">768</display_length>
+  </requires>
+  <supports>
+    <control>keyboard</control>
+    <control>gamepad</control>
+  </supports>
+  <provides>
+    <binary>polystnx</binary>
+  </provides>
+  <categories>
+    <category>Game</category>
+    <category>Emulator</category>
+  </categories>
+  <releases>
+    <release version="1.2.2-beta" date="2026-10-12">
+      <description>
+        <p>Removed the run-ahead option: the game always runs at full
+        speed now, with the lowest possible CPU and energy cost.</p>
+        <p xml:lang="pt-BR">Removido o run-ahead: o jogo roda sempre à
+        velocidade cheia, com o menor gasto de CPU e energia possível.</p>
+      </description>
+    </release>
+    <release version="1.2.1-beta" date="2026-10-12">
+      <description>
+        <p>Run-ahead is now self-adjusting: it turns itself off after 30
+        frames above the frame budget, fixing the slowdown in the Steam
+        Deck AppImage.</p>
+        <p xml:lang="pt-BR">O run-ahead virou auto-ajustável: desliga sozinho
+        após 30 frames acima do budget, consertando a lentidão do AppImage
+        no Steam Deck.</p>
+      </description>
+    </release>
+    <release version="1.2.0-beta" date="2026-10-11">
+      <description>
+        <p>Unified offline game info built into the binary for 10,638 PS1
+        titles (canonical name, year, publisher, IGDB ratings and
+        HowLongToBeat times); real wooden shelf with LED strips; play
+        button on box hover.</p>
+        <p xml:lang="pt-BR">Infos unificadas embutidas no binário, offline,
+        para 10.638 títulos de PS1 (nome canônico, ano, editora, notas da
+        IGDB e tempos do HowLongToBeat); estante de madeira de verdade com
+        fita LED; botão de play no hover da capa.</p>
+      </description>
+    </release>
+  </releases>
+</component>
