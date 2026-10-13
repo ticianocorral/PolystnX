@@ -4,6 +4,28 @@ Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/);
 versionamento por [SemVer 2.0.0](https://semver.org/lang/pt-BR/). O workspace
 inteiro compartilha uma versão (`[workspace.package]` em `Cargo.toml`).
 
+## [1.2.5-beta] - 2026-10-13
+
+### Corrigido
+- **O atualizador in-app nunca aplicava no Linux/AppImage** — `current_exe()`
+  dentro de um AppImage em execução aponta para o monte efêmero somente
+  leitura (`/tmp/.mount_XXXX/...`): a cópia do update falhava, o erro era
+  engolido (melhor-esforço) e a versão velha seguia rodando calada — o app
+  "atualizava", reiniciava, e nada mudava. Agora o alvo é o arquivo real do
+  AppImage (`$APPIMAGE`, exportado pelo runtime; binário solto continua no
+  `current_exe`), gravado via temp + rename atômico.
+- **Gaming mode do Steam Deck: XWayland** — sob o gamescope o app agora pede
+  o driver de vídeo `x11` (detectando o gamescope pelo env
+  `GAMESCOPE_WAYLAND_DISPLAY` que ele exporta): o caminho wayland do SDL
+  apresenta mal ali — o loop interno segue nominal e a TELA desaba em
+  judder/câmera lenta. XWayland é o caminho batido de todo emulador Steam.
+  Fora do gamescope nada muda; `SDL_VIDEODRIVER` no ambiente vence.
+
+### Adicionado
+- **Retrato de desempenho no log a cada 10 s** durante o jogo — runs/s,
+  renderer ativo, fila e descartes de áudio: qualquer log de sessão passa a
+  carregar o diagnóstico sem reproduzir com TRACE ligado.
+
 ## [1.2.4-beta] - 2026-10-13
 
 ### Corrigido

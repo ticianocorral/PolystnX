@@ -1850,6 +1850,10 @@ pub fn run_game(
     let mut slow_streak: u32 = 0;
     let mut slow_warned_at: Option<Instant> = None;
     let mut audio_dropped: u32 = 0;
+    // Janelas de 1 s desde o último "perf:" no log — o retrato periódico
+    // (runs/s, renderer, fila e descartes de áudio) que faz QUALQUER log
+    // carregar o diagnóstico sem precisar reproduzir com TRACE ligado.
+    let mut perf_windows: u32 = 0;
 
     // Which note slot to save into once the next frame is ready — set at
     // click time, consumed after `core.run()` produces a real frame.
@@ -3167,6 +3171,20 @@ pub fn run_game(
                         fps_window_start = Instant::now();
                         let fps = fps_window_frames as f64 / window.as_secs_f64();
                         fps_window_frames = 0;
+                        // Retrato de 10 em 10 s: um log qualquer da sessão
+                        // carrega runs/s, renderer e saúde do áudio — o
+                        // "continuou lento" da próxima vez vem com números.
+                        perf_windows += 1;
+                        if perf_windows >= 10 {
+                            perf_windows = 0;
+                            log::info!(
+                                "perf: ~{fps:.0} runs/s | renderer {} | fila de áudio {} \
+                                 quadros | descartados {audio_dropped}",
+                                cab.renderer_name(),
+                                audio.queued_frames()
+                            );
+                            audio_dropped = 0;
+                        }
                         // Boot de BIOS hesita de verdade — só vigia depois
                         // do console assentar (10 s do ligar).
                         let booted =

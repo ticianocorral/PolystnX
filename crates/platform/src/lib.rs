@@ -401,6 +401,15 @@ impl Platform {
         // era o default sem hint; GPU: MAILBOX→IMMEDIATE, só FIFO se não
         // houver outro). Um SDL_RENDER_VSYNC no ambiente vence.
         sdl3::hint::set("SDL_RENDER_VSYNC", "0");
+        // Sob o gamescope (o gaming mode do Steam Deck): o caminho wayland
+        // do SDL apresenta mal — o loop interno segue nominal e a TELA desaba
+        // (judder/câmera lenta que o app não consegue enxergar de dentro).
+        // XWayland é o caminho batido de todo emulador na Steam. Detectar o
+        // gamescope pelo env que ele exporta e pedir x11 SÓ aí; quem definir
+        // SDL_VIDEODRIVER no ambiente vence (prioridade DEFAULT).
+        if std::env::var_os("GAMESCOPE_WAYLAND_DISPLAY").is_some() {
+            sdl3::hint::set("SDL_VIDEO_DRIVER", "x11");
+        }
         let sdl = sdl3::init()?;
         let video_subsystem = sdl.video()?;
         let audio_subsystem = sdl.audio()?;

@@ -293,10 +293,27 @@ fn apply_macos_dmg(dmg: &Path) -> Result<(), String> {
 #[cfg(target_os = "linux")]
 fn apply_linux_appimage(appimage: &Path) -> Result<(), String> {
     use std::os::unix::fs::PermissionsExt;
-    let exe = std::env::current_exe().map_err(|e| e.to_string())?;
-    std::fs::copy(appimage, &exe).map_err(|e| e.to_string())?;
-    std::fs::set_permissions(&exe, std::fs::Permissions::from_mode(0o755))
+    // O alvo NÃO é `current_exe()`: dentro de um AppImage em execução ele
+    // aponta para o monte efêmero (/tmp/.mount_XXXX/usr/bin/polystnx),
+    // somente leitura — a cópia falhava, o erro era engolido
+    // (melhor-esforço) e a versão velha seguia rodando CALADA: o app
+    // "atualizava", reiniciava e continuava na antiga. O runtime do
+    // AppImage exporta o caminho real do arquivo em $APPIMAGE; sem a
+    // variável (binário solto, não-AppImage), o current_exe é o alvo
+    // certo mesmo.
+    let target = match std::env::var_os("APPIMAGE") {
+        Some(p) => PathBuf::from(p),
+        None => std::env::current_exe().map_err(|e| e.to_string())?,
+    };
+    // Temp + rename: atômico — um crash no meio da cópia nunca deixa um
+    // arquivo-pela-metade no lugar do AppImage.
+    let mut tmp_name = target.as_os_str().to_owned();
+    tmp_name.push(".new");
+    let tmp = PathBuf::from(tmp_name);
+    std::fs::copy(appimage, &tmp).map_err(|e| e.to_string())?;
+    std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o755))
         .map_err(|e| e.to_string())?;
+    std::fs::rename(&tmp, &target).map_err(|e| e.to_string())?;
     Ok(())
 }
 
