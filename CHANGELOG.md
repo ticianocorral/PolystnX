@@ -4,6 +4,19 @@ Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/);
 versionamento por [SemVer 2.0.0](https://semver.org/lang/pt-BR/). O workspace
 inteiro compartilha uma versão (`[workspace.package]` em `Cargo.toml`).
 
+## [1.3.7-beta] - 2026-10-13
+
+### Corrigido
+- **macOS: o app não faz mais spawn de processo NENHUM** — a leitura de
+  RAM via `ps` era o gatilho dos congelamentos: o fps aparecia no painel
+  (primeira janela de 1 s fecha) e o jogo congelava no instante seguinte,
+  no primeiro spawn. Todos os laudos de zumbi tinham a thread ram-readout
+  presa no wait4, e o `ps` engasgava com os zumbis anteriores — o ciclo
+  que forçava encerrar a sessão. No macOS o painel de desempenho mostra
+  só o FPS (RAM e temperatura ficam de fora até haver leitura sem fork —
+  sysctl). No Linux nada muda (RAM lê /proc, sem spawn, e o painel nunca
+  travou lá).
+
 ## [1.3.6-beta] - 2026-10-13
 
 ### Adicionado

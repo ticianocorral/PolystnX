@@ -53,53 +53,21 @@ pub fn process_ram_mb() -> Option<f32> {
         let status = std::fs::read_to_string("/proc/self/status").ok()?;
         parse_vm_rss_kb(&status).map(|kb| kb / 1024.0)
     }
+    // macOS SEM leitura de RAM por ora: o spawn do `ps` é o GATILHO dos
+    // congelamentos nesta máquina (o fps aparecia no painel — primeira
+    // janela de 1 s — e o jogo congelava no segundo seguinte; todo laudo
+    // de zumbi tem a thread ram-readout presa no wait4, e o ps engasgava
+    // com os zumbis anteriores: ciclo). Nenhum spawn de processo em
+    // nenhum caminho do app; quando quisermos RAM no macOS, sysctl
+    // KERN_PROCINFO (sem fork).
     #[cfg(target_os = "macos")]
     {
-        use std::sync::atomic::{AtomicI32, Ordering};
-        // MESMA disciplina da temperatura (o congelamento era aqui): o
-        // spawn do `ps` rodava na thread de UI a cada 2 s — e a main thread
-        // foi parar DENTRO do spawn/wait4 (confirmado por sample dos
-        // processos travados). Worker de fundo + cache atômico: a UI lê
-        // número pronto, em MB com um decimal. i32::MIN = primeira leitura
-        // pendente; -1 = leitura falhou.
-        static CACHE: AtomicI32 = AtomicI32::new(i32::MIN);
-        static STARTED: std::sync::OnceLock<()> = std::sync::OnceLock::new();
-        STARTED.get_or_init(|| {
-            let _ = std::thread::Builder::new()
-                .name("ram-readout".into())
-                .spawn(|| loop {
-                    let value = match ps_ram_kb() {
-                        Some(kb) => (kb / 1024.0 * 10.0) as i32,
-                        None => -1,
-                    };
-                    CACHE.store(value, Ordering::Relaxed);
-                    std::thread::sleep(std::time::Duration::from_secs(2));
-                });
-        });
-        match CACHE.load(Ordering::Relaxed) {
-            i32::MIN => None,
-            -1 => None,
-            tenths => Some(tenths as f32 / 10.0),
-        }
+        None
     }
     #[cfg(not(any(target_os = "linux", target_os = "macos")))]
     {
         None
     }
-}
-
-/// `ps -o rss=` do próprio processo → kB. Só roda no worker de fundo.
-#[cfg(target_os = "macos")]
-fn ps_ram_kb() -> Option<f32> {
-    let out = std::process::Command::new("ps")
-        .args(["-o", "rss=", "-p", &std::process::id().to_string()])
-        .output()
-        .ok()?;
-    out.status.success().then_some(())?;
-    String::from_utf8_lossy(&out.stdout)
-        .trim()
-        .parse::<f32>()
-        .ok()
 }
 
 /// Millidegrees string ("52000", trailing newline fine) → °C.
