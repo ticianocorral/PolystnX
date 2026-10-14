@@ -51,7 +51,7 @@ pub(crate) fn load_mc_logo(cab: &mut Cabinet) {
 
 /// O placeholder do leitor: sempre a imagem embutida (não tem override —
 /// é o "hardware" do console, não arte de marca).
-pub(crate) fn load_cd_reader(cab: &mut Cabinet) {
+pub fn load_cd_reader(cab: &mut Cabinet) {
     match image::load_from_memory(DEFAULT_CD_READER) {
         Ok(img) => {
             let img = img.thumbnail(512, 512).to_rgba8();

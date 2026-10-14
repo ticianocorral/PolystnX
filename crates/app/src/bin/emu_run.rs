@@ -267,6 +267,10 @@ fn main() -> Result<()> {
     // Mesmo nameplate do app real (bin/polystnx.rs) — sem isso o queixo do
     // jogo mostra só "PolystnX" e o dev tool mente sobre a tela do usuário.
     cabinet.set_nameplate(&polystnx_app::core_update::nameplate_text(Some(&args.core)));
+    // E as artes do console (leitor de CD, vidro da tampa, mesa do
+    // spindle): sem elas o poço fica pelado e o dev tool mente DUAS vezes —
+    // o vidro da tampa, por exemplo, nunca desenha aqui.
+    polystnx_app::console_art::load_cd_reader(&mut cabinet);
     if cfg.fullscreen {
         cabinet.toggle_fullscreen();
     }

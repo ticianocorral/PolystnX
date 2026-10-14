@@ -5575,23 +5575,53 @@ fn draw_panel_slot(
         // antigos ficavam estranhos sobre a arte.
         if p >= 1.0 && !ejecting && lid_alpha > 0.0 {
             if let Some(glass) = images.get(&LID_GLASS_IMG) {
-                // A tampa DESLIZA: ao fechar, entra de cima assentando no
-                // poço; ao abrir, sobe e some por trás da carcaça. O clip é
-                // a abertura FIXA do poço (o vidro passa "por trás" da
-                // face) — o smoothstep dá a inércia do acrílico real.
+                // A tampa DESLIZA por trás da carcaça: ao abrir, sobe e só a
+                // parte de BAIXO do vidro segue cobrindo o topo do poço. O
+                // recorte é na FONTE, em pixels DO VIDRO (nada de clip — o
+                // espaço de coordenadas do clip não é o do desenho e o
+                // vidro sumia) — e proporcional: o poço é maior que a
+                // textura, src fora dos limites falha em silêncio.
                 let t = lid_alpha.clamp(0.0, 1.0);
                 let ease = t * t * (3.0 - 2.0 * t);
                 let slide = (disc.height() as f32 * 0.6) as i32;
-                let offset = ((1.0 - ease) * slide as f32) as i32;
-                let moving = Rect::new(
-                    disc.x(),
-                    disc.y() - offset,
-                    disc.width(),
-                    disc.height(),
-                );
-                canvas.set_clip_rect(Some(disc));
-                let _ = canvas.copy(&glass.tex, None, moving);
-                canvas.set_clip_rect(ClippingRect::None);
+                let offset = ((1.0 - ease) * slide as f32).round() as i32;
+                let vis_h = (disc.height() as i32 - offset).max(0);
+                if vis_h > 0 {
+                    let glass_h = glass.h as f32;
+                    let src_y = offset as f32 * (glass_h / disc.height() as f32);
+                    let src = sdl3::render::FRect::new(
+                        0.0,
+                        src_y,
+                        glass.w as f32,
+                        glass_h - src_y,
+                    );
+                    let dst = sdl3::render::FRect::new(
+                        disc.x() as f32,
+                        disc.y() as f32,
+                        disc.width() as f32,
+                        vis_h as f32,
+                    );
+                    let r = canvas.copy(&glass.tex, Some(src), Some(dst));
+                    // DEBUG temporário (bissecção do vidro sumido): as 3
+                    // primeiras chamadas confessam retângulos e resultado.
+                    {
+                        static N: std::sync::atomic::AtomicU32 =
+                            std::sync::atomic::AtomicU32::new(0);
+                        let n = N.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                        if n < 3 {
+                            log::info!(
+                                "DEBUG glass #{n}: vis_h={vis_h} src_y={src_y:.1} \
+                                 src_h={:.1} dst=({},{},{},{}) ok={}",
+                                glass_h - src_y,
+                                disc.x(),
+                                disc.y(),
+                                disc.width(),
+                                disc.height(),
+                                r.is_ok()
+                            );
+                        }
+                    }
+                }
             }
         }
     }

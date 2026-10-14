@@ -4,6 +4,24 @@ Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/);
 versionamento por [SemVer 2.0.0](https://semver.org/lang/pt-BR/). O workspace
 inteiro compartilha uma versão (`[workspace.package]` em `Cargo.toml`).
 
+## [1.3.9-beta] - 2026-10-13
+
+### Corrigido
+- **O vidro da tampa voltou a desenhar** — o clip da 1.3.8 usava espaço de
+  coordenadas que não é o do desenho: recorte vazio, vidro invisível. O
+  deslize agora recorta na FONTE (a parte de baixo do vidro segue
+  cobrindo o poço conforme ele sobe por trás da carcaça), com a origem
+  proporcional aos pixels da textura — src fora dos limites falhava em
+  silêncio (o let _ = engolia).
+
+### Modificado
+- **emu-run carrega as artes do console** (leitor de CD, vidro da tampa,
+  mesa do spindle) — o dev tool mentia sobre a tela: sem elas o poço fica
+  pelado e o vidro da tampa nunca desenha (foi assim que o bug passou
+  pela bissecção).
+- **POLYSTNX_PERF=1** liga o painel de desempenho sem menu (repro/testes
+  headless).
+
 ## [1.3.8-beta] - 2026-10-13
 
 ### Corrigido
