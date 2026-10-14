@@ -383,9 +383,6 @@ pub struct Cabinet {
     perf_fps: u32,
     perf_cpu: Option<u32>,
     perf_ram_mb: Option<u32>,
-    /// Tween do vidro da tampa (abrir/fechar): início, alpha de origem e
-    /// alpha de destino. `None` = parado (o painel mostra `lid_alpha`).
-    lid_motion: Option<(Instant, f32, f32)>,
     /// Whether the top-left "fechar app" button is drawn/clickable this
     /// screen (plan revision: "criar botao de fechar app no canto superior
     /// esquerdo") — the idle/shelf/settings/history screens turn it on;
@@ -777,10 +774,6 @@ struct PanelInfo {
     lid_open: bool,
     /// Há disco no drive (some quando removido com a tampa aberta).
     disc_in: bool,
-    /// Opacidade do vidro da tampa (0..1) — tween do abrir/fechar; 1 =
-    /// fechada, 0 = aberta. O `set_drive` arma o tween e o presente do
-    /// jogo avança a cada frame (era um pop instantâneo).
-    lid_alpha: f32,
     /// Reset's rocker is momentary (plan revision): true for a short spring
     /// window right after a click, then the caller (`runner`) lets it lapse —
     /// see `Cabinet::set_reset_pressed`. Power's rocker has no such flag; its
@@ -1107,7 +1100,6 @@ impl Cabinet {
             perf_fps: 0,
             perf_cpu: None,
             perf_ram_mb: None,
-            lid_motion: None,
             close_button: Rect::new(0, 0, 0, 0),
             minimize_button: Rect::new(0, 0, 0, 0),
         })
@@ -1405,9 +1397,6 @@ impl Cabinet {
         } else {
             false
         };
-        // O vidro da tampa pode ter ficado com alpha de tween da sessão
-        // anterior — a nova (ou a ausência dela) nasce com o vidro inteiro.
-        self.set_image_alpha(LID_GLASS_IMG, 255);
         self.panel = Some(PanelInfo {
             has_logo,
             has_cartridge,
@@ -1419,7 +1408,6 @@ impl Cabinet {
             powered: false,
             lid_open: false,
             disc_in: true,
-            lid_alpha: 1.0,
             reset_pressed: false,
             card1_label: None,
 
@@ -1460,13 +1448,6 @@ impl Cabinet {
         if let Some(p) = self.panel.as_mut() {
             p.lid_open = lid_open;
             p.disc_in = disc_in;
-            // Tween do vidro: do alpha atual para o estado novo — o
-            // abrir/fechar ganha movimento em vez de um pop instantâneo.
-            let to = if lid_open { 0.0 } else { 1.0 };
-            let from = p.lid_alpha;
-            if (to - from).abs() > f32::EPSILON {
-                self.lid_motion = Some((Instant::now(), from, to));
-            }
         }
     }
 
@@ -1504,20 +1485,7 @@ impl Cabinet {
     /// the "Inserir cartucho" button instead of the previous game's stale
     /// info. A no-op if there's nothing set.
     pub fn clear_panel(&mut self) {
-        // O vidro da tampa volta inteiro para o console idle (uma sessão
-        // encerrada com a tampa aberta deixava o alpha do tween em 0).
-        self.set_image_alpha(LID_GLASS_IMG, 255);
-        self.lid_motion = None;
         self.panel = None;
-    }
-
-    /// Modula o alpha (0..255) de uma imagem registrada — o tween do vidro
-    /// da tampa usa para o abrir/fechar animado sem carregar o mapa de
-    /// imagens (&shared) nos desenhos.
-    pub(crate) fn set_image_alpha(&mut self, id: u64, alpha: u8) {
-        if let Some(img) = self.images.get_mut(&id) {
-            img.tex.set_alpha_mod(alpha);
-        }
     }
 
     /// The idle screen's console-brand logo (plan revision: the idle/root
@@ -2198,24 +2166,6 @@ impl Cabinet {
         // revision: "mostrar o fechar e minimizar em todas as telas").
         self.close_button = draw_close_button(&mut self.canvas, &mut self.font);
         self.minimize_button = draw_minimize_button(&mut self.canvas, &mut self.font);
-        // Avança o tween do vidro da tampa (~0,35 s): o alpha do painel
-        // acompanha o abrir/fechar em vez de trocar a seco — e a textura do
-        // vidro recebe a modulação (o painel desenha lendo o mapa &shared).
-        if let Some((since, from, to)) = self.lid_motion {
-            let t = (since.elapsed().as_secs_f32() / 0.35).min(1.0);
-            let alpha = from + (to - from) * t;
-            if let Some(p) = self.panel.as_mut() {
-                p.lid_alpha = alpha;
-            }
-            self.set_image_alpha(LID_GLASS_IMG, (255.0 * alpha).round() as u8);
-            if t >= 1.0 {
-                self.lid_motion = None;
-                if let Some(p) = self.panel.as_mut() {
-                    p.lid_alpha = to;
-                }
-                self.set_image_alpha(LID_GLASS_IMG, (255.0 * to).round() as u8);
-            }
-        }
         self.panel_buttons = draw_panel(
             &mut self.canvas,
             &mut self.font,
@@ -5460,8 +5410,6 @@ fn draw_panel_slot(
     reset_pressed: bool,
     spin_deg: f32,
     lid_open: bool,
-    // Opacidade do vidro da tampa (0..1) — o tween do abrir/fechar.
-    lid_alpha: f32,
     card_labels: Option<&str>,
     card_motion: Option<(f32, bool)>,
     analog: bool,
@@ -5573,37 +5521,9 @@ fn draw_panel_slot(
         // FECHADA — abrir o OPEN remove o vidro. Reflexos pré-renderizados
         // com gradiente (textura RGBA com blend) — os círculos chapados
         // antigos ficavam estranhos sobre a arte.
-        if p >= 1.0 && !ejecting && lid_alpha > 0.0 {
-            // O tween da tampa: alpha + deslize vertical (abrir sobe, fechar
-            // assenta). O aro claro em volta é o que faz a tampa preta LER
-            // sobre a carcaça preta — a borda do acrílico pega luz.
-            let t = lid_alpha.clamp(0.0, 1.0);
-            let ease = t * t * (3.0 - 2.0 * t);
-            let slide = (disc.height() as f32 * 0.6) as i32;
-            let offset = ((1.0 - ease) * slide as f32).round() as i32;
-            let cx = disc.x() + disc.width() as i32 / 2;
-            let cy = disc.y() + disc.height() as i32 / 2 - offset;
-            let radius = (disc.width() as f32 / 2.0) as i32;
-            fill_circle(canvas, (206, 206, 198), cx, cy, radius + 3);
-            fill_circle(canvas, (10, 10, 12), cx, cy, radius);
+        if p >= 1.0 && !ejecting && !lid_open {
             if let Some(glass) = images.get(&LID_GLASS_IMG) {
-                // O vidro desliza por trás da carcaça: recorte na FONTE, em
-                // pixels DO VIDRO e proporcional — o poço é maior que a
-                // textura, e src fora dos limites falha em silêncio.
-                let vis_h = (disc.height() as i32 - offset).max(0);
-                if vis_h > 0 {
-                    let glass_h = glass.h as f32;
-                    let src_y = offset as f32 * (glass_h / disc.height() as f32);
-                    let src =
-                        sdl3::render::FRect::new(0.0, src_y, glass.w as f32, glass_h - src_y);
-                    let dst = sdl3::render::FRect::new(
-                        disc.x() as f32,
-                        disc.y() as f32,
-                        disc.width() as f32,
-                        vis_h as f32,
-                    );
-                    let _ = canvas.copy(&glass.tex, Some(src), Some(dst));
-                }
+                let _ = canvas.copy(&glass.tex, None, disc);
             }
         }
     }
@@ -5996,7 +5916,6 @@ fn draw_panel(
             panel.reset_pressed,
             spin,
             panel.lid_open,
-            panel.lid_alpha,
             panel.card1_label.as_deref(),
             panel.card_motion,
             panel.analog1,
