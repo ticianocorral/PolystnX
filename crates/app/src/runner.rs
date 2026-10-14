@@ -1835,6 +1835,12 @@ pub fn run_game(
     let mut paused = false;
     let frame_time = Duration::from_secs_f64(1.0 / av.fps.max(1.0));
     let mut next = Instant::now();
+    // Bússola do loop: a cada 10 s, qual ramo o tick está servindo (jogo,
+    // pausa, modal, console off) e o in_flight. O travamento do macOS deixou
+    // a main thread viva no pace_frame com o core parado no recv — ou seja,
+    // o loop saiu do ramo de jogo sem ninguém saber por qual porta. Esta
+    // linha nomeia o ramo no log, qualquer que seja ele.
+    let mut estado_next = Instant::now();
     let mut frames: u32 = 0;
     let mut last_dims: Option<(u32, u32)> = None;
     // Don't let the audio queue run more than ~0.15 s ahead (latency creep).
@@ -3145,6 +3151,24 @@ pub fn run_game(
             prev_sig = Some(sig);
         }
         cab.set_reset_pressed(reset_pressed(&flash));
+
+        // Bússola do loop (ver declaração): a cada 10 s, o ramo atual no
+        // log — o travamento congelava o jogo com a main thread viva e
+        // ninguém sabia em qual ramo ela estava girando.
+        if Instant::now() >= estado_next {
+            estado_next = Instant::now() + Duration::from_secs(10);
+            let estado = if paused {
+                "pausa"
+            } else if modal != Modal::None {
+                "modal"
+            } else {
+                "jogo"
+            };
+            log::info!(
+                "estado: {estado} | in_flight={in_flight} | frames={frames} | tampa={}",
+                lid_open
+            );
+        }
 
         if !powered {
             cab.set_session_time(live_session_time(powered_elapsed, powered_since));

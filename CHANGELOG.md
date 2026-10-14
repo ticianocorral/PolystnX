@@ -4,6 +4,15 @@ Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/);
 versionamento por [SemVer 2.0.0](https://semver.org/lang/pt-BR/). O workspace
 inteiro compartilha uma versão (`[workspace.package]` em `Cargo.toml`).
 
+## [1.3.6-beta] - 2026-10-13
+
+### Adicionado
+- **Bússola do loop no log** — a cada 10 s, uma linha `estado:` diz em qual
+  ramo o tick está (jogo/pausa/modal), com in_flight, frames e estado da
+  tampa. O congelamento do macOS deixa a main thread VIVA no ritmo de 60
+  fps com o core parado no recv — ou seja, o loop saiu do ramo de jogo por
+  alguma porta; agora o log nomeia a porta.
+
 ## [1.3.5-beta] - 2026-10-13
 
 ### Corrigido
