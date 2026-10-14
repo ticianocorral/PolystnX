@@ -3264,14 +3264,9 @@ pub fn run_game(
                                      {audio_dropped} quadros)",
                                     cab.renderer_name()
                                 );
-                                cab.push_osd(
-                                    &[
-                                        "DESEMPENHO REDUZIDO",
-                                        &format!("JOGO EM CÂMERA LENTA (~{fps:.0} FPS)"),
-                                    ],
-                                    None,
-                                    Duration::from_secs(6),
-                                );
+                                // O OSD saiu (disputava o chin com o selo
+                                // de RA) — o aviso vive no log, com fps,
+                                // renderer e descartes de áudio.
                                 audio_dropped = 0;
                             }
                         } else {

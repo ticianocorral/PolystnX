@@ -14,22 +14,61 @@
 pub fn cpu_temp_celsius() -> Option<f32> {
     #[cfg(target_os = "linux")]
     {
-        let mut cpu_zone: Option<f32> = None;
-        let mut any_zone: Option<f32> = None;
-        let zones = std::fs::read_dir("/sys/class/thermal").ok()?;
-        for zone in zones.flatten() {
-            let dir = zone.path();
-            let temp = parse_thermal_temp(&std::fs::read_to_string(dir.join("temp")).ok()?)?;
-            if let Ok(kind) = std::fs::read_to_string(dir.join("type")) {
-                let kind = kind.to_ascii_lowercase();
-                if kind.contains("cpu") || kind.contains("soc") {
-                    cpu_zone = Some(cpu_zone.map_or(temp, |c| c.max(temp)));
+        // Duas fontes: thermal_zone (ACPI/soc) e hwmon (k10temp, coretemp,
+        // zenpower — em vários handhelds SÓ o hwmon tem a temperatura da
+        // CPU). hwmon vence (é a leitura da CPU de verdade), zone reserva.
+        let mut cpu_hwmon: Option<f32> = None;
+        if let Ok(chips) = std::fs::read_dir("/sys/class/hwmon") {
+            for chip in chips.flatten() {
+                let dir = chip.path();
+                let Ok(name) = std::fs::read_to_string(dir.join("name")) else {
+                    continue;
+                };
+                let name = name.to_ascii_lowercase();
+                let is_cpu = ["k10temp", "coretemp", "zenpower", "cpu_thermal", "x86_pkg_temp"]
+                    .iter()
+                    .any(|k| name.contains(k));
+                if !is_cpu {
                     continue;
                 }
+                if let Ok(inputs) = std::fs::read_dir(&dir) {
+                    for input in inputs.flatten() {
+                        let fname = input.file_name().to_string_lossy().to_string();
+                        if fname.starts_with("temp") && fname.ends_with("_input") {
+                            if let Some(temp) = parse_thermal_temp(
+                                &std::fs::read_to_string(input.path()).ok().unwrap_or_default(),
+                            ) {
+                                cpu_hwmon = Some(cpu_hwmon.map_or(temp, |c| c.max(temp)));
+                            }
+                        }
+                    }
+                }
             }
-            any_zone = Some(any_zone.map_or(temp, |c| c.max(temp)));
         }
-        cpu_zone.or(any_zone).map(|milli| milli / 1000.0)
+        if cpu_hwmon.is_some() {
+            return cpu_hwmon;
+        }
+        let mut cpu_zone: Option<f32> = None;
+        let mut any_zone: Option<f32> = None;
+        if let Ok(zones) = std::fs::read_dir("/sys/class/thermal") {
+            for zone in zones.flatten() {
+                let dir = zone.path();
+                let Some(temp) =
+                    parse_thermal_temp(&std::fs::read_to_string(dir.join("temp")).ok()?)
+                else {
+                    continue;
+                };
+                if let Ok(kind) = std::fs::read_to_string(dir.join("type")) {
+                    let kind = kind.to_ascii_lowercase();
+                    if kind.contains("cpu") || kind.contains("soc") {
+                        cpu_zone = Some(cpu_zone.map_or(temp, |c| c.max(temp)));
+                        continue;
+                    }
+                }
+                any_zone = Some(any_zone.map_or(temp, |c| c.max(temp)));
+            }
+        }
+        cpu_zone.or(any_zone)
     }
     // macOS SEM leitura de temperatura por ora: o user client do SMC
     // escrito à mão travava DENTRO de uma chamada IOKit no kernel — a thread
@@ -53,16 +92,42 @@ pub fn process_ram_mb() -> Option<f32> {
         let status = std::fs::read_to_string("/proc/self/status").ok()?;
         parse_vm_rss_kb(&status).map(|kb| kb / 1024.0)
     }
-    // macOS SEM leitura de RAM por ora: o spawn do `ps` é o GATILHO dos
-    // congelamentos nesta máquina (o fps aparecia no painel — primeira
-    // janela de 1 s — e o jogo congelava no segundo seguinte; todo laudo
-    // de zumbi tem a thread ram-readout presa no wait4, e o ps engasgava
-    // com os zumbis anteriores: ciclo). Nenhum spawn de processo em
-    // nenhum caminho do app; quando quisermos RAM no macOS, sysctl
-    // KERN_PROCINFO (sem fork).
+    // macOS: proc_pid_rusage (libproc) — UMA chamada de kernel direta,
+    // sem fork (o spawn do `ps` era o gatilho dos congelamentos neste
+    // beta: a main thread amanhecia dentro do wait4/spawn) e sem IOKit
+    // (o SMC artesanal travava o kernel). resident_size = RSS em bytes.
+    // Qualquer falha vira None — o segmento sai do painel.
     #[cfg(target_os = "macos")]
     {
-        None
+        #[repr(C)]
+        struct RUsageInfoV2 {
+            uuid: [u8; 16],
+            user_time: u64,
+            system_time: u64,
+            pkg_idle_wkups: u64,
+            interrupt_wkups: u64,
+            pageins: u64,
+            wired_fraction: u64,
+            resident_fraction: u64,
+            resident_size: u64,
+            phys_footprint: u64,
+        }
+        #[link(name = "c")]
+        extern "C" {
+            fn getpid() -> i32;
+            fn proc_pid_rusage(pid: i32, flavor: i32, buffer: *mut std::ffi::c_void) -> i32;
+        }
+        const PROC_PID_RUSAGE_V2: i32 = 2;
+        let mut info: RUsageInfoV2 = unsafe { std::mem::zeroed() };
+        let ok = unsafe {
+            proc_pid_rusage(
+                getpid(),
+                PROC_PID_RUSAGE_V2,
+                &mut info as *mut RUsageInfoV2 as *mut std::ffi::c_void,
+            )
+        } == 0;
+        (ok && info.resident_size > 0)
+            .then(|| info.resident_size as f32 / 1024.0 / 1024.0)
     }
     #[cfg(not(any(target_os = "linux", target_os = "macos")))]
     {
