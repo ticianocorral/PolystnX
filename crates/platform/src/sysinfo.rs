@@ -4,13 +4,52 @@
 //! functions so the tests can pin the formats without a live kernel.
 //!
 //! - Linux: thermal zones of sysfs + `VmRSS` de /proc/self/status.
-//! - macOS: SMC user client (IOKit, chaves de temperatura — a lista cobre
-//!   Intel e Apple Silicon; chave inexistente no modelo só falha e passa) +
-//!   `ps -o rss=` do próprio processo.
+//! - macOS: RAM via proc_pid_rusage (libproc, worker de fundo — NENHUMA
+//!   syscall na thread de UI: IOKit e fork engasgavam o kernel deste
+//!   beta). Temperatura sem leitura por ora (SMC artesanal travava).
 
 /// CPU temperature in °C. Linux prefers zones whose `type` mentions
 /// cpu/soc (handhelds expose several — battery, GPU, ACPI noise), falling
 /// back to the hottest zone; macOS probes the usual SMC keys.
+#[cfg(target_os = "macos")]
+mod mac {
+    use std::os::raw::c_void;
+
+    /// RAM residente do processo, MB — proc_pid_rusage (libproc), chamada
+    /// direta de kernel, sem fork e sem IOKit.
+    pub fn proc_rss_mb() -> Option<f32> {
+        #[repr(C)]
+        struct RUsageInfoV2 {
+            uuid: [u8; 16],
+            user_time: u64,
+            system_time: u64,
+            pkg_idle_wkups: u64,
+            interrupt_wkups: u64,
+            pageins: u64,
+            wired_fraction: u64,
+            resident_fraction: u64,
+            resident_size: u64,
+            phys_footprint: u64,
+        }
+        #[link(name = "c")]
+        extern "C" {
+            fn getpid() -> i32;
+            fn proc_pid_rusage(pid: i32, flavor: i32, buffer: *mut c_void) -> i32;
+        }
+        const PROC_PID_RUSAGE_V2: i32 = 2;
+        let mut info: RUsageInfoV2 = unsafe { std::mem::zeroed() };
+        let ok = unsafe {
+            proc_pid_rusage(
+                getpid(),
+                PROC_PID_RUSAGE_V2,
+                &mut info as *mut RUsageInfoV2 as *mut c_void,
+            )
+        } == 0;
+        (ok && info.resident_size > 0).then(|| info.resident_size as f32 / 1024.0 / 1024.0)
+    }
+}
+
+/// CPU temperature in °C.
 pub fn cpu_temp_celsius() -> Option<f32> {
     #[cfg(target_os = "linux")]
     {
@@ -92,42 +131,35 @@ pub fn process_ram_mb() -> Option<f32> {
         let status = std::fs::read_to_string("/proc/self/status").ok()?;
         parse_vm_rss_kb(&status).map(|kb| kb / 1024.0)
     }
-    // macOS: proc_pid_rusage (libproc) — UMA chamada de kernel direta,
-    // sem fork (o spawn do `ps` era o gatilho dos congelamentos neste
-    // beta: a main thread amanhecia dentro do wait4/spawn) e sem IOKit
-    // (o SMC artesanal travava o kernel). resident_size = RSS em bytes.
-    // Qualquer falha vira None — o segmento sai do painel.
+    // macOS: MESMA disciplina de sempre — NENHUMA leitura na thread de
+    // UI. Neste beta do macOS cada syscall que o monitoramento tentou da
+    // main (IOKit, fork+ps, proc_info) acabou wedging no kernel. O worker
+    // de fundo lê a cada 2 s (proc_pid_rusage — uma chamada direta de
+    // libproc, sem fork, sem IOKit) e publica num atomic; a UI só lê o
+    // cache. Se a leitura segurar no kernel, o app NÃO sente: o pior caso
+    // é o segmento congelar no último valor ou ausentar.
     #[cfg(target_os = "macos")]
     {
-        #[repr(C)]
-        struct RUsageInfoV2 {
-            uuid: [u8; 16],
-            user_time: u64,
-            system_time: u64,
-            pkg_idle_wkups: u64,
-            interrupt_wkups: u64,
-            pageins: u64,
-            wired_fraction: u64,
-            resident_fraction: u64,
-            resident_size: u64,
-            phys_footprint: u64,
+        use std::sync::atomic::{AtomicI32, Ordering};
+        static CACHE: AtomicI32 = AtomicI32::new(i32::MIN);
+        static STARTED: std::sync::OnceLock<()> = std::sync::OnceLock::new();
+        STARTED.get_or_init(|| {
+            let _ = std::thread::Builder::new()
+                .name("ram-readout".into())
+                .spawn(|| loop {
+                    let value = match mac::proc_rss_mb() {
+                        Some(mb) => (mb * 10.0) as i32,
+                        None => -1,
+                    };
+                    CACHE.store(value, Ordering::Relaxed);
+                    std::thread::sleep(std::time::Duration::from_secs(2));
+                });
+        });
+        match CACHE.load(Ordering::Relaxed) {
+            i32::MIN => None,
+            -1 => None,
+            tenths => Some(tenths as f32 / 10.0),
         }
-        #[link(name = "c")]
-        extern "C" {
-            fn getpid() -> i32;
-            fn proc_pid_rusage(pid: i32, flavor: i32, buffer: *mut std::ffi::c_void) -> i32;
-        }
-        const PROC_PID_RUSAGE_V2: i32 = 2;
-        let mut info: RUsageInfoV2 = unsafe { std::mem::zeroed() };
-        let ok = unsafe {
-            proc_pid_rusage(
-                getpid(),
-                PROC_PID_RUSAGE_V2,
-                &mut info as *mut RUsageInfoV2 as *mut std::ffi::c_void,
-            )
-        } == 0;
-        (ok && info.resident_size > 0)
-            .then(|| info.resident_size as f32 / 1024.0 / 1024.0)
     }
     #[cfg(not(any(target_os = "linux", target_os = "macos")))]
     {
