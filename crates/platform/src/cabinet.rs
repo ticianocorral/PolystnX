@@ -5575,9 +5575,23 @@ fn draw_panel_slot(
         // antigos ficavam estranhos sobre a arte.
         if p >= 1.0 && !ejecting && lid_alpha > 0.0 {
             if let Some(glass) = images.get(&LID_GLASS_IMG) {
-                // O alpha do vidro chega pronto (o tween do Cabinet modula a
-                // textura via `set_image_alpha` antes do painel desenhar).
-                let _ = canvas.copy(&glass.tex, None, disc);
+                // A tampa DESLIZA: ao fechar, entra de cima assentando no
+                // poço; ao abrir, sobe e some por trás da carcaça. O clip é
+                // a abertura FIXA do poço (o vidro passa "por trás" da
+                // face) — o smoothstep dá a inércia do acrílico real.
+                let t = lid_alpha.clamp(0.0, 1.0);
+                let ease = t * t * (3.0 - 2.0 * t);
+                let slide = (disc.height() as f32 * 0.6) as i32;
+                let offset = ((1.0 - ease) * slide as f32) as i32;
+                let moving = Rect::new(
+                    disc.x(),
+                    disc.y() - offset,
+                    disc.width(),
+                    disc.height(),
+                );
+                canvas.set_clip_rect(Some(disc));
+                let _ = canvas.copy(&glass.tex, None, moving);
+                canvas.set_clip_rect(ClippingRect::None);
             }
         }
     }

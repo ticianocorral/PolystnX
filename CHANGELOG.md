@@ -4,6 +4,16 @@ Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/);
 versionamento por [SemVer 2.0.0](https://semver.org/lang/pt-BR/). O workspace
 inteiro compartilha uma versão (`[workspace.package]` em `Cargo.toml`).
 
+## [1.3.8-beta] - 2026-10-13
+
+### Corrigido
+- **A tampa do CD agora tem efeito de tampa** — o vidro de acrílico
+  aparecia/desaparecia num cross-fade imperceptível (vidro translúcido
+  desvanecendo nele mesmo não se vê). Agora ela DESLIZA: ao fechar, entra
+  de cima assentando no poço; ao abrir, sobe e some por trás da carcaça
+  (clip na abertura fixa, smoothstep de ~0,45 s), com o disco parando e
+  retomando por baixo como já fazia.
+
 ## [1.3.7-beta] - 2026-10-13
 
 ### Corrigido
