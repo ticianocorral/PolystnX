@@ -13,6 +13,13 @@ Auditoria de segurança alinhada com o SixteeN (1.3.2 → 1.8.1).
   prata sobre plástico escuro. POWER liga e desliga o tubo com a animação
   de aquecer e de colapsar (vidro morto curvado pela malha do tubo); com a
   TV desligada o jogo segue rodando, sem imagem nem som.
+- **Ligar e desligar como uma TV de tubo do fim dos anos 90** (sem a janela
+  que abria e fechava): ao desligar, a PRÓPRIA imagem é esmagada na
+  vertical — com as cores ainda aparecendo — até virar uma linha clara que
+  estoura o brilho, a linha encolhe num ponto e o ponto some devagar
+  (persistência do fósforo); ao ligar, o tubo fica escuro por um instante e
+  a imagem sobe do preto ganhando brilho. `examples/tv_shot.rs off|on K`
+  fotografa quadro a quadro.
 - **Volume** 0..16 com o OSD de barrinhas verdes sobre a imagem; o áudio do
   jogo passa pelo volume (cheio por padrão — o mesmo som de antes).
 - **MENU** (à esquerda do POWER): abre o menu de imagem — BRILHO,

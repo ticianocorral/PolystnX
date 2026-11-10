@@ -329,8 +329,9 @@ pub struct Cabinet {
     tv_power_buttons: Option<TvChinControls>,
     /// O vidro morto pronto numa textura (refeita só ao mudar o tamanho).
     dead_glass: Option<DeadGlass>,
-    /// Alvo de textura do vidro em transição (liga/desliga), tamanho do tubo.
-    glass_target: Option<(u32, u32, Texture)>,
+    /// A foto do tubo no instante em que o desligar começa (a imagem que se
+    /// esmaga numa linha).
+    collapse_snap: Option<Texture>,
     /// O loop do leitor de CD (hesitação do core): stream dedicado com fade
     /// de entrada/saída — nunca corta o som no meio seco.
     cd_noise: Option<CdNoise>,
@@ -1085,7 +1086,7 @@ impl Cabinet {
             volume_osd_until: None,
             tv_power_buttons: None,
             dead_glass: None,
-            glass_target: None,
+            collapse_snap: None,
             hiss_rng: 0x2545_f491,
             foley: None,
             cd_noise: None,

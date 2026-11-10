@@ -20,8 +20,8 @@ const MENU_STEP: u8 = 5;
 
 /// O comprimento das fases do tubo em frames (60fps: o warm-up leva ~2s
 /// como um tubo de verdade, o colapso é rápido — ~0.4s).
-const TV_WARM_FRAMES: u32 = 120;
-const TV_COLLAPSE_FRAMES: u32 = 26;
+const TV_WARM_FRAMES: u32 = 90;
+const TV_COLLAPSE_FRAMES: u32 = 30;
 
 /// Um controle físico do queixo da TV (ver `Cabinet::hit_tv_controls`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -58,9 +58,11 @@ impl TvChinControls {
 /// O estado da animação da TV ligando/desligando (`None` = ligada).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TvPower {
-    /// Filamento acordando -> ponto -> linha -> raster abrindo.
+    /// Ligando: um instante de tubo escuro e a imagem sobe do preto,
+    /// ganhando brilho (sem janela abrindo).
     Warming { frames: u32 },
-    /// Imagem -> linha -> ponto -> afterglow decaindo.
+    /// Desligando: a imagem esmaga numa linha clara, a linha encolhe num
+    /// ponto e o ponto some devagar (a persistência do fósforo).
     Collapsing { frames: u32 },
     /// Desligada: vidro quase preto com reflexo, controles do queixo vivos.
     Off,
@@ -72,8 +74,10 @@ pub enum TvPhase {
     On,
     /// Desligada: o vidro morto por cima de tudo.
     Dead,
-    /// Transição (warm-up abrindo / colapso fechando) por cima do sinal.
-    Raster { open: f32, hot: f32, ponto: bool },
+    /// Desligando (`t` de 0 a 1): a imagem esmagada -> linha -> ponto.
+    Collapse { t: f32 },
+    /// Ligando (`t` de 0 a 1): o tubo escuro e a imagem subindo do preto.
+    WarmUp { t: f32 },
 }
 
 /// O que o queixo precisa saber do estado da TV para se desenhar.
@@ -300,36 +304,8 @@ pub(super) fn disco_alpha(
     }
 }
 
-/// O reflexo diagonal do vidro (a faixa clara dos mocks) — alpha baixo,
-/// desenhado sobre o vidro morto para ele não ser preto chapado.
-pub(super) fn glass_reflection(
-    canvas: &mut WindowCanvas,
-    sx: i32,
-    sy: i32,
-    sw: i32,
-    sh: i32,
-    base: u8,
-) {
-    let len = (sw / 3).min(sh / 2);
-    let esp = 26i32;
-    canvas.set_blend_mode(BlendMode::Blend);
-    for i in 0..len {
-        for e in 0..esp {
-            let x = sx + i;
-            let y = sy + sh / 4 + esp - i - e;
-            if x >= sx && x < sx + sw && y >= sy && y < sy + sh {
-                let a = reflection_alpha(e, base);
-                if a > 0 {
-                    canvas.set_draw_color(Color::RGBA(255, 255, 255, a));
-                    let _ = canvas.fill_rect(Rect::new(x, y, 1, 1));
-                }
-            }
-        }
-    }
-}
-
 /// O alpha do reflexo diagonal na faixa `e` (0..26) — a mesma escada de
-/// [`glass_reflection`].
+/// [`reflection_alpha`].
 fn reflection_alpha(e: i32, base: u8) -> u8 {
     match e {
         0..=3 => base,
@@ -341,7 +317,7 @@ fn reflection_alpha(e: i32, base: u8) -> u8 {
 /// O vidro morto (`TvPhase::Dead`) já composto em RGBA32 opaco, `w`x`h`:
 /// as linhas do gradiente quase preto e o reflexo diagonal misturado por
 /// cima (`src*a + dst*(1-a)`, arredondado como a GPU faz). Pixel a pixel
-/// o que [`draw_tv_glass_phase`] desenha com ~600 `fill_rect` + milhares
+/// o que o desenho direto fazia com ~600 `fill_rect` + milhares
 /// de retângulos 1x1 por quadro — o frame vivo sobe isto UMA vez numa
 /// textura ([`DeadGlass`]) e só copia.
 pub(super) fn dead_glass_rgba(w: u32, h: u32) -> Vec<u8> {
@@ -387,81 +363,6 @@ pub(super) fn dead_glass_rgba(w: u32, h: u32) -> Vec<u8> {
 pub(super) struct DeadGlass {
     pub size: (u32, u32),
     pub tex: Texture,
-}
-
-/// O que a fase do tubo manda desenhar NO VIDRO (`tv_phase`), como função
-/// pura — o frame vivo (`draw_tv_phase_glass`) e os captures (que não
-/// podem pegar `&mut self`) desenham o MESMO vidro, sobre a NEVE no
-/// estático ou sobre a IMAGEM DO JOGO no gameplay. A área é sempre
-/// `screen` (o glass; o bezel desenha por cima depois).
-pub(super) fn draw_tv_glass_phase(canvas: &mut WindowCanvas, screen: Rect, phase: &TvPhase) {
-    let (sw, sh) = (screen.width() as i32, screen.height() as i32);
-    let sx = screen.x();
-    let sy = screen.y();
-    match phase {
-        TvPhase::On => {}
-        TvPhase::Dead => {
-            // TV desligada: o vidro morto por cima de tudo — quase preto
-            // com um resíduo mínimo e o reflexo diagonal fraco.
-            for row in 0..sh {
-                let t = row as f32 / sh as f32;
-                let v = 5.0 + 3.0 * t;
-                canvas.set_draw_color(Color::RGB(v as u8, v as u8, (v + 1.0) as u8));
-                let _ = canvas.fill_rect(Rect::new(sx, sy + row, sw as u32, 1));
-            }
-            glass_reflection(canvas, sx, sy, sw, sh, 5);
-        }
-        TvPhase::Raster { open, hot, ponto } => {
-            if *ponto {
-                // afterglow: o ponto quente no centro, o resto do tubo morto
-                let (cx, cy) = (sx + sw / 2, sy + sh / 2);
-                let glow = (hot * 255.0) as u8;
-                for r in (2..=16).rev() {
-                    let a = (hot * (16 - r) as f32 / 16.0 * 80.0) as u8;
-                    disco_alpha(canvas, cx, cy, (r as f32 * 1.8) as i32, (255, 240, 200, a));
-                }
-                disco_alpha(canvas, cx, cy, 4, (255, 255, 245, glow));
-                let dead = (5.0 + 3.0) as u8;
-                canvas.set_draw_color(Color::RGBA(dead, dead, dead + 1, 255));
-            } else if *open < 1.0 {
-                let virt_h = ((sh as f32 * open.clamp(0.02, 1.0)).round() as i32).max(2);
-                let top = sy + sh / 2 - virt_h / 2;
-                let bottom = top + virt_h;
-                // o tubo fora do raster: morto
-                canvas.set_draw_color(Color::RGB(5, 5, 6));
-                if top > sy {
-                    let _ = canvas.fill_rect(Rect::new(sx, sy, sw as u32, (top - sy) as u32));
-                }
-                if bottom < sy + sh {
-                    let _ = canvas.fill_rect(Rect::new(
-                        sx,
-                        bottom,
-                        sw as u32,
-                        (sy + sh - bottom) as u32,
-                    ));
-                }
-                // a borda do raster: gradiente âmbar quente
-                for i in 0..8 {
-                    let k = 1.0 - i as f32 / 8.0;
-                    let a = (200.0 * hot * k) as u8;
-                    canvas.set_draw_color(Color::RGBA(255, 214, 150, a));
-                    let _ =
-                        canvas.fill_rect(Rect::new(sx, (top + i).min(bottom - 1), sw as u32, 1));
-                    let _ =
-                        canvas.fill_rect(Rect::new(sx, (bottom - 1 - i).max(top), sw as u32, 1));
-                }
-                // a lavagem do brilho dentro do raster (o fósforo estourado)
-                if *hot > 0.0 {
-                    canvas.set_draw_color(Color::RGBA(255, 250, 235, (hot * 60.0) as u8));
-                    let _ = canvas.fill_rect(Rect::new(sx, top, sw as u32, virt_h as u32));
-                }
-            } else if *hot > 0.0 {
-                // raster aberto ainda assentando: um véu quente que decai
-                canvas.set_draw_color(Color::RGBA(255, 250, 235, (hot * 26.0) as u8));
-                let _ = canvas.fill_rect(Rect::new(sx, sy, sw as u32, sh as u32));
-            }
-        }
-    }
 }
 
 /// Uma tecla de plástico escuro do queixo — o mesmo plástico da saia do
@@ -824,87 +725,191 @@ impl Cabinet {
     /// A fase do frame ATUAL, sem avançar o relógio.
     fn tv_phase_snapshot(&self) -> TvPhase {
         match self.tv_power {
-            Some(TvPower::Warming { frames }) => {
-                let t = frames as f32 / TV_WARM_FRAMES as f32;
-                // o raster abre: 0 até o meio do warm-up, depois abre até 1
-                let open = ((t - 0.35) / 0.5).clamp(0.0, 1.0);
-                // o brilho do fósforo: nasce no ponto, pico na abertura,
-                // assenta no fim
-                let hot = if t < 0.35 {
-                    t / 0.35
-                } else {
-                    (1.0 - (t - 0.35) / 0.65 * 0.8).max(0.2)
-                };
-                TvPhase::Raster {
-                    open,
-                    hot,
-                    ponto: false,
-                }
-            }
-            Some(TvPower::Collapsing { frames }) => {
-                let t = frames as f32 / TV_COLLAPSE_FRAMES as f32;
-                TvPhase::Raster {
-                    open: (1.0 - t * 1.15).clamp(0.0, 1.0),
-                    hot: (0.6 + t * 0.4).min(1.0),
-                    ponto: t > 0.85,
-                }
-            }
+            Some(TvPower::Warming { frames }) => TvPhase::WarmUp {
+                t: frames as f32 / TV_WARM_FRAMES as f32,
+            },
+            Some(TvPower::Collapsing { frames }) => TvPhase::Collapse {
+                t: frames as f32 / TV_COLLAPSE_FRAMES as f32,
+            },
             Some(TvPower::Off) => TvPhase::Dead,
             None => TvPhase::On,
         }
     }
 
-    /// Desenha o vidro da fase CURVADO pela mesma malha do tubo (as bordas
-    /// seguem o barril e o vinheta, em vez de um retângulo reto). O vidro
-    /// morto sai de uma textura pronta ([`DeadGlass`], refeita só quando o
-    /// tamanho do tubo muda); as fases de transição são pintadas num alvo de
-    /// textura do tamanho do tubo e depois deformadas pela malha.
-    fn draw_tv_phase_glass(&mut self, phase: &TvPhase, mesh: &CrtMesh) {
+    /// O vidro morto (a textura pronta, refeita só quando o tamanho do tubo
+    /// muda) deformado pela malha do tubo e com `alpha` (0..=255) — 255 cobre
+    /// a imagem por inteiro, menos deixa o que está por baixo aparecer.
+    fn draw_dead_glass(&mut self, mesh: &CrtMesh, alpha: u8) {
         let screen = self.screen;
-        let (w, h) = (screen.width(), screen.height());
-        if w == 0 || h == 0 {
-            return;
+        let size = (screen.width(), screen.height());
+        if self.dead_glass.as_ref().is_none_or(|g| g.size != size) {
+            self.dead_glass = self.build_dead_glass(size);
         }
-        if matches!(phase, TvPhase::Dead) {
-            if self.dead_glass.as_ref().is_none_or(|g| g.size != (w, h)) {
-                self.dead_glass = self.build_dead_glass((w, h));
-            }
-            if let Some(g) = &self.dead_glass {
-                let _ = self
-                    .canvas
-                    .render_geometry(&mesh.verts, Some(&g.tex), &mesh.indices[..]);
-            }
-            return;
-        }
-        if self
-            .glass_target
-            .as_ref()
-            .is_none_or(|(tw, th, _)| (*tw, *th) != (w, h))
-        {
-            self.glass_target = self
-                .canvas
-                .create_texture_target(SdlFormat::RGBA32, w, h)
-                .ok()
-                .map(|mut t| {
-                    t.set_blend_mode(BlendMode::Blend);
-                    (w, h, t)
-                });
-        }
-        let Some((_, _, tex)) = self.glass_target.as_mut() else {
+        let Some(g) = &self.dead_glass else {
             return;
         };
-        let local = Rect::new(0, 0, w, h);
-        let _ = self.canvas.with_texture_canvas(tex, |c| {
-            c.set_blend_mode(BlendMode::None);
-            c.set_draw_color(Color::RGBA(0, 0, 0, 0));
-            c.clear();
-            c.set_blend_mode(BlendMode::Blend);
-            draw_tv_glass_phase(c, local, phase);
-        });
-        if let Some((_, _, tex)) = &self.glass_target {
+        if alpha == 255 {
             let _ = self
                 .canvas
-                .render_geometry(&mesh.verts, Some(tex), &mesh.indices[..]);
+                .render_geometry(&mesh.verts, Some(&g.tex), &mesh.indices[..]);
+            return;
+        }
+        // O alfa vai nas cores dos vértices (a textura entra com blend).
+        let a = alpha as f32 / 255.0;
+        let mut verts = mesh.verts.clone();
+        for v in &mut verts {
+            v.color.a = a;
+        }
+        let _ = self
+            .canvas
+            .render_geometry(&verts, Some(&g.tex), &mesh.indices[..]);
+    }
+
+    /// Fotografa o que o tubo mostra agora (a região do vidro, já com a
+    /// imagem desenhada) para esmagá-la no desligar.
+    fn snapshot_screen(&mut self) {
+        let screen = self.screen;
+        let Ok(surf) = self.canvas.read_pixels(Some(screen)) else {
+            return;
+        };
+        let Ok(surf) = surf.convert_format(SdlFormat::RGBA32) else {
+            return;
+        };
+        let (w, h, pitch) = (surf.width(), surf.height(), surf.pitch() as usize);
+        let Ok(mut tex) = self.canvas.create_texture_static(SdlFormat::RGBA32, w, h) else {
+            return;
+        };
+        if surf
+            .with_lock(|bytes| tex.update(None, bytes, pitch))
+            .is_err()
+        {
+            return;
+        }
+        tex.set_blend_mode(BlendMode::None);
+        tex.set_scale_mode(SdlScaleMode::Linear);
+        self.collapse_snap = Some(tex);
+    }
+
+    /// O desligar de uma TV de tubo do fim dos anos 90: a imagem é
+    /// ESMAGADA na vertical até virar uma linha clara, a linha encolhe até
+    /// um ponto e o ponto brilha e some devagar (a persistência do fósforo).
+    /// Nada de janela fechando: é a própria imagem que se comprime, com o
+    /// brilho estourando à medida que ela afina.
+    fn draw_collapse(&mut self, t: f32, mesh: &CrtMesh) {
+        if self.collapse_snap.is_none() {
+            self.snapshot_screen();
+        }
+        // O tubo apaga por baixo; o que sobra é só o que a fase desenha.
+        self.draw_dead_glass(mesh, 255);
+        let screen = self.screen;
+        let (sw, sh) = (screen.width() as f32, screen.height() as f32);
+        let (cx, cy) = (
+            screen.x() + screen.width() as i32 / 2,
+            screen.y() + screen.height() as i32 / 2,
+        );
+        const SQUASH_END: f32 = 0.5; // até aqui: imagem -> linha
+        const LINE_END: f32 = 0.82; // até aqui: linha -> ponto; depois, o brilho do ponto
+                                    // Fatores de escala da imagem (vertical, horizontal).
+        let (fy, fx) = if t < SQUASH_END {
+            ((1.0 - t / SQUASH_END).powf(2.4).max(0.012), 1.0)
+        } else if t < LINE_END {
+            (
+                0.012,
+                (1.0 - ((t - SQUASH_END) / (LINE_END - SQUASH_END)).powf(1.4)).max(0.0),
+            )
+        } else {
+            (0.0, 0.0)
+        };
+        if fx > 0.0 {
+            let (w, h) = ((sw * fx).max(2.0), (sh * fy).max(2.0));
+            let dst = Rect::new(
+                cx - (w / 2.0) as i32,
+                cy - (h / 2.0) as i32,
+                w as u32,
+                h as u32,
+            );
+            if let Some(snap) = self.collapse_snap.as_mut() {
+                // A imagem comprimida; quanto mais fina, mais estourada.
+                snap.set_blend_mode(BlendMode::None);
+                snap.set_alpha_mod(255);
+                let _ = self.canvas.copy(snap, None, dst);
+                // Só estoura quando já está fina (abaixo de ~1/4 da altura):
+                // a imagem grossa ainda aparece com as cores.
+                let boost = (1.0 - fy / 0.25).clamp(0.0, 1.0);
+                if boost > 0.0 {
+                    snap.set_blend_mode(BlendMode::Add);
+                    for pass in 0..2 {
+                        snap.set_alpha_mod((boost * 190.0 * (1.0 - pass as f32 * 0.4)) as u8);
+                        let _ = self.canvas.copy(snap, None, dst);
+                    }
+                }
+            }
+            // A linha clara que a imagem vira: núcleo branco e halo azulado.
+            let line_a = ((1.0 - fy / 0.25).clamp(0.0, 1.0) * 255.0) as u8;
+            self.canvas.set_blend_mode(BlendMode::Add);
+            for (grow, a) in [(5, line_a / 5), (3, line_a / 3), (1, line_a)] {
+                self.canvas.set_draw_color(Color::RGBA(190, 205, 255, a));
+                let _ = self.canvas.fill_rect(Rect::new(
+                    dst.x(),
+                    dst.y() - grow,
+                    dst.width(),
+                    dst.height() + (grow * 2) as u32,
+                ));
+            }
+            self.canvas.set_blend_mode(BlendMode::Blend);
+        } else {
+            // O ponto: brilho quente que apaga sem pressa.
+            let k = ((t - LINE_END) / (1.0 - LINE_END)).clamp(0.0, 1.0);
+            let glow = (1.0 - k).powf(1.6);
+            self.canvas.set_blend_mode(BlendMode::Add);
+            for r in (2..=14).rev() {
+                let a = (glow * (14 - r) as f32 / 14.0 * 90.0) as u8;
+                disco_alpha(
+                    &mut self.canvas,
+                    cx,
+                    cy,
+                    (r as f32 * 1.8) as i32,
+                    (255, 240, 205, a),
+                );
+            }
+            disco_alpha(
+                &mut self.canvas,
+                cx,
+                cy,
+                3,
+                (255, 255, 250, (glow * 255.0) as u8),
+            );
+            self.canvas.set_blend_mode(BlendMode::Blend);
+        }
+    }
+
+    /// O ligar: um instante de tubo escuro (o filamento esquentando) e a
+    /// imagem sobe do preto ganhando brilho — sem janela abrindo. O vidro
+    /// morto vai ficando transparente com uma curva que arranca devagar.
+    fn draw_warmup(&mut self, t: f32, mesh: &CrtMesh) {
+        const DELAY: f32 = 0.14;
+        if t < DELAY {
+            self.draw_dead_glass(mesh, 255);
+            return;
+        }
+        let p = ((t - DELAY) / (1.0 - DELAY)).clamp(0.0, 1.0);
+        let alpha = ((1.0 - p.powf(1.8)) * 255.0) as u8;
+        self.draw_dead_glass(mesh, alpha);
+    }
+
+    /// O vidro da fase por cima da imagem do tubo (a malha curva as bordas).
+    fn draw_tv_phase_glass(&mut self, phase: &TvPhase, mesh: &CrtMesh) {
+        if self.screen.width() == 0 || self.screen.height() == 0 {
+            return;
+        }
+        if !matches!(phase, TvPhase::Collapse { .. }) {
+            self.collapse_snap = None;
+        }
+        match *phase {
+            TvPhase::On => {}
+            TvPhase::Dead => self.draw_dead_glass(mesh, 255),
+            TvPhase::Collapse { t } => self.draw_collapse(t, mesh),
+            TvPhase::WarmUp { t } => self.draw_warmup(t, mesh),
         }
     }
 
@@ -915,7 +920,7 @@ impl Cabinet {
             .canvas
             .create_texture_static(SdlFormat::RGBA32, w, h)
             .ok()?;
-        tex.set_blend_mode(BlendMode::None);
+        tex.set_blend_mode(BlendMode::Blend);
         tex.set_scale_mode(SdlScaleMode::Nearest);
         tex.update(None, &dead_glass_rgba(w, h), (w * 4) as usize)
             .ok()?;
@@ -928,9 +933,6 @@ impl Cabinet {
     /// quadro apresentado.
     pub(super) fn draw_tv_glass_before_bezel(&mut self, mesh: &CrtMesh) {
         let phase = self.tv_phase();
-        if matches!(phase, TvPhase::On) {
-            return;
-        }
         self.draw_tv_phase_glass(&phase, mesh);
     }
 
