@@ -1,3 +1,5 @@
+#![allow(clippy::too_many_arguments)] // helpers de desenho de um exemplo de dev
+
 //! MOCK — a estante de games do PolystnX desenhada como uma estante de
 //! verdade: prateleiras de madeira (tampo com veio, suporte, sombra na
 //! parede), jogos em pé como caixas com lombada e arte própria, sombra de
@@ -137,7 +139,8 @@ fn main() -> anyhow::Result<()> {
         manual_first_page: None,
         award_img: None,
 
-        igdb: None,        hltb,
+        igdb: None,
+        hltb,
     });
 
     cab.capture_shelf(
@@ -168,13 +171,7 @@ fn main() -> anyhow::Result<()> {
             d.text(MARGEM, 16, 2, (200, 196, 190), "55 games");
             let (bx, bw, bh) = (sw - MARGEM - 280, 280, 32);
             d.outline(bx, 16, bw, bh, 1, (96, 92, 86, 255));
-            d.fill(
-                bx + 1,
-                17,
-                (bw - 2) as u32,
-                (bh - 2) as u32,
-                (30, 27, 24, 255),
-            );
+            d.fill(bx + 1, 17, bw - 2, bh - 2, (30, 27, 24, 255));
             d.text(bx + 10, 22, 1, dim, "buscar...");
 
             // Três prateleiras: recentes, todos, favoritos.

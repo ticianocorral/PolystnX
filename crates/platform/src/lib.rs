@@ -8,9 +8,10 @@ pub mod sysinfo;
 
 pub use audio::AudioOut;
 pub use cabinet::{
-    Cabinet, FrameRef, HltbBar, HltbBars, IgdbSection, ModalBackdrop, PanelButton, PanelSection,
-    PixelFormat, RaStatus, Screen, SettingsButton, SettingsPanelInfo, ShelfButton, ShelfPanelInfo,
-    UpdateArrow, BRAND, DEMO_BADGE_IMG, RA_LOGO_IMG,
+    Cabinet, FrameRef, HltbBar, HltbBars, IgdbSection, ModalBackdrop, PadFocus, PanelButton,
+    PanelSection, Picture, PixelFormat, RaStatus, Screen, SettingsButton, SettingsPanelInfo,
+    ShelfButton, ShelfPanelInfo, TvControl, TvPower, UpdateArrow, BRAND, DEMO_BADGE_IMG,
+    RA_LOGO_IMG,
 };
 pub use input::{Input, KeyMap, PadButton, PadMap, UiEvent, MAX_PORTS};
 // The SDL gamepad button enum, for callers that hold a captured press
@@ -81,6 +82,41 @@ fn mouse_up_at(event: &Event) -> Option<(i32, i32)> {
         } => Some((*x as i32, *y as i32)),
         _ => None,
     }
+}
+
+/// A ordem das portas numa partida em curso, a partir dos ids conectados
+/// agora (`present`, na ordem do SDL). Quem está em `order` e saiu deixa a
+/// vaga; cada id novo ocupa a primeira vaga (herdando o "já jogou" de quem
+/// saiu, em `engaged`) e só depois vai para o fim. Devolve os ids presentes
+/// na ordem das portas.
+fn reorder_for_game(
+    order: &mut Vec<JoystickId>,
+    engaged: &mut Vec<JoystickId>,
+    present: &[JoystickId],
+) -> Vec<JoystickId> {
+    let mut fresh: std::collections::VecDeque<JoystickId> = present
+        .iter()
+        .filter(|id| !order.contains(id))
+        .copied()
+        .collect();
+    for slot in order.iter_mut() {
+        if present.contains(slot) {
+            continue;
+        }
+        let Some(new_id) = fresh.pop_front() else {
+            break;
+        };
+        if engaged.contains(slot) {
+            engaged.push(new_id);
+        }
+        *slot = new_id;
+    }
+    order.extend(fresh);
+    order
+        .iter()
+        .filter(|id| present.contains(id))
+        .copied()
+        .collect()
 }
 
 fn left_click_at(event: &Event) -> Option<(i32, i32)> {
@@ -274,11 +310,81 @@ impl From<String> for PlatformError {
 
 /// Owns the SDL context and its subsystems. Create one, keep it alive for the
 /// whole process.
+/// Se `event` é o jogador mexendo em algo — o que acorda as telas paradas
+/// do ritmo ocioso ([`Platform::idle_for`]). Eixos analógicos e sensores
+/// ficam DE FORA (o ruído do stick chega sem parar e manteria a tela
+/// "ativa" para sempre) e conectar/desconectar controle também (um pad que
+/// cai e volta nunca deixaria a tela descansar): o primeiro botão apertado
+/// já conta.
+fn is_player_input(event: &Event) -> bool {
+    matches!(
+        event,
+        Event::Window { .. }
+            | Event::KeyDown { .. }
+            | Event::KeyUp { .. }
+            | Event::TextEditing { .. }
+            | Event::TextInput { .. }
+            | Event::MouseMotion { .. }
+            | Event::MouseButtonDown { .. }
+            | Event::MouseButtonUp { .. }
+            | Event::MouseWheel { .. }
+            | Event::JoyButtonDown { .. }
+            | Event::JoyButtonUp { .. }
+            | Event::JoyHatMotion { .. }
+            | Event::GamepadButtonDown { .. }
+            | Event::GamepadButtonUp { .. }
+            | Event::GamepadTouchpadDown { .. }
+            | Event::GamepadTouchpadMotion { .. }
+            | Event::FingerDown { .. }
+            | Event::FingerMotion { .. }
+            | Event::FingerUp { .. }
+            | Event::PenDown { .. }
+            | Event::PenMotion { .. }
+    )
+}
+
+/// Mudança de visibilidade da janela: `Some(true)` minimizada/escondida,
+/// `Some(false)` de volta. `Occluded` fica de fora de propósito: no
+/// gamescope do Steam Deck e com outra janela por cima no macOS ele chega
+/// em situações em que o jogador ainda está olhando para o app.
+fn window_hidden_change(event: &Event) -> Option<bool> {
+    use sdl3::event::WindowEvent as W;
+    match event {
+        Event::Window { win_event, .. } => match win_event {
+            W::Minimized | W::Hidden => Some(true),
+            W::Restored | W::Shown | W::Exposed | W::Maximized | W::FocusGained => Some(false),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
 pub struct Platform {
     pub sdl: sdl3::Sdl,
     pub video_subsystem: sdl3::VideoSubsystem,
     pub audio_subsystem: sdl3::AudioSubsystem,
     event_pump: sdl3::EventPump,
+    /// O acorde Select+Start estava apertado no `poll` anterior.
+    chord_down: bool,
+    /// O último input foi de controle (botão), e não de teclado ou mouse: o
+    /// anel de foco só aparece para quem está usando o controle.
+    last_input_pad: bool,
+    /// Partida em curso ([`Platform::set_game_session`]): os pads que já
+    /// estavam ligados na largada — herdam o "já jogou" de quem sai.
+    game_engaged: Option<Vec<JoystickId>>,
+    /// Partida em curso: a ordem das portas por id. Quem desconecta deixa a
+    /// vaga marcada aqui; o próximo pad que aparece (o mesmo controle volta
+    /// com id NOVO) ocupa essa vaga — senão P1 e P2 ficavam trocados até o
+    /// fim da partida depois de um Bluetooth que dormiu.
+    game_order: Vec<JoystickId>,
+    /// Último input do jogador (ver [`is_player_input`]).
+    last_activity: Instant,
+    /// Janela minimizada/escondida (ver [`window_hidden_change`]).
+    window_hidden: bool,
+    /// Jogo correndo: o descanso de tela fica bloqueado.
+    playing: bool,
+    /// O que o SDL sabe agora sobre o descanso de tela (só chama ao mudar).
+    screensaver_blocked: bool,
     gamepad_subsystem: sdl3::GamepadSubsystem,
     /// Open gamepads, in order — index n drives port n. Paired with the
     /// `JoystickId` each was opened from, so a device change only touches the
@@ -298,7 +404,7 @@ pub struct Platform {
     /// Testing hook headless: quando `Some`, sobrepõe a posição real do
     /// cursor que o `poll_menu` reporta (não há mouse de verdade lá).
     debug_pointer: Option<(i32, i32)>,
-    /// SNES-button layout of the gamepads — the pair table `sample_gamepads`
+    /// PS1-button layout of the gamepads — the pair table `sample_gamepads`
     /// walks. Defaults to the factory layout; the settings screen swaps pairs
     /// through `set_pad_map` (persisted by the app).
     pad_map: PadMap,
@@ -408,6 +514,12 @@ impl Platform {
         // era o default sem hint; GPU: MAILBOX→IMMEDIATE, só FIFO se não
         // houver outro). Um SDL_RENDER_VSYNC no ambiente vence.
         sdl3::hint::set("SDL_RENDER_VSYNC", "0");
+        // O SDL, por padrão, impede o descanso de tela enquanto o app está
+        // aberto — horas na tela ociosa com a tela acesa (o painel é a maior
+        // conta de energia do Steam Deck). Aqui ele fica LIBERADO e o app só
+        // o segura quando precisa (jogo correndo ou input recente, ver
+        // `update_screensaver`).
+        sdl3::hint::set("SDL_VIDEO_ALLOW_SCREENSAVER", "1");
         // LINUX: vídeo x11 sempre (XWayland no Plasma e no gamescope). O
         // caminho wayland do SDL apresentou mal no gaming mode do Deck — o
         // loop interno segue nominal e a exibição desaba — e a tentativa de
@@ -428,6 +540,15 @@ impl Platform {
             video_subsystem,
             audio_subsystem,
             event_pump,
+            chord_down: false,
+            last_input_pad: false,
+            game_engaged: None,
+            game_order: Vec::new(),
+            last_activity: Instant::now(),
+            window_hidden: false,
+            playing: false,
+            // O SDL parte bloqueando (o hint abaixo libera o padrão).
+            screensaver_blocked: true,
             gamepad_subsystem,
             gamepads: Vec::new(),
             seen_ids: Vec::new(),
@@ -456,6 +577,10 @@ impl Platform {
         };
         self.seen_ids = ids.clone();
         self.seen_ids.sort_unstable();
+        let ids = match &mut self.game_engaged {
+            Some(engaged) => reorder_for_game(&mut self.game_order, engaged, &ids),
+            None => ids,
+        };
         let mut leftovers = std::mem::take(&mut self.gamepads);
         let mut gamepads = Vec::with_capacity(leftovers.len());
         for id in ids.into_iter().take(input::MAX_PORTS) {
@@ -473,6 +598,27 @@ impl Platform {
         // Whatever `leftovers` still holds was unplugged; dropping it closes
         // the pads.
         self.gamepads = gamepads;
+    }
+
+    /// Liga/desliga o modo "partida em curso" da ordem dos controles. Dentro
+    /// dele, um controle que cai e volta (com id novo) reocupa a SUA porta, e
+    /// um 3º pad entra na fila em vez de roubar a vaga de quem caiu — numa
+    /// partida a dois, o Bluetooth que dormiu não troca mais P1 por P2.
+    pub fn set_game_session(&mut self, on: bool) {
+        self.game_order = if on {
+            let mut order: Vec<JoystickId> = self.gamepads.iter().map(|(id, _)| *id).collect();
+            if let Ok(all) = self.gamepad_subsystem.gamepads() {
+                for id in all {
+                    if !order.contains(&id) {
+                        order.push(id);
+                    }
+                }
+            }
+            order
+        } else {
+            Vec::new()
+        };
+        self.game_engaged = on.then(|| self.gamepads.iter().map(|(id, _)| *id).collect());
     }
 
     /// Resolve a pending hotplug: only when the connected-id set actually
@@ -571,12 +717,82 @@ impl Platform {
     /// `Down`), and gamepad d-pad/buttons (rising edge only, `MENU_PAD_MAP`)
     /// always feed `nav`. In `CaptureKey` mode only, a keydown is captured
     /// raw instead — see [`MenuMode`].
+    /// O último input foi de controle (e não de teclado/mouse)? O anel de
+    /// foco e a legenda de botões só aparecem para quem usa o controle.
+    pub fn last_input_was_pad(&self) -> bool {
+        self.last_input_pad
+    }
+
+    /// Há quanto tempo o jogador não mexe em nada (teclado, mouse, toque ou
+    /// botão). As telas paradas usam isto para cair para meio quadro — a
+    /// bateria do Steam Deck agradece.
+    pub fn idle_for(&self) -> Duration {
+        self.last_activity.elapsed()
+    }
+
+    /// Os botões de menu segurados AGORA contam como já vistos: a próxima
+    /// tela só reage a um aperto novo (o aviso de jogo que falhou abre com
+    /// o A ainda apertado do jogo).
+    pub fn prime_menu_edges(&mut self) {
+        let pad = self.gamepads.first().map(|(_, p)| p);
+        for (i, (btn, _)) in MENU_PAD_MAP.iter().enumerate() {
+            self.menu_prev[i] = pad.is_some_and(|p| p.button(*btn));
+        }
+    }
+
+    /// A janela está minimizada/escondida: ninguém vê o que se desenha.
+    pub fn window_hidden(&self) -> bool {
+        self.window_hidden
+    }
+
+    /// O jogo está correndo (ligado, sem pausa nem menu): enquanto `true`
+    /// o descanso de tela fica bloqueado — botões de controle não contam
+    /// como atividade para o sistema em vários desktops Linux.
+    pub fn set_playing(&mut self, on: bool) {
+        self.playing = on;
+        self.update_screensaver();
+    }
+
+    /// Bloqueia o descanso de tela só com jogo correndo ou input recente.
+    /// Parado num menu, a tela pode apagar. Só chama o SDL quando o estado
+    /// muda.
+    fn update_screensaver(&mut self) {
+        const NAV_GRACE: Duration = Duration::from_secs(120);
+        let block = self.playing || self.idle_for() < NAV_GRACE;
+        if block == self.screensaver_blocked {
+            return;
+        }
+        self.screensaver_blocked = block;
+        let r = if block {
+            self.video_subsystem.disable_screen_saver()
+        } else {
+            self.video_subsystem.enable_screen_saver()
+        };
+        if let Err(e) = r {
+            log::warn!("descanso de tela: {e}");
+        }
+    }
+
     pub fn poll_menu(&mut self, mode: MenuMode) -> MenuInput {
         use sdl3::keyboard::Keycode;
         self.fire_due_clicks();
         let _span = TraceSpan::new("poll_menu");
+        self.update_screensaver();
         let mut out = MenuInput::default();
         for event in self.event_pump.poll_iter() {
+            if is_player_input(&event) {
+                self.last_activity = Instant::now();
+            }
+            match &event {
+                Event::KeyDown { .. } | Event::TextInput { .. } | Event::MouseButtonDown { .. } => {
+                    self.last_input_pad = false
+                }
+                Event::GamepadButtonDown { .. } => self.last_input_pad = true,
+                _ => {}
+            }
+            if let Some(hidden) = window_hidden_change(&event) {
+                self.window_hidden = hidden;
+            }
             if let Some(pos) = left_click_at(&event) {
                 out.click = Some(pos);
                 continue;
@@ -586,7 +802,10 @@ impl Platform {
                 continue;
             }
             match event {
-                Event::Quit { .. } => out.quit = true,
+                Event::Quit { .. } => {
+                    log::warn!("SDL: evento Quit recebido");
+                    out.quit = true
+                }
                 Event::GamepadAdded { .. } | Event::GamepadRemoved { .. } => {
                     self.devices_pending = true
                 }
@@ -669,6 +888,9 @@ impl Platform {
                 }
             }
             self.menu_prev[i] = down;
+            if down {
+                self.last_activity = Instant::now();
+            }
         }
         // A posição do cursor é estado contínuo (o hover da estante lê a
         // cada frame), não evento — e o override headless tem precedência.
@@ -710,8 +932,22 @@ impl Platform {
     pub fn poll_text_entry(&mut self) -> TextEntryInput {
         use sdl3::keyboard::{Keycode, Mod};
         let _span = TraceSpan::new("poll_text_entry");
+        self.update_screensaver();
         let mut out = TextEntryInput::default();
         for event in self.event_pump.poll_iter() {
+            if is_player_input(&event) {
+                self.last_activity = Instant::now();
+            }
+            match &event {
+                Event::KeyDown { .. } | Event::TextInput { .. } | Event::MouseButtonDown { .. } => {
+                    self.last_input_pad = false
+                }
+                Event::GamepadButtonDown { .. } => self.last_input_pad = true,
+                _ => {}
+            }
+            if let Some(hidden) = window_hidden_change(&event) {
+                self.window_hidden = hidden;
+            }
             if let Some(pos) = left_click_at(&event) {
                 out.click = Some(pos);
                 continue;
@@ -729,7 +965,10 @@ impl Platform {
                 continue;
             }
             match event {
-                Event::Quit { .. } => out.quit = true,
+                Event::Quit { .. } => {
+                    log::warn!("SDL: evento Quit recebido");
+                    out.quit = true
+                }
                 Event::TextInput { text, .. } => out.typed.push_str(&text),
                 // Hotplug durante a digitação não é lido aqui, mas o evento
                 // seria engolido (e o controle ficaria morto até o próximo
@@ -814,8 +1053,22 @@ impl Platform {
     /// request ([`UiEvent::CloseRequested`]), if either happened this frame.
     pub fn poll(&mut self, input: &mut Input, keymap: &KeyMap) -> Vec<UiEvent> {
         let _span = TraceSpan::new("poll");
+        self.update_screensaver();
         let mut out = Vec::new();
         for event in self.event_pump.poll_iter() {
+            if is_player_input(&event) {
+                self.last_activity = Instant::now();
+            }
+            match &event {
+                Event::KeyDown { .. } | Event::TextInput { .. } | Event::MouseButtonDown { .. } => {
+                    self.last_input_pad = false
+                }
+                Event::GamepadButtonDown { .. } => self.last_input_pad = true,
+                _ => {}
+            }
+            if let Some(hidden) = window_hidden_change(&event) {
+                self.window_hidden = hidden;
+            }
             if let Some((x, y)) = left_click_at(&event) {
                 out.push(UiEvent::Click(x, y));
                 continue;
@@ -854,10 +1107,21 @@ impl Platform {
         }
         self.refresh_gamepads_if_changed();
         self.sample_gamepads(input);
+        // Acorde Select+Start (qualquer pad): abre/fecha o livro de pausa sem
+        // tocar na tela — o jogo é dono de todos os botões, então o menu só
+        // abre com um acorde. Só a borda de subida conta.
+        let chord = self
+            .gamepads
+            .iter()
+            .any(|(_, p)| p.button(PadBtn::Back) && p.button(PadBtn::Start));
+        if chord && !self.chord_down {
+            out.push(UiEvent::TogglePause);
+        }
+        self.chord_down = chord;
         out
     }
 
-    /// Swap the gamepad SNES-button layout (settings screen); takes effect on
+    /// Swap the gamepad PS1-button layout (settings screen); takes effect on
     /// the next `poll`.
     pub fn set_pad_map(&mut self, map: PadMap) {
         self.pad_map = map;
@@ -1000,5 +1264,45 @@ mod tests {
         assert_eq!(konami_nav_step(MenuNav::Back), Some(B));
         assert_eq!(konami_nav_step(MenuNav::Confirm), Some(A));
         assert_eq!(konami_nav_step(MenuNav::PageUp), None);
+    }
+}
+
+#[cfg(test)]
+mod port_order_tests {
+    use super::reorder_for_game;
+    use sdl3::joystick::JoystickId;
+
+    fn ids(v: &[u32]) -> Vec<JoystickId> {
+        v.iter().map(|&n| JoystickId::new(n)).collect()
+    }
+
+    #[test]
+    fn replugged_pad_takes_back_its_port() {
+        // Partida a dois: P1 = 1, P2 = 2, os dois já jogaram.
+        let mut order = ids(&[1, 2]);
+        let mut engaged = ids(&[1, 2]);
+        // P1 cai: P2 é o único presente (temporariamente na porta 0).
+        assert_eq!(
+            reorder_for_game(&mut order, &mut engaged, &ids(&[2])),
+            ids(&[2])
+        );
+        // P1 volta com id novo (7) — e o SDL o lista DEPOIS do P2.
+        let now = reorder_for_game(&mut order, &mut engaged, &ids(&[2, 7]));
+        assert_eq!(now, ids(&[7, 2]), "o controle que voltou é P1 de novo");
+        assert!(
+            engaged.contains(&JoystickId::new(7)),
+            "e herda o 'já jogou'"
+        );
+    }
+
+    #[test]
+    fn new_pad_without_vacancy_goes_last() {
+        let mut order = ids(&[1]);
+        let mut engaged = ids(&[1]);
+        assert_eq!(
+            reorder_for_game(&mut order, &mut engaged, &ids(&[3, 1])),
+            ids(&[1, 3])
+        );
+        assert!(!engaged.contains(&JoystickId::new(3)));
     }
 }

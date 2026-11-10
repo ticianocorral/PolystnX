@@ -87,7 +87,7 @@ fn in_rect(x: i32, y: i32, r: (i32, i32, u32, u32)) -> bool {
 /// app should quit altogether (window closed here), `Ok(false)` to return to
 /// the idle screen — same contract as the settings screen's `run`.
 pub fn run(plat: &mut Platform, cab: &mut Cabinet) -> Result<bool> {
-    let frame = Duration::from_millis(16);
+    let frame = crate::runner::UI_FRAME;
     let mut next = Instant::now() + frame;
 
     let mut rx: Option<Receiver<InstallMsg>> = None;
@@ -157,6 +157,7 @@ pub fn run(plat: &mut Platform, cab: &mut Cabinet) -> Result<bool> {
             }
             if let Some((x, y)) = m.click {
                 let (ox, oy) = cab.window_to_output(x, y);
+                cab.try_tv_click(ox, oy);
                 if cab.hit_close_button(ox, oy) {
                     return Ok(true);
                 }
@@ -223,7 +224,10 @@ pub fn run(plat: &mut Platform, cab: &mut Cabinet) -> Result<bool> {
 
             let (px, py, pw, ph) = perf_rect(w, h);
             let pcolor = if sel == 1 { TEXT } else { DIM };
-            let plabel = format!("infos de desempenho: {}", if perf_on { "LIGADO" } else { "DESLIGADO" });
+            let plabel = format!(
+                "infos de desempenho: {}",
+                if perf_on { "LIGADO" } else { "DESLIGADO" }
+            );
             d.outline(px, py, pw, ph, 2, (pcolor.0, pcolor.1, pcolor.2, 255));
             d.text(
                 px + (pw as i32 - plabel.chars().count() as i32 * CELL * 2) / 2,
@@ -255,7 +259,7 @@ pub fn run(plat: &mut Platform, cab: &mut Cabinet) -> Result<bool> {
             );
         };
         cab.frame_2d(BG, render);
-        crate::runner::pace_frame(&mut next, frame);
+        crate::runner::pace_ui(&mut next, frame, plat, cab);
     }
 }
 
@@ -295,6 +299,9 @@ fn try_install(
             break;
         }
         bytes.extend_from_slice(&buf[..n]);
+        if bytes.len() > MAX_PACKAGE_BYTES as usize {
+            return Err("download maior que o esperado — abortado".to_string());
+        }
         let _ = tx.send(InstallMsg::Progress {
             downloaded: bytes.len() as u64,
             total,
@@ -303,6 +310,10 @@ fn try_install(
 
     install_bytes(&bytes, root, tx)
 }
+
+/// Teto do pacote de exemplo — baixado e descompactado (ROMs homebrew e
+/// artes: dezenas de MB; 1 GB é teto anti-disco-cheio, não tamanho esperado).
+const MAX_PACKAGE_BYTES: u64 = 1024 * 1024 * 1024;
 
 /// Unpack an already-downloaded example package into `root` — only entries
 /// under `roms/` and `assets/` are installed (o LEIA-ME é instrução de
@@ -317,9 +328,12 @@ fn install_bytes(
     let mut archive =
         zip::ZipArchive::new(std::io::Cursor::new(bytes)).map_err(|e| e.to_string())?;
     let mut installed = 0usize;
+    let mut written = 0u64;
     for i in 0..archive.len() {
         let mut file = archive.by_index(i).map_err(|e| e.to_string())?;
-        let name = file.name().to_string();
+        let Ok(name) = file.name().map(|n| n.into_owned()) else {
+            continue;
+        };
         if file.is_dir() || name.starts_with('.') || name.contains("__MACOSX") {
             continue;
         }
@@ -334,8 +348,18 @@ fn install_bytes(
         if let Some(parent) = dest.parent() {
             std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
         }
+        // Teto de expansão por entrada e no total: um zip de poucos KB não
+        // enche o disco (zip bomb).
         let mut out = std::fs::File::create(&dest).map_err(|e| e.to_string())?;
-        std::io::copy(&mut file, &mut out).map_err(|e| e.to_string())?;
+        let budget = MAX_PACKAGE_BYTES.saturating_sub(written);
+        let n = std::io::copy(&mut (&mut file).take(budget + 1), &mut out)
+            .map_err(|e| e.to_string())?;
+        if n > budget {
+            drop(out);
+            let _ = std::fs::remove_file(&dest);
+            return Err("pacote maior que o esperado ao descompactar — abortado".to_string());
+        }
+        written += n;
         installed += 1;
     }
     if installed == 0 {

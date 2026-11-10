@@ -13,6 +13,14 @@
 use std::io::Read;
 use std::time::Duration;
 
+/// Mensagens só em português (o par en/pt do SixteeN fica na fonte para o
+/// port seguir 1:1).
+macro_rules! tr {
+    ($en:expr, $pt:expr $(,)?) => {
+        $pt
+    };
+}
+
 pub const API_BASE: &str = "https://retroachievements.org";
 
 /// Identifies the app to the RA server in every call (third-party clients
@@ -24,6 +32,17 @@ fn agent() -> ureq::Agent {
         .timeout_connect(Duration::from_secs(5))
         .timeout(Duration::from_secs(10))
         .build()
+}
+
+/// Teto do corpo JSON de uma resposta — o `into_json` do ureq 2 lê sem
+/// limite, e um servidor com bug (ou hostil) não pode encher a memória.
+/// As respostas reais ficam em dezenas de KB; 8 MiB sobra.
+const MAX_JSON_BYTES: u64 = 8 << 20;
+
+/// `into_json` com teto: desserializa no máximo [`MAX_JSON_BYTES`] do corpo
+/// (um corpo maior chega truncado e falha como JSON inválido).
+fn read_json<T: serde::de::DeserializeOwned>(resp: ureq::Response) -> serde_json::Result<T> {
+    serde_json::from_reader(resp.into_reader().take(MAX_JSON_BYTES))
 }
 
 /// Percent-encode the few characters a username/token can carry that would
@@ -48,7 +67,7 @@ fn encode(s: &str) -> String {
 /// settings screen wraps it in the standard worker + `mpsc` shape.
 pub fn test_login(user: &str, token: &str) -> Result<String, String> {
     if user.is_empty() || token.is_empty() {
-        return Err("preencha usuário e token".to_string());
+        return Err(tr!("fill in the username and token", "preencha usuário e token").to_string());
     }
     let resp = agent()
         .get(&format!(
@@ -58,42 +77,28 @@ pub fn test_login(user: &str, token: &str) -> Result<String, String> {
         ))
         .set("User-Agent", USER_AGENT)
         .call()
-        .map_err(|e| format!("rede: {e}"))?;
-    let body: serde_json::Value = resp.into_json().map_err(|e| format!("resposta: {e}"))?;
+        .map_err(net_err)?;
+    let body: serde_json::Value =
+        read_json(resp).map_err(|e| tr!(format!("response: {e}"), format!("resposta: {e}")))?;
     // Failure shapes: {"Success": false} or an error code object; success
     // carries the profile with at least "User".
     if body.get("Success").is_some_and(|s| s == false) {
-        return Err("usuário ou token inválidos".to_string());
+        return Err(tr!("invalid username or token", "usuário ou token inválidos").to_string());
     }
     let Some(name) = body.get("User").and_then(|v| v.as_str()) else {
-        return Err("resposta inesperada".to_string());
+        return Err(tr!("unexpected response", "resposta inesperada").to_string());
     };
     let points = body.get("TotalPoints").and_then(|v| v.as_i64());
     Ok(match points {
-        Some(p) => format!("{name} — {p} pontos"),
+        Some(p) => tr!(
+            format!("{name} — {p} points"),
+            format!("{name} — {p} pontos")
+        ),
         None => name.to_string(),
     })
 }
 
 // ---- fase 2: game identification ------------------------------------
-
-/// The RA ROM hash for a SNES image: MD5 of the file's bytes, skipping the
-/// 512-byte copier header when the size says one is present (`size %
-/// 0x2000 == 512`) — a faithful port of `rc_hash_snes` from rcheevos
-/// (src/rhash/hash_rom.c), which is what the server hashes its registered
-/// ROMs with. `rom` is the raw image (`library::load_rom` already
-/// transparently unzips).
-pub fn snes_ra_hash(rom: &[u8]) -> String {
-    let head = if rom.len() % 0x2000 == 512 {
-        &rom[512..]
-    } else {
-        rom
-    };
-    use md5::Digest;
-    let mut h = md5::Md5::new();
-    h.update(head);
-    h.finalize().iter().map(|b| format!("{b:02x}")).collect()
-}
 
 /// What phase 2 needs to know about a game: its RA title and how many
 /// achievements its set has. The unlock runtime (phase 3) will grow this
@@ -222,19 +227,23 @@ pub fn fetch_game(
     hash: &str,
 ) -> Result<Option<RaGame>, String> {
     if connect.is_empty() {
-        return Err("conecte a conta (senha) em configurações > conquistas".to_string());
+        return Err(tr!(
+            "link the account (password) in settings > achievements",
+            "conecte a conta (senha) em configurações > conquistas"
+        )
+        .to_string());
     }
     let resp = agent()
-        .post(&format!(
-            "{API_BASE}/dorequest.php?r=achievementsets&u={}&t={}&m={}",
-            encode(user),
-            encode(connect),
-            encode(hash)
-        ))
+        .post(&format!("{API_BASE}/dorequest.php"))
         .set("User-Agent", USER_AGENT)
-        .call()
-        .map_err(|e| format!("rede: {e}"))?;
-    let body: serde_json::Value = resp.into_json().map_err(|e| format!("resposta: {e}"))?;
+        .send_form(&[
+            ("r", "achievementsets"),
+            ("u", user),
+            ("t", connect),
+            ("m", hash),
+        ])
+        .map_err(net_err)?;
+    let body: serde_json::Value = read_json(resp).map_err(|e| format!("resposta: {e}"))?;
     if body.get("Success").is_some_and(|s| s == false) {
         let err = body
             .get("Error")
@@ -266,9 +275,14 @@ pub fn fetch_game(
                 .set("User-Agent", USER_AGENT)
                 .call()
             {
-                if let Ok(meta) = meta.into_json::<serde_json::Value>() {
+                if let Ok(meta) = read_json::<serde_json::Value>(meta) {
                     let mut cached: serde_json::Value =
                         serde_json::from_str(&text).unwrap_or_else(|_| body.clone());
+                    // Indexar um Value que não é objeto (array/null de um
+                    // servidor com bug) dá panic — só mescla em objeto.
+                    if !cached.is_object() {
+                        cached = serde_json::json!({});
+                    }
                     cached["Released"] = meta.get("Released").cloned().unwrap_or_default();
                     cached["Publisher"] = meta.get("Publisher").cloned().unwrap_or_default();
                     cached["Developer"] = meta.get("Developer").cloned().unwrap_or_default();
@@ -287,7 +301,7 @@ fn write_cache(hash: &str, text: &str) -> Result<(), String> {
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir).map_err(|e| format!("cache: {e}"))?;
     }
-    std::fs::write(&path, text).map_err(|e| format!("cache: {e}"))
+    polystnx_domain::fsutil::write_atomic(&path, text).map_err(|e| format!("cache: {e}"))
 }
 
 // ---- fase 3: live session -------------------------------------------
@@ -362,6 +376,16 @@ fn points_from_json(a: &serde_json::Value) -> u32 {
     }
 }
 
+/// Assinatura de validação que o `awardachievement` espera (`v`): MD5 de
+/// id da conquista + usuário + flag hardcore ("0"/"1"), concatenados — o
+/// mesmo que o rcheevos manda em `rc_api_init_award_achievement_request`.
+fn award_signature(achievement_id: u32, user: &str, hardcore: bool) -> String {
+    use md5::Digest;
+    let mut h = md5::Md5::new();
+    h.update(format!("{achievement_id}{user}{}", u8::from(hardcore)));
+    h.finalize().iter().map(|b| format!("{b:02x}")).collect()
+}
+
 /// Award one unlocked achievement through the Connect route —
 /// authenticated with the login token (`connect_login`), not the web key.
 /// `hardcore` maps straight to the API's `h` flag. Returns the server
@@ -374,18 +398,22 @@ pub fn award(
     hardcore: bool,
 ) -> Result<String, String> {
     let resp = agent()
-        .post(&format!(
-            "{API_BASE}/dorequest.php?r=awardachievement&u={}&t={}&a={}&h={}&m={}",
-            encode(user),
-            encode(token),
-            achievement_id,
-            if hardcore { "1" } else { "0" },
-            hash
-        ))
+        .post(&format!("{API_BASE}/dorequest.php"))
         .set("User-Agent", USER_AGENT)
-        .call()
-        .map_err(|e| format!("rede: {e}"))?;
-    let body: serde_json::Value = resp.into_json().map_err(|e| format!("resposta: {e}"))?;
+        .send_form(&[
+            ("r", "awardachievement"),
+            ("u", user),
+            ("t", token),
+            ("a", &achievement_id.to_string()),
+            ("h", if hardcore { "1" } else { "0" }),
+            ("m", hash),
+            ("v", &award_signature(achievement_id, user, hardcore)),
+        ])
+        // Qualquer status de erro (401 de token revogado, 429, 5xx) leva o
+        // prefixo `HTTP:` — falha de transporte/credencial, nunca "recusa":
+        // só um 200 com `Success:false` recusa o envio em si.
+        .map_err(|e| format!("HTTP: {}", net_err(e)))?;
+    let body: serde_json::Value = read_json(resp).map_err(|e| format!("resposta: {e}"))?;
     if body.get("Success").is_some_and(|s| s == false) {
         let err = body
             .get("Error")
@@ -399,31 +427,48 @@ pub fn award(
         .unwrap_or_else(|| "ok".into()))
 }
 
+/// A request failure as a message for the settings row / log — WITHOUT
+/// the URL: ureq's own `Display` prints the full request URL, and the web
+/// API routes carry the key in the query string. An HTTP error status
+/// keeps the server's `Error` text when the body has one (a wrong
+/// password comes back as 401 with JSON).
+fn net_err(e: ureq::Error) -> String {
+    match e {
+        ureq::Error::Status(code, resp) => read_json::<serde_json::Value>(resp)
+            .ok()
+            .and_then(|b| b.get("Error").and_then(|v| v.as_str()).map(str::to_string))
+            .unwrap_or_else(|| format!("HTTP {code}")),
+        ureq::Error::Transport(t) => {
+            tr!(
+                format!("network: {}", t.kind()),
+                format!("rede: {}", t.kind())
+            )
+        }
+    }
+}
+
 /// Exchange the account password for a long-lived Connect login token —
 /// what the logic (`achievementsets`) and submission (`awardachievement`)
 /// routes authenticate with. The password itself is never stored.
 pub fn connect_login(user: &str, password: &str) -> Result<String, String> {
     let resp = agent()
-        .post(&format!(
-            "{API_BASE}/dorequest.php?r=login2&u={}&p={}",
-            encode(user),
-            encode(password)
-        ))
+        .post(&format!("{API_BASE}/dorequest.php"))
         .set("User-Agent", USER_AGENT)
-        .call()
-        .map_err(|e| format!("rede: {e}"))?;
-    let body: serde_json::Value = resp.into_json().map_err(|e| format!("resposta: {e}"))?;
+        .send_form(&[("r", "login2"), ("u", user), ("p", password)])
+        .map_err(net_err)?;
+    let body: serde_json::Value =
+        read_json(resp).map_err(|e| tr!(format!("response: {e}"), format!("resposta: {e}")))?;
     if body.get("Success").is_some_and(|s| s == false) {
         let err = body
             .get("Error")
             .and_then(|v| v.as_str())
-            .unwrap_or("login recusado");
+            .unwrap_or(tr!("login refused", "login recusado"));
         return Err(err.to_string());
     }
     body.get("Token")
         .and_then(|v| v.as_str())
         .map(|s| s.to_string())
-        .ok_or_else(|| "resposta sem token".to_string())
+        .ok_or_else(|| tr!("no token in response", "resposta sem token").to_string())
 }
 
 /// Where a game's "already earned" ids live — `retroachievements/ra-earned/<hash>.json`.
@@ -471,7 +516,7 @@ fn save_earned(hash: &str, earned: &EarnedMap) {
         let _ = std::fs::create_dir_all(dir);
     }
     if let Ok(t) = serde_json::to_string(earned) {
-        let _ = std::fs::write(path, t);
+        let _ = polystnx_domain::fsutil::write_atomic(&path, t);
     }
 }
 
@@ -511,6 +556,9 @@ impl Active {
         token: &str,
         hardcore: bool,
     ) -> Result<Option<Active>, String> {
+        // Sessão logada: o que ficou pendente de uma execução anterior
+        // (app fechado no meio do envio, rede fora) vai em segundo plano.
+        resubmit_pending(user, token);
         let hash = hash_rom(path)?;
         let Some(cached) = cached_game(&hash) else {
             return Ok(None);
@@ -605,7 +653,7 @@ impl Active {
             if let Some(dir) = path.parent() {
                 let _ = std::fs::create_dir_all(dir);
             }
-            let _ = std::fs::write(path, blob);
+            let _ = polystnx_domain::fsutil::write_atomic(&path, blob);
         }
     }
 
@@ -648,52 +696,262 @@ impl Active {
         self.earned.values().filter(|&&hardcore| hardcore).count()
     }
 
-    /// Fire-and-forget submit of one unlock (worker thread, 2 retries).
-    /// Persisted failures go to `pending` for a later manual retry.
+    /// Envio de um desbloqueio (worker thread, 3 tentativas). O registro vai
+    /// para `ra-pending.jsonl` ANTES de qualquer rede e só sai de lá quando o
+    /// servidor aceita (ou diz que já tinha): se o app fechar no meio, ou as
+    /// tentativas acabarem, o próximo login reenvia ([`resubmit_pending`]).
     pub fn submit_unlock(&self, unlock: &Unlock) {
-        let (user, token, hash, hardcore) = (
-            self.user.clone(),
-            self.token.clone(),
-            self.hash.clone(),
-            self.hardcore,
-        );
-        let unlock = unlock.clone();
+        let entry = PendingAward {
+            user: self.user.clone(),
+            hash: self.hash.clone(),
+            id: unlock.id,
+            hardcore: self.hardcore,
+            title: unlock.title.clone(),
+            refusals: 0,
+        };
+        let token = self.token.clone();
+        // A pendência vai para o disco AQUI, antes da thread: se o app
+        // fechar logo depois do desbloqueio, a thread pode nem rodar — o
+        // registro já está salvo para o reenvio do próximo login. É uma
+        // escrita pequena e rara (um desbloqueio).
+        let path = pending_path();
+        if let Err(e) = pending_add(&path, &entry) {
+            log::warn!("ra: pendente {} não gravado ({e})", entry.id);
+        }
         std::thread::spawn(move || {
             for attempt in 0..3 {
-                match award(&user, &token, unlock.id, &hash, hardcore) {
+                match award(&entry.user, &token, entry.id, &entry.hash, entry.hardcore) {
                     Ok(msg) => {
                         log::info!(
                             "ra: conquista {} enviada ({msg}, tentativa {})",
-                            unlock.id,
+                            entry.id,
                             attempt + 1
                         );
+                        let _ = pending_remove(&path, &entry);
+                        return;
+                    }
+                    Err(e) if is_already_awarded(&e) => {
+                        log::info!("ra: conquista {} já estava no servidor ({e})", entry.id);
+                        let _ = pending_remove(&path, &entry);
                         return;
                     }
                     Err(e) => {
-                        log::warn!("ra: submit {} falhou ({e})", unlock.id);
+                        log::warn!("ra: submit {} falhou ({e})", entry.id);
                         std::thread::sleep(Duration::from_secs(2));
                     }
                 }
             }
-            // Out of retries: record for a future pass instead of dropping.
-            let path = crate::dirs::retroachievements_dir().join("ra-pending.jsonl");
-            if let Ok(mut f) = std::fs::OpenOptions::new()
-                .create(true)
-                .append(true)
-                .open(path)
-            {
-                use std::io::Write;
-                let _ = writeln!(
-                    f,
-                    "{}\t{}\t{}\t{}",
-                    hash,
-                    unlock.id,
-                    if hardcore { 1 } else { 0 },
-                    unlock.title
-                );
-            }
+            // Sem mais tentativas: o registro fica no pendente para o
+            // reenvio do próximo login.
+            log::warn!("ra: conquista {} fica pendente", entry.id);
         });
     }
+}
+
+// ---- envios pendentes -------------------------------------------------
+
+/// Um desbloqueio ainda não confirmado pelo servidor — uma linha JSON de
+/// `retroachievements/ra-pending.jsonl`, com tudo o que o `award` precisa
+/// (o token não: vem da sessão logada no reenvio).
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+struct PendingAward {
+    /// Vazio nas linhas do formato legado (TSV, sem usuário): reenviadas
+    /// com a conta logada.
+    #[serde(default)]
+    user: String,
+    hash: String,
+    id: u32,
+    hardcore: bool,
+    /// Só para o log / leitura humana do arquivo.
+    #[serde(default)]
+    title: String,
+    /// Quantas vezes o servidor RECUSOU este envio (recusa de verdade, não
+    /// falha de rede): depois de [`MAX_REFUSALS`] ele sai da fila, em vez de
+    /// ser reenviado a cada cartucho inserido para sempre.
+    #[serde(default)]
+    refusals: u32,
+}
+
+/// Recusas do servidor até um pendente ser descartado.
+const MAX_REFUSALS: u32 = 3;
+
+/// Falha que não diz nada sobre o envio (sem rede, servidor fora, resposta
+/// ilegível) — o pendente fica para a próxima, sem contar recusa.
+fn is_transient_failure(err: &str) -> bool {
+    err.starts_with("HTTP")
+        || err.starts_with("rede:")
+        || err.starts_with("network:")
+        || err.starts_with("resposta:")
+        || err.starts_with("HTTP 5")
+        || err.starts_with("HTTP 429")
+}
+
+/// Conta uma recusa do servidor; na [`MAX_REFUSALS`]ª, tira da fila.
+fn pending_refused(path: &std::path::Path, entry: &PendingAward) -> std::io::Result<()> {
+    mutate_pending(path, |all| {
+        for e in all.iter_mut().filter(|e| e.same_award(entry)) {
+            e.refusals += 1;
+        }
+        all.retain(|e| {
+            let keep = e.refusals < MAX_REFUSALS;
+            if !keep {
+                log::warn!(
+                    "ra: conquista {} recusada {} vezes — descartada",
+                    e.id,
+                    e.refusals
+                );
+            }
+            keep
+        });
+    })
+}
+
+impl PendingAward {
+    /// Mesmo envio = mesmo usuário, jogo, conquista e modo (o título não
+    /// conta).
+    fn same_award(&self, other: &PendingAward) -> bool {
+        self.user == other.user
+            && self.hash == other.hash
+            && self.id == other.id
+            && self.hardcore == other.hardcore
+    }
+}
+
+fn pending_path() -> std::path::PathBuf {
+    crate::dirs::retroachievements_dir().join("ra-pending.jsonl")
+}
+
+/// Serializa toda mutação do arquivo de pendentes: o worker de cada
+/// desbloqueio e o reenvio do login fazem read-modify-write no mesmo
+/// arquivo, e sem a trava um sobrescreveria o que o outro acabou de pôr.
+static PENDING_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+/// Uma linha do arquivo: JSON (formato atual) ou o TSV legado
+/// `hash\tid\thardcore\ttítulo`. Linha inválida = `None` (ignorada).
+fn parse_pending_line(line: &str) -> Option<PendingAward> {
+    let line = line.trim();
+    if line.is_empty() {
+        return None;
+    }
+    if line.starts_with('{') {
+        return serde_json::from_str(line).ok();
+    }
+    let mut parts = line.splitn(4, '\t');
+    let hash = parts.next()?.to_string();
+    let id = parts.next()?.parse().ok()?;
+    let hardcore = match parts.next()? {
+        "1" => true,
+        "0" => false,
+        _ => return None,
+    };
+    let title = parts.next().unwrap_or_default().to_string();
+    (!hash.is_empty()).then_some(PendingAward {
+        user: String::new(),
+        hash,
+        id,
+        hardcore,
+        title,
+        refusals: 0,
+    })
+}
+
+/// Os pendentes do arquivo, na ordem; linhas inválidas são puladas.
+fn read_pending(path: &std::path::Path) -> Vec<PendingAward> {
+    std::fs::read_to_string(path)
+        .unwrap_or_default()
+        .lines()
+        .filter_map(parse_pending_line)
+        .collect()
+}
+
+/// O único caminho que muda o arquivo: trava, lê, aplica `f`, regrava
+/// atômico (só quando algo mudou). Linhas inválidas somem na regravação.
+fn mutate_pending(
+    path: &std::path::Path,
+    f: impl FnOnce(&mut Vec<PendingAward>),
+) -> std::io::Result<()> {
+    let _guard = PENDING_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let before = read_pending(path);
+    let mut entries = before.clone();
+    f(&mut entries);
+    if entries == before {
+        return Ok(());
+    }
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir)?;
+    }
+    let mut text = String::new();
+    for e in &entries {
+        if let Ok(line) = serde_json::to_string(e) {
+            text.push_str(&line);
+            text.push('\n');
+        }
+    }
+    polystnx_domain::fsutil::write_atomic(path, text)
+}
+
+/// Põe um envio no pendente (sem duplicar o mesmo envio).
+fn pending_add(path: &std::path::Path, entry: &PendingAward) -> std::io::Result<()> {
+    mutate_pending(path, |all| {
+        if !all.iter().any(|e| e.same_award(entry)) {
+            all.push(entry.clone());
+        }
+    })
+}
+
+/// Tira um envio confirmado do pendente (todas as cópias dele).
+fn pending_remove(path: &std::path::Path, entry: &PendingAward) -> std::io::Result<()> {
+    mutate_pending(path, |all| all.retain(|e| !e.same_award(entry)))
+}
+
+/// O servidor recusou porque o usuário já tem a conquista ("User already
+/// has this achievement unlocked…") — para o pendente vale como sucesso.
+fn is_already_awarded(err: &str) -> bool {
+    err.to_ascii_lowercase().contains("already")
+}
+
+/// Um reenvio por vez no processo (cada cartucho inserido chama).
+static RESUBMIT_RUNNING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Reenvia em segundo plano os pendentes do usuário logado (e os legados
+/// sem usuário), tirando do arquivo os que o servidor aceitar ou já tiver.
+/// Não bloqueia: worker thread, mesmo agent/timeouts do `award`.
+pub fn resubmit_pending(user: &str, token: &str) {
+    use std::sync::atomic::Ordering;
+    if user.is_empty() || token.is_empty() {
+        return;
+    }
+    if RESUBMIT_RUNNING.swap(true, Ordering::AcqRel) {
+        return;
+    }
+    let (user, token) = (user.to_string(), token.to_string());
+    std::thread::spawn(move || {
+        let path = pending_path();
+        let todo: Vec<PendingAward> = read_pending(&path)
+            .into_iter()
+            .filter(|e| e.user.is_empty() || e.user == user)
+            .collect();
+        let mut sent = 0usize;
+        for entry in &todo {
+            match award(&user, &token, entry.id, &entry.hash, entry.hardcore) {
+                Ok(_) => {}
+                Err(e) if is_already_awarded(&e) => {}
+                Err(e) => {
+                    log::info!("ra: pendente {} segue pendente ({e})", entry.id);
+                    if !is_transient_failure(&e) {
+                        let _ = pending_refused(&path, entry);
+                    }
+                    continue;
+                }
+            }
+            let _ = pending_remove(&path, entry);
+            sent += 1;
+        }
+        if sent > 0 {
+            log::info!("ra: {sent} conquista(s) pendente(s) reenviada(s)");
+        }
+        RESUBMIT_RUNNING.store(false, Ordering::Release);
+    });
 }
 
 // ---- shelf view (fase 2/4) -------------------------------------------
@@ -825,10 +1083,14 @@ impl Award {
     /// "mostre se foi zerado e/ou mastered junto com as infos do game").
     pub fn label(&self) -> &'static str {
         match self {
-            Award::Beaten { hardcore: true } => "zerado (hardcore)",
-            Award::Beaten { hardcore: false } => "zerado (softcore)",
-            Award::Completed { hardcore: true } => "completado (hardcore)",
-            Award::Completed { hardcore: false } => "completado (softcore)",
+            Award::Beaten { hardcore: true } => tr!("beaten (hardcore)", "zerado (hardcore)"),
+            Award::Beaten { hardcore: false } => tr!("beaten (softcore)", "zerado (softcore)"),
+            Award::Completed { hardcore: true } => {
+                tr!("completed (hardcore)", "completado (hardcore)")
+            }
+            Award::Completed { hardcore: false } => {
+                tr!("completed (softcore)", "completado (softcore)")
+            }
             Award::Mastered => "mastered",
         }
     }
@@ -936,8 +1198,8 @@ pub fn fetch_completion(
             ))
             .set("User-Agent", USER_AGENT)
             .call()
-            .map_err(|e| format!("rede: {e}"))?;
-        let body: serde_json::Value = resp.into_json().map_err(|e| format!("resposta: {e}"))?;
+            .map_err(net_err)?;
+        let body: serde_json::Value = read_json(resp).map_err(|e| format!("resposta: {e}"))?;
         let total = body.get("Total").and_then(|v| v.as_u64()).unwrap_or(0);
         let results = body
             .get("Results")
@@ -1013,7 +1275,10 @@ pub fn release_and_extras(hash: &str) -> (Option<String>, Vec<(String, String)>)
         .and_then(|v| v.as_str())
         .filter(|s| !s.is_empty())
     {
-        extras.push(("editora".to_string(), publisher.to_string()));
+        extras.push((
+            tr!("publisher", "editora").to_string(),
+            publisher.to_string(),
+        ));
     }
     if let Some(developer) = body
         .get("Developer")
@@ -1021,14 +1286,17 @@ pub fn release_and_extras(hash: &str) -> (Option<String>, Vec<(String, String)>)
         .filter(|s| !s.is_empty())
         .filter(|d| Some(*d) != body.get("Publisher").and_then(|v| v.as_str()))
     {
-        extras.push(("desenvolvedor".to_string(), developer.to_string()));
+        extras.push((
+            tr!("developer", "desenvolvedor").to_string(),
+            developer.to_string(),
+        ));
     }
     if let Some(genre) = body
         .get("Genre")
         .and_then(|v| v.as_str())
         .filter(|s| !s.is_empty())
     {
-        extras.push(("gênero".to_string(), genre.to_string()));
+        extras.push((tr!("genre", "gênero").to_string(), genre.to_string()));
     }
     (release, extras)
 }
@@ -1088,15 +1356,15 @@ pub fn fetch_game_earned(user: &str, token: &str, game_id: u64) -> Result<Earned
         ))
         .set("User-Agent", USER_AGENT)
         .call()
-        .map_err(|e| format!("rede: {e}"))?;
-    let body: serde_json::Value = resp.into_json().map_err(|e| format!("resposta: {e}"))?;
+        .map_err(net_err)?;
+    let body: serde_json::Value = read_json(resp).map_err(|e| format!("resposta: {e}"))?;
     let earned = earned_map_from_json(&body);
     let path = earned_ids_path(game_id);
     if let Some(dir) = path.parent() {
         let _ = std::fs::create_dir_all(dir);
     }
     if let Ok(t) = serde_json::to_string(&earned) {
-        let _ = std::fs::write(path, t);
+        let _ = polystnx_domain::fsutil::write_atomic(&path, t);
     }
     Ok(earned)
 }
@@ -1160,8 +1428,28 @@ pub fn fetch_game_earned_worker(
 
 // ---- badges ----------------------------------------------------------
 
+/// Nome de badge como veio do servidor, reduzido ao conjunto inofensivo
+/// `[A-Za-z0-9_.-]` — o `BadgeName` do RetroAchievements alimenta tanto a
+/// URL quanto o nome de arquivo do cache, e um valor hostil (`../..`)
+/// não pode escapar do diretório de badges.
+fn sanitize_badge_name(name: &str) -> Option<String> {
+    let clean: String = name
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '_' || c == '-' || c == '.' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    let clean = clean.replace("..", "_");
+    (!clean.is_empty()).then_some(clean)
+}
+
 /// Where a downloaded badge lives — `retroachievements/ra-cache/badges/<name>.png`.
 pub fn badge_path(name: &str) -> Option<std::path::PathBuf> {
+    let name = sanitize_badge_name(name)?;
     let p = crate::dirs::retroachievements_dir()
         .join("ra-cache")
         .join("badges")
@@ -1177,19 +1465,31 @@ pub fn download_badge(name: &str) -> Option<std::path::PathBuf> {
     if let Some(p) = badge_path(name) {
         return Some(p);
     }
+    // O nome vem do servidor: sanitizado já para a URL, não só para o
+    // arquivo do cache.
+    let name = sanitize_badge_name(name)?;
     let resp = agent()
         .get(&format!("{API_BASE}/Badge/{name}.png"))
         .set("User-Agent", USER_AGENT)
         .call()
         .ok()?;
+    // Badges são PNGs de poucos KB — um corpo gigante é coisa errada.
     let mut bytes = Vec::new();
-    resp.into_reader().read_to_end(&mut bytes).ok()?;
+    resp.into_reader()
+        .take(2 * 1024 * 1024)
+        .read_to_end(&mut bytes)
+        .ok()?;
+    // Um badge que declara dimensões absurdas nem entra no cache.
+    if !crate::imgutil::fits(&bytes, crate::imgutil::BADGE_MAX_SIDE) {
+        log::warn!("ra: badge {name} recusado (não é uma imagem de até 512 px)");
+        return None;
+    }
     let dir = crate::dirs::retroachievements_dir()
         .join("ra-cache")
         .join("badges");
     std::fs::create_dir_all(&dir).ok()?;
     let path = dir.join(format!("{name}.png"));
-    std::fs::write(&path, &bytes).ok()?;
+    polystnx_domain::fsutil::write_atomic(&path, &bytes).ok()?;
     Some(path)
 }
 
@@ -1230,6 +1530,114 @@ pub fn prefetch_badges(rom_path: &std::path::Path) {
 mod tests {
     use super::*;
 
+    fn pending_entry(id: u32, hardcore: bool) -> PendingAward {
+        PendingAward {
+            user: "UserA".into(),
+            hash: "abc123".into(),
+            id,
+            hardcore,
+            title: format!("Conquista {id}"),
+            refusals: 0,
+        }
+    }
+
+    fn pending_tmp(nome: &str) -> std::path::PathBuf {
+        let dir =
+            std::env::temp_dir().join(format!("polystnx-ra-pending-{nome}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        dir.join("ra-pending.jsonl")
+    }
+
+    #[test]
+    fn refused_pending_is_dropped_after_max_refusals() {
+        let path = pending_tmp("refused");
+        let a = pending_entry(9, false);
+        pending_add(&path, &a).unwrap();
+        for _ in 1..MAX_REFUSALS {
+            pending_refused(&path, &a).unwrap();
+            assert_eq!(read_pending(&path).len(), 1, "ainda na fila");
+        }
+        pending_refused(&path, &a).unwrap();
+        assert!(read_pending(&path).is_empty(), "recusado demais: sai");
+        assert!(is_transient_failure("rede: Dns"));
+        assert!(is_transient_failure("HTTP 503"));
+        assert!(!is_transient_failure("Unknown achievement"));
+        // Token revogado: 401 com JSON — credencial, não recusa do envio.
+        assert!(is_transient_failure(
+            "HTTP: Invalid user/token combination."
+        ));
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn pending_add_remove_round_trip() {
+        let path = pending_tmp("roundtrip");
+        let (a, b) = (pending_entry(1, false), pending_entry(2, true));
+        pending_add(&path, &a).unwrap();
+        pending_add(&path, &b).unwrap();
+        // O mesmo envio não duplica; outro modo é outro envio.
+        pending_add(&path, &a).unwrap();
+        let hc = pending_entry(1, true);
+        pending_add(&path, &hc).unwrap();
+        assert_eq!(read_pending(&path), vec![a.clone(), b.clone(), hc.clone()]);
+
+        pending_remove(&path, &a).unwrap();
+        assert_eq!(read_pending(&path), vec![b.clone(), hc.clone()]);
+        pending_remove(&path, &b).unwrap();
+        pending_remove(&path, &hc).unwrap();
+        assert!(read_pending(&path).is_empty());
+        // Remover o que não está lá não falha.
+        pending_remove(&path, &a).unwrap();
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[test]
+    fn pending_skips_malformed_lines_and_reads_legacy_tsv() {
+        let path = pending_tmp("malformed");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        let good = pending_entry(7, true);
+        let text = format!(
+            "{}\nlixo\n{{\"hash\": 1}}\n\nabc123\tnão-número\t1\tx\nfff\t42\t0\tLegada\twith tab\n",
+            serde_json::to_string(&good).unwrap()
+        );
+        std::fs::write(&path, text).unwrap();
+        let legacy = PendingAward {
+            user: String::new(),
+            hash: "fff".into(),
+            id: 42,
+            hardcore: false,
+            title: "Legada\twith tab".into(),
+            refusals: 0,
+        };
+        assert_eq!(read_pending(&path), vec![good.clone(), legacy.clone()]);
+
+        // A regravação mantém só as válidas, já no formato JSON.
+        pending_remove(&path, &good).unwrap();
+        let raw = std::fs::read_to_string(&path).unwrap();
+        assert_eq!(raw.lines().count(), 1);
+        assert!(raw.starts_with('{'));
+        assert_eq!(read_pending(&path), vec![legacy]);
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[test]
+    fn already_awarded_counts_as_success() {
+        assert!(is_already_awarded(
+            "User already has this achievement unlocked in hardcore mode."
+        ));
+        assert!(!is_already_awarded("Invalid token"));
+    }
+
+    #[test]
+    fn award_signature_is_md5_of_id_user_hardcore() {
+        // md5("1234UserA1")
+        assert_eq!(award_signature(1234, "UserA", true).len(), 32);
+        assert_ne!(
+            award_signature(1234, "UserA", true),
+            award_signature(1234, "UserA", false)
+        );
+    }
+
     #[test]
     fn encode_leaves_safe_chars_and_escapes_the_rest() {
         assert_eq!(encode("user.name-1_~"), "user.name-1_~");
@@ -1240,26 +1648,6 @@ mod tests {
     fn empty_credentials_fail_before_any_network() {
         assert!(test_login("", "token").is_err());
         assert!(test_login("user", "").is_err());
-    }
-
-    #[test]
-    fn snes_hash_strips_copier_header() {
-        // A 0x2000-multiple image with a 512-byte copier header hashes the
-        // same as the headerless image; one without any header is hashed
-        // as-is.
-        let rom = vec![0xABu8; 0x4000];
-        let headered = {
-            let mut v = vec![0u8; 512];
-            v.extend_from_slice(&rom);
-            v
-        };
-        assert_eq!(snes_ra_hash(&headered), snes_ra_hash(&rom));
-        assert_ne!(snes_ra_hash(&rom), snes_ra_hash(&vec![0xAB; 0x4001]));
-        // Known-answer: an all-zero 32 KiB image, no header.
-        assert_eq!(
-            snes_ra_hash(&vec![0u8; 0x8000]),
-            "bb7df04e1b0a2570657527a7e108ae23"
-        );
     }
 
     #[test]

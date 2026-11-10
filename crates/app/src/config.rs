@@ -24,12 +24,15 @@ pub struct Config {
     /// a one-time notice on the idle screen; a network failure just means no
     /// notice, never an error.
     pub check_updates_on_start: bool,
-    /// Sobra do tempo do RF — o PSX é AV, a tela sem sinal é muda. O valor
-    /// ainda é lido de configs antigas (sem efeito) e nunca mais escrito.
-    #[allow(dead_code)]
-    pub hiss_on_static: bool,
     /// Silencia o áudio do jogo (só o som de ambiente do leitor toca).
     pub mute_game: bool,
+    /// Cheater Fish: ao ligar o console com um disco que tem cheats, mostra
+    /// primeiro a tela de cheats (estilo GameShark) antes do jogo.
+    pub cheater_fish: bool,
+    /// Volume da TV, 0..=16 (os botões VOL- / VOL+ do queixo).
+    pub tv_volume: u8,
+    /// Menu de imagem da TV: brilho, contraste, cor e nitidez (0..=100).
+    pub tv_picture: [u8; 4],
     /// LEGADO: o suporte ao CONTROLE 2 saiu do painel (plan revision,
     /// "no momento") — o campo morre na leitura, sem efeito.
     /// A BIOS padrão (nome do arquivo em `bios/`); `None` = o core varre a
@@ -60,7 +63,7 @@ pub struct Config {
     pub ra_connect: Option<String>,
     pub keymap: KeyMap,
     /// Gamepad-button layout (`[gamepad]`): which SDL gamepad button drives
-    /// each SNES button. Rebindable in the settings screen alongside the
+    /// each PS1 button. Rebindable in the settings screen alongside the
     /// keyboard — clones and native-driver paths can land a press in the
     /// wrong slot, so the layout is the user's to fix.
     pub padmap: PadMap,
@@ -75,9 +78,13 @@ struct Raw {
     fullscreen: Option<bool>,
     #[serde(default)]
     check_updates_on_start: Option<bool>,
-    #[serde(default)]
-    hiss_on_static: Option<bool>,
     mute_game: Option<bool>,
+    #[serde(default)]
+    cheater_fish: Option<bool>,
+    #[serde(default)]
+    tv_volume: Option<u8>,
+    #[serde(default)]
+    tv_picture: Option<[u8; 4]>,
     card_slot1: Option<String>,
     card_slot2: Option<String>,
     bios_default: Option<String>,
@@ -104,7 +111,13 @@ impl Config {
                 None => (Some(crate::dirs::config_path()), false),
             },
         };
+        Self::load_at(path, required)
+    }
 
+    /// O miolo do [`Config::load`]: `required` = o caminho veio do jogador
+    /// (`--config`/`PSX_XPERIENCE_CONFIG`) e um erro nele é erro; o padrão
+    /// se recupera sozinho.
+    fn load_at(path: Option<PathBuf>, required: bool) -> Result<Self> {
         let mut cfg = Config {
             // Estados de PSX são grandes (MB) e o core é pesado — o
             // run-ahead de PSX nasce desligado (plano §3.1); medição na
@@ -114,8 +127,10 @@ impl Config {
             // settings screen's own toggle still turns it off from there.
             fullscreen: true,
             check_updates_on_start: true,
-            hiss_on_static: false,
             mute_game: false,
+            cheater_fish: true,
+            tv_volume: 16,
+            tv_picture: [50; 4],
             card_slot1: None,
             card_slot2: None,
             bios_default: None,
@@ -132,17 +147,45 @@ impl Config {
             return Ok(cfg);
         };
 
-        match std::fs::read_to_string(&path) {
-            Ok(text) => {
-                let raw: Raw =
-                    toml::from_str(&text).with_context(|| format!("parsing {}", path.display()))?;
-                cfg.apply(raw)?;
+        // `fs::read` + UTF-8 à parte: um arquivo com bytes inválidos vira erro
+        // de conteúdo (vai para `.bad` abaixo), não de leitura.
+        match std::fs::read(&path) {
+            Ok(bytes) => {
+                tighten_permissions(&path);
+                let parsed = String::from_utf8(bytes)
+                    .map_err(|_| anyhow::anyhow!("{}: não é UTF-8 válido", path.display()))
+                    .and_then(|text| parse_raw(&text, &path))
+                    .and_then(|raw| cfg.apply(raw));
+                if let Err(e) = parsed {
+                    if required {
+                        return Err(e);
+                    }
+                    // O cfg padrão (editado à mão e quebrado) não pode impedir o
+                    // app de abrir: vai para `.bad` — guardado, não apagado —
+                    // e o app sobe com os padrões gravados de novo.
+                    let bad = path.with_extension("cfg.bad");
+                    log::error!(
+                        "{e:#} — o arquivo vai para {} e o app segue com os padrões",
+                        bad.display()
+                    );
+                    std::fs::rename(&path, &bad)
+                        .with_context(|| format!("renomeando {}", path.display()))?;
+                    // O `.bad` leva o token do RA: um cfg editado à mão costuma
+                    // voltar 0644 do editor, e o rename preserva o modo.
+                    #[cfg(unix)]
+                    {
+                        use std::os::unix::fs::PermissionsExt;
+                        let _ =
+                            std::fs::set_permissions(&bad, std::fs::Permissions::from_mode(0o600));
+                    }
+                    return Self::load_at(Some(path), required);
+                }
             }
             Err(e) if e.kind() == std::io::ErrorKind::NotFound && !required => {
                 if let Some(dir) = path.parent() {
                     let _ = std::fs::create_dir_all(dir);
                 }
-                let _ = std::fs::write(&path, cfg.to_toml());
+                let _ = write_config_private(&path, &cfg.to_toml());
             }
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
                 bail!("config not found: {}", path.display());
@@ -161,8 +204,14 @@ impl Config {
         if let Some(c) = raw.check_updates_on_start {
             self.check_updates_on_start = c;
         }
-        if let Some(h) = raw.hiss_on_static {
-            self.hiss_on_static = h;
+        if let Some(v) = raw.tv_volume {
+            self.tv_volume = v.min(16);
+        }
+        if let Some(p) = raw.tv_picture {
+            self.tv_picture = p.map(|v| v.min(100));
+        }
+        if let Some(c) = raw.cheater_fish {
+            self.cheater_fish = c;
         }
         if let Some(m) = raw.mute_game {
             self.mute_game = m;
@@ -201,10 +250,11 @@ impl Config {
                 log::warn!("[keyboard] {action}: not a bindable action any more, ignoring");
                 continue;
             };
-            self.keymap
-                .bind_pad(key, b)
-                .map_err(anyhow::Error::msg)
-                .with_context(|| format!("[keyboard] {action}"))?;
+            // Uma tecla inválida perde só ela — não o arquivo inteiro (que
+            // levaria junto o login do RA e os mapas dos controles).
+            if let Err(e) = self.keymap.bind_pad(key, b) {
+                log::warn!("[keyboard] {action}: {e} — ignorado");
+            }
         }
         for (action, button) in &raw.gamepad {
             let Ok(b) = action.parse::<PadButton>() else {
@@ -217,10 +267,9 @@ impl Config {
                 // other action's bind dropping the default).
                 continue;
             }
-            self.padmap
-                .bind(button, b)
-                .map_err(anyhow::Error::msg)
-                .with_context(|| format!("[gamepad] {action}"))?;
+            if let Err(e) = self.padmap.bind(button, b) {
+                log::warn!("[gamepad] {action}: {e} — ignorado");
+            }
         }
         Ok(())
     }
@@ -257,6 +306,14 @@ impl Config {
             "# mute_game: silencia o áudio do jogo (fica só o som ambiente do leitor).\nmute_game = {}\n\n",
             self.mute_game
         ));
+        s.push_str(&format!(
+            "# cheater_fish: ao ligar o console, a tela de cheats (estilo GameShark) antes do jogo.\ncheater_fish = {}\n\n",
+            self.cheater_fish
+        ));
+        s.push_str(&format!(
+            "# TV: volume 0..16 e imagem [brilho, contraste, cor, nitidez] 0..100 (50 = neutro).\ntv_volume = {}\ntv_picture = {:?}\n\n",
+            self.tv_volume, self.tv_picture
+        ));
         if let Some(b) = &self.bios_default {
             s.push_str(&format!(
                 "# bios_default: a BIOS ativa (os arquivos ficam em bios/).\nbios_default = \"{}\"\n\n",
@@ -291,8 +348,62 @@ impl Config {
         if let Some(dir) = path.parent() {
             std::fs::create_dir_all(dir).with_context(|| format!("creating {}", dir.display()))?;
         }
-        std::fs::write(path, self.to_toml()).with_context(|| format!("writing {}", path.display()))
+        write_config_private(path, &self.to_toml())
+            .with_context(|| format!("writing {}", path.display()))
     }
+}
+
+/// Grava o config com permissão 0600 no Unix — ele carrega os tokens do
+/// RetroAchievements — e de forma atômica (tmp + rename): um travamento no
+/// meio não deixa o cfg pela metade.
+/// O cfg guarda o token do RA: legível por outros usuários (0644 de um
+/// editor de texto, ou de uma migração por rename, que preserva o modo),
+/// volta para 0600 já na leitura — não só na próxima gravação.
+fn tighten_permissions(path: &std::path::Path) {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        if let Ok(meta) = std::fs::metadata(path) {
+            if meta.permissions().mode() & 0o077 != 0 {
+                let _ = std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600));
+            }
+        }
+    }
+    #[cfg(not(unix))]
+    let _ = path;
+}
+
+/// O TOML do cfg, com um erro que diz só ONDE quebrou (linha/coluna e a
+/// mensagem do parser) — o `Display` do `toml` cita o trecho do arquivo, e
+/// a linha quebrada pode ser a do `ra_token`, que iria parar no log.
+fn parse_raw(text: &str, path: &std::path::Path) -> Result<Raw> {
+    toml::from_str::<Raw>(text).map_err(|e| {
+        let (line, col) = e
+            .span()
+            .map(|span| {
+                let before = &text[..span.start.min(text.len())];
+                let line = before.matches('\n').count() + 1;
+                let col = before.rsplit('\n').next().map_or(0, |l| l.chars().count()) + 1;
+                (line, col)
+            })
+            .unwrap_or((0, 0));
+        // Erro de tipo/valor do serde cita o VALOR ("invalid type: integer
+        // `123…`") — que pode ser um token sem aspas. Só o tipo do erro.
+        let msg = e.message();
+        let msg = if msg.starts_with("invalid type") || msg.starts_with("invalid value") {
+            "valor de tipo inválido"
+        } else {
+            msg
+        };
+        anyhow::anyhow!(
+            "parsing {}: linha {line}, coluna {col}: {msg}",
+            path.display()
+        )
+    })
+}
+
+pub(crate) fn write_config_private(path: &std::path::Path, contents: &str) -> std::io::Result<()> {
+    polystnx_domain::fsutil::write_atomic_private(path, contents)
 }
 
 #[cfg(test)]
@@ -303,8 +414,10 @@ mod tests {
         Config {
             fullscreen: false,
             check_updates_on_start: true,
-            hiss_on_static: false,
             mute_game: false,
+            cheater_fish: true,
+            tv_volume: 16,
+            tv_picture: [50; 4],
             card_slot1: None,
             card_slot2: None,
             bios_default: None,
@@ -316,6 +429,33 @@ mod tests {
             padmap: PadMap::defaults(),
             source: None,
         }
+    }
+
+    #[test]
+    fn cheater_fish_defaults_on_and_round_trips() {
+        let mut cfg = defaults();
+        assert!(cfg.cheater_fish);
+        cfg.apply(toml::from_str("cheater_fish = false").unwrap())
+            .unwrap();
+        assert!(!cfg.cheater_fish);
+        let raw: Raw = toml::from_str(&cfg.to_toml()).unwrap();
+        let mut round = defaults();
+        round.apply(raw).unwrap();
+        assert!(!round.cheater_fish);
+    }
+
+    #[test]
+    fn tv_settings_round_trip_and_clamp() {
+        let mut cfg = defaults();
+        assert_eq!((cfg.tv_volume, cfg.tv_picture), (16, [50; 4]));
+        cfg.apply(toml::from_str("tv_volume = 99\ntv_picture = [10, 200, 50, 70]").unwrap())
+            .unwrap();
+        assert_eq!(cfg.tv_volume, 16, "volume tem teto");
+        assert_eq!(cfg.tv_picture, [10, 100, 50, 70], "imagem tem teto");
+        let raw: Raw = toml::from_str(&cfg.to_toml()).unwrap();
+        let mut round = defaults();
+        round.apply(raw).unwrap();
+        assert_eq!(round.tv_picture, cfg.tv_picture);
     }
 
     #[test]
@@ -413,9 +553,79 @@ mod tests {
     }
 
     #[test]
-    fn unknown_gamepad_button_is_an_error() {
+    fn unknown_gamepad_button_is_skipped_not_fatal() {
         let mut cfg = defaults();
+        let before = cfg.padmap.describe();
         let raw: Raw = toml::from_str("[gamepad]\nb = \"not_a_button\"").unwrap();
-        assert!(cfg.apply(raw).is_err());
+        assert!(cfg.apply(raw).is_ok(), "uma tecla ruim não derruba o cfg");
+        assert_eq!(cfg.padmap.describe(), before, "e o mapa fica como estava");
+    }
+
+    #[test]
+    fn toml_errors_do_not_quote_the_file() {
+        let text = "ra_user = \"x\"\nra_token = \"segredo123\" lixo\n";
+        let e = parse_raw(text, std::path::Path::new("polystnx.cfg"))
+            .err()
+            .expect("tinha de falhar");
+        let msg = format!("{e:#}");
+        assert!(!msg.contains("segredo123"), "{msg}");
+        assert!(msg.contains("linha 2"), "{msg}");
+        // Token sem aspas, só números: erro de tipo — o valor não aparece.
+        let e = parse_raw(
+            "ra_token = 98765432\n",
+            std::path::Path::new("polystnx.cfg"),
+        )
+        .err()
+        .expect("tipo errado");
+        assert!(!format!("{e:#}").contains("98765432"), "{e:#}");
+    }
+
+    #[test]
+    fn invalid_utf8_default_cfg_moves_aside() {
+        let dir = std::env::temp_dir().join(format!("polystnx-cfg-utf8-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("polystnx.cfg");
+        std::fs::write(&path, [0xff, 0xfe, b'x']).unwrap();
+        assert!(Config::load_at(Some(path.clone()), false).is_ok());
+        assert!(dir.join("polystnx.cfg.bad").exists());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn broken_default_cfg_moves_aside_and_loads_defaults() {
+        let dir = std::env::temp_dir().join(format!("polystnx-cfg-bad-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("polystnx.cfg");
+        std::fs::write(&path, "isto [não é toml").unwrap();
+
+        let cfg = Config::load_at(Some(path.clone()), false).unwrap();
+        assert!(cfg.fullscreen, "padrões de volta");
+        let bad = dir.join("polystnx.cfg.bad");
+        assert_eq!(std::fs::read_to_string(&bad).unwrap(), "isto [não é toml");
+        assert!(path.exists(), "um cfg padrão novo foi gravado");
+
+        // Explícito: o erro continua sendo erro, e nada sai do lugar.
+        std::fs::write(&path, "isto [não é toml").unwrap();
+        assert!(Config::load_at(Some(path.clone()), true).is_err());
+        assert!(path.exists());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn readable_cfg_is_tightened_on_load() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = std::env::temp_dir().join(format!("polystnx-cfg-perm-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("polystnx.cfg");
+        std::fs::write(&path, "fullscreen = false\n").unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
+        Config::load_at(Some(path.clone()), false).unwrap();
+        let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

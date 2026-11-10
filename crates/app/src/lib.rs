@@ -14,6 +14,7 @@
 //! - [`update_check`] — startup checks for a newer release/PCSX Rearmed core.
 
 pub mod bios;
+pub mod cheater_fish;
 pub mod config;
 pub mod console_art;
 pub mod core_update;
@@ -21,8 +22,10 @@ pub mod dat_update;
 pub mod devmenu;
 pub mod dirs;
 pub mod idle;
+pub mod imgutil;
 pub mod manual;
 pub mod memcard;
+pub mod psx_gpu;
 pub mod ra;
 pub mod rom_rename;
 pub mod runner;

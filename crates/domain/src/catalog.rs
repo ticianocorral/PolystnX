@@ -296,7 +296,7 @@ impl Catalog {
             path: self.store_path.display().to_string(),
             source,
         })?;
-        std::fs::write(&self.store_path, text).map_err(|source| CatalogError::Io {
+        crate::fsutil::write_atomic(&self.store_path, text).map_err(|source| CatalogError::Io {
             path: self.store_path.display().to_string(),
             source,
         })
@@ -313,7 +313,17 @@ fn load_store(path: &Path) -> Result<HashMap<String, Persisted>> {
         path: path.display().to_string(),
         source,
     })?;
-    Ok(serde_json::from_str(&text).unwrap_or_default())
+    match serde_json::from_str(&text) {
+        Ok(store) => Ok(store),
+        Err(e) => {
+            // Corrompido: guardado ao lado (não apagado) antes que o próximo
+            // `save()` grave um mapa vazio por cima dos favoritos/contagens.
+            let bad = path.with_extension("json.bad");
+            log::warn!("{}: {e} — vai para {}", path.display(), bad.display());
+            let _ = std::fs::rename(path, &bad);
+            Ok(HashMap::new())
+        }
+    }
 }
 
 #[cfg(test)]

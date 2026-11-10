@@ -22,10 +22,16 @@ finish-args:
   - --socket=fallback-x11
   - --socket=wayland
   # Áudio
+  - --socket=pulseaudio
+  # Rede: download do núcleo, RetroAchievements e DAT (o self-update fica
+  # desligado dentro do Flatpak — quem atualiza é o Flatpak).
+  - --share=network
+  # Controles (SDL lê /dev/input e hidraw — não existe --device=udev)
   - --device=all
   # GPU (o tubo CRT renderiza via GPU)
   - --device=dri
-  # A pasta de dados vive em ~/Documents/PolystnX (roms/bios/saves/cards)
+  # A raiz de dados é XDG_DATA_HOME/PolystnX (remapeado pelo Flatpak); o
+  # acesso à home serve para ler discos (.chd, de GBs) de qualquer pasta.
   - --filesystem=home
 modules:
   - name: polystnx

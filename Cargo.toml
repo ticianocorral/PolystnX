@@ -10,7 +10,7 @@ members = [
 ]
 
 [workspace.package]
-version = "1.3.12-beta"
+version = "1.4.0-beta"
 edition = "2021"
 license = "MIT"
 repository = "https://github.com/ticianocorral/polystnx"
@@ -29,6 +29,7 @@ crc32fast = "1.4"
 md-5 = "0.10"
 polystnx-ra = { path = "crates/ra" }
 sha1 = "0.10"
+sha2 = "0.10"
 hex = "0.4"
 
 # Build the whole workspace with optimisation even in dev: the emulator loop

@@ -68,16 +68,33 @@ fn try_download(dest: &Path, tx: &Sender<CoreUpdateMsg>) -> Result<(), String> {
     let mut reader = resp.into_reader();
     let mut bytes = Vec::new();
     let mut buf = [0u8; 64 * 1024];
+    // O DAT de PS1 tem poucos MB; 64 MB de teto é folga para o arquivo
+    // crescer sem virar um balde de RAM/disco na mão de um servidor ruim.
+    const MAX_DAT_DOWNLOAD: usize = 64 * 1024 * 1024;
     loop {
         let n = reader.read(&mut buf).map_err(|e| e.to_string())?;
         if n == 0 {
             break;
         }
         bytes.extend_from_slice(&buf[..n]);
+        if bytes.len() > MAX_DAT_DOWNLOAD {
+            return Err("download maior que o esperado — abortado".to_string());
+        }
         let _ = tx.send(CoreUpdateMsg::Progress {
             downloaded: bytes.len() as u64,
             total,
         });
+    }
+
+    // Corpo cortado no meio (conexão caiu) começa igualzinho a um DAT bom:
+    // o tamanho anunciado é o que pega.
+    if let Some(t) = total {
+        if bytes.len() as u64 != t {
+            return Err(format!(
+                "download incompleto ({} de {t} bytes)",
+                bytes.len()
+            ));
+        }
     }
 
     // Cheap sanity check before touching the real path: it must at least
@@ -92,10 +109,9 @@ fn try_download(dest: &Path, tx: &Sender<CoreUpdateMsg>) -> Result<(), String> {
         return Err("resposta não parece um DAT (clrmamepro/XML)".to_string());
     }
 
-    let part = dest.with_extension("dat.part");
-    std::fs::write(&part, &bytes).map_err(|e| e.to_string())?;
-    std::fs::rename(&part, dest).map_err(|e| e.to_string())?;
-    Ok(())
+    // Temporário + `sync_all` + rename: uma queda de energia logo depois
+    // não deixa um DAT vazio no lugar do bom.
+    polystnx_domain::fsutil::write_atomic(dest, &bytes).map_err(|e| e.to_string())
 }
 
 #[cfg(test)]

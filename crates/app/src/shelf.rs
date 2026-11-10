@@ -14,7 +14,7 @@
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, Receiver};
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 use anyhow::Result;
 use polystnx_domain::{Catalog, CatalogEntry, Order};
@@ -552,13 +552,13 @@ fn game_info_lines(entry: &CatalogEntry, playtime_secs: u64) -> Vec<(String, Str
     ]
 }
 
-/// O id fixo da textura do ícone "H" do HowLongToBeat — 0x484C5442 é "HLTB"
-/// em ASCII. Registrada uma vez (como as medalhas do RA), lida por todo
-/// painel que tiver bloco de tempos.
-
 /// O id fixo da textura da logo da IGDB — 0x49474442 é "IGDB" em ASCII.
 /// Registrada uma vez, lida pelo cabeçalho da seção de nota.
 const IGDB_ICON_IMG: u64 = 0x4947_4442;
+
+/// O id fixo da textura do ícone "H" do HowLongToBeat — 0x484C5442 é "HLTB"
+/// em ASCII. Registrada uma vez (como as medalhas do RA), lida por todo
+/// painel que tiver bloco de tempos.
 const HLTB_ICON_IMG: u64 = 0x484C_5442;
 
 /// O bloco HowLongToBeat do painel — as 4 barras do card do site (história
@@ -971,7 +971,7 @@ impl RecentLayout {
 /// an empty ROMs folder is the expected first-launch state for a portable,
 /// autoexecutável app, not a misconfiguration.
 fn empty_roms_screen(plat: &mut Platform, cab: &mut Cabinet) -> Result<Pick> {
-    let frame = Duration::from_millis(16);
+    let frame = crate::runner::UI_FRAME;
     cab.set_shelf_panel(empty_shelf_panel());
     cab.set_close_button(true);
     let refresh_rect = refresh_button_rect(cab.shelf_screen_size().0);
@@ -985,6 +985,7 @@ fn empty_roms_screen(plat: &mut Platform, cab: &mut Cabinet) -> Result<Pick> {
         }
         if let Some((x, y)) = m.click {
             let (ox, oy) = cab.window_to_output(x, y);
+            cab.try_tv_click(ox, oy);
             if cab.hit_close_button(ox, oy) {
                 return Ok(Pick::Quit);
             }
@@ -1122,7 +1123,7 @@ pub fn run(
     let mut filter_query = opts.preset_filter.clone().unwrap_or_default();
     let mut filter_draft = String::new();
     let mut editing_filter = false;
-    let frame = Duration::from_millis(16);
+    let frame = crate::runner::UI_FRAME;
     let mut next = Instant::now() + frame;
     let mut frame_no = 0u64;
     // The filtered/sorted listings are rebuilt only when the applied filter
@@ -1171,6 +1172,11 @@ pub fn run(
     // chegam — para qualquer jogo, não só o primeiro aberto.
     let mut badge_ids: std::collections::HashMap<String, u64> = std::collections::HashMap::new();
     let mut badge_tried: HashSet<String> = HashSet::new();
+    // Quando o painel foi montado e com quê: reconstruí-lo custa ler o
+    // playtime.txt, clonar infos e formatar textos, e fazia isso 60×/s com
+    // o jogo parado. Só refaz quando a chave muda ou a cada 500 ms (o que
+    // chega de fora — tally do RA, badges — entra nessa janela).
+    let mut panel_built: Option<(String, Instant)> = None;
     // Earned do servidor para os [x] da lista de conquistas (uma tentativa
     // por jogo por visita — o disco cacheia por game id): o worker une no
     // arquivo local `retroachievements/ra-earned/<hash>.json` e devolve o
@@ -1196,19 +1202,6 @@ pub fn run(
 
     loop {
         frame_no += 1;
-        // DEBUG: auto-abre o primeiro jogo após N frames — bissecção do
-        // quadrado da Metal (a estante rodou de verdade antes do jogo).
-        if let Ok(n) = std::env::var("PSX_XPERIENCE_SHELF_FRAMES") {
-            if let Ok(n) = n.parse::<u64>() {
-                if frame_no == n {
-                    if let Some(e) = view.first() {
-                        let logo_dir = crate::dirs::assets_dir().join("logo");
-                        let cart_dir = crate::dirs::assets_dir().join("disc");
-                        return Ok(pick_play(catalog, &logo_dir, &cart_dir, e));
-                    }
-                }
-            }
-        }
         if opts.max_frames.is_some_and(|n| frame_no > n) {
             return Ok(Pick::Quit);
         }
@@ -1462,6 +1455,7 @@ pub fn run(
                 }
                 if let Some((x, y)) = m.click {
                     let (ox, oy) = cab.window_to_output(x, y);
+                    cab.try_tv_click(ox, oy);
                     if cab.hit_close_button(ox, oy) {
                         return Ok(Pick::Quit);
                     }
@@ -1599,6 +1593,7 @@ pub fn run(
                 // without a gamepad now.
                 if let Some((x, y)) = m.click {
                     let (ox, oy) = cab.window_to_output(x, y);
+                    cab.try_tv_click(ox, oy);
                     if cab.hit_close_button(ox, oy) {
                         return Ok(Pick::Quit);
                     }
@@ -2137,7 +2132,10 @@ pub fn run(
                         continue;
                     }
                     if let Some(path) = crate::ra::badge_path(&a.badge) {
-                        if let Ok(img) = image::open(&path).map(|i| i.to_rgba8()) {
+                        if let Ok(img) =
+                            crate::imgutil::open_limited(&path, crate::imgutil::BADGE_MAX_SIDE)
+                                .map(|i| i.to_rgba8())
+                        {
                             let id = badge_image_id(&a.badge);
                             cab.set_image(id, img.width(), img.height(), img.as_raw());
                             badge_ids.insert(a.badge.clone(), id);
@@ -2239,172 +2237,199 @@ pub fn run(
         // outside the tube): whatever's focused right now, DAT extras and
         // all when the DAT had any ("se o DAT tiver informacoes do jogo,
         // preencher no painel").
-        let shelf_panel = match focused {
-            Some(e) => {
-                let wid = wheel_id(&e.rom.sha1);
-                let cid = cartridge_id(&e.rom.sha1);
-                let bid = backcover_id(&e.rom.sha1);
-                let save_title = crate::runner::rom_title(Path::new(&e.rom.path));
-                let playtime =
-                    crate::runner::total_playtime_secs(&crate::dirs::saves_dir(), &save_title);
-                // A tabela única embutida (serial → tudo): lançamento,
-                // editora, região e nota da IGDB — sem DAT, sem rede.
-                let infos = polystnx_domain::infos::lookup(&e.rom.sha1);
-                let mut info: Vec<(String, String)> = Vec::new();
-                if let Some(i) = &infos {
-                    // o lançamento vai pelo campo `release` do painel
-                    if let Some(editora) = &i.publisher {
-                        info.push(("editora".to_string(), editora.clone()));
-                    }
-                    if let Some(regiao) = &i.region {
-                        if regiao != "outra" {
-                            info.push(("região".to_string(), regiao.clone()));
-                        }
-                    }
-                }
-                let release = infos.as_ref().and_then(|i| i.year.clone());
-                let mut award_img: Option<u64> = None;
-                if let Some(Some(_)) = ra_games.get(&e.rom.sha1) {
-                    // "30 de 58 (52%)" — o tally custa um hash de ROM inteiro,
-                    // então fica cacheado por visita (e refresco quando o
-                    // completion progress do servidor chega).
-                    let tally = *ra_tally.entry(e.rom.sha1.clone()).or_insert_with(|| {
-                        ra_hashes
-                            .get(&e.rom.sha1)
-                            .and_then(|h| crate::ra::tally_from_cache(h, ra_completion.as_ref()))
-                    });
-                    // A medalha de prêmio do RA desenhada ao lado do número
-                    // da linha de conquistas (pixel-art gerada por
-                    // `medal_rgba`, uma textura por variante).
-                    if let Some((earned, total, award)) = tally {
-                        let pct = (earned * 100 + total / 2).checked_div(total).unwrap_or(0);
-                        info.push((
-                            "conquistas".to_string(),
-                            format!("{earned} de {total} ({pct}%)"),
-                        ));
-                        // "zerado (softcore)" / "mastered" — o prêmio em
-                        // palavras, junto das infos (plan revision).
-                        if let Some(a) = award {
-                            info.push(("status".to_string(), a.label().to_string()));
-                        }
-                        if let Some(medal) = award.map(|a| a.medal()) {
-                            let id = crate::ra::medal_image_id(medal);
-                            if !cab.has_image(id) {
-                                let (w, h, rgba) = crate::ra::medal_rgba(medal);
-                                cab.set_image(id, w, h, &rgba);
-                            }
-                            award_img = Some(id);
-                        }
-                    }
-                    // Os badges do set já baixando em background — a notificação
-                    // e a lista da estante os encontram em cache na hora.
-                    if badge_tried.insert(e.rom.sha1.clone()) {
-                        crate::ra::prefetch_badges(std::path::Path::new(&e.rom.path));
-                    }
-                }
-                info.extend(game_info_lines(e, playtime));
-                // O bloco HowLongToBeat no fim da aba — os tempos vêm da
-                // própria tabela única (nada de rede); jogo fora dela não
-                // ganha bloco nenhum.
-                // A seção de nota da IGDB + o HowLongToBeat, ambos da
-                // tabela única — o HLTB fecha o painel.
-                let igdb = infos
-                    .as_ref()
-                    .and_then(|i| i.nota.clone())
-                    .filter(|nota| !nota.is_empty())
-                    .map(|nota| polystnx_platform::IgdbSection {
-                        icon: igdb_icon_registered(cab),
-                        nota: format!("{nota} / 100"),
-                    });
-                let hltb = infos
-                    .as_ref()
-                    .map(|i| hltb_bars(i, hltb_icon_registered(cab)));
-                let manual_path = manual_paths
-                    .entry(e.rom.sha1.clone())
-                    .or_insert_with(|| find_local_manual(&manual_dir, &e.rom.path))
-                    .clone();
-                // Preview: contagem + primeira página decodificadas uma vez
-                // por jogo — a aba manual as mostra como as artes mostram
-                // capa/cartucho (plan revision).
-                if let Some(preview_path) = &manual_path {
-                    if manual_preview_tried.insert(e.rom.sha1.clone()) {
-                        let (ev_tx, ev_rx) = mpsc::channel();
-                        let preview_path = preview_path.clone();
-                        let preview_sha1 = e.rom.sha1.clone();
-                        std::thread::spawn(move || {
-                            let pages = crate::manual::page_count(&preview_path).unwrap_or(0);
-                            let _ = ev_tx.send(crate::manual::ManualEv::Ready {
-                                sha1: preview_sha1.clone(),
-                                pages,
-                            });
-                            if let Ok(Some(img)) = crate::manual::render_page(&preview_path, 1, 512)
-                            {
-                                let _ = ev_tx.send(crate::manual::ManualEv::Page {
-                                    sha1: preview_sha1.clone(),
-                                    page: 1,
-                                    w: img.w,
-                                    h: img.h,
-                                    rgba: img.rgba,
-                                });
-                            }
-                        });
-                        manual_channels.push(ev_rx);
-                    }
-                }
-                let ra_state = ra_games.get(&e.rom.sha1);
-                // Identificado (qualquer set) = botão desenhado — set vazio o
-                // desenha DESATIVADO com o motivo (plan revision: "mostre o
-                // botão mas mostre desativado", revendo o "nada de botão nem
-                // 0 de 0"); hash marcado "versão não suportada" = desativado
-                // com o motivo também; não identificado = nada de botão.
-                let ra_identified = ra_state.and_then(|g| g.as_ref());
-                ShelfPanelInfo {
-                    title: e.title().into_owned(),
-                    logo_img: cab.has_image(wid).then_some(wid),
-                    cartridge_img: cab.has_image(cid).then_some(cid),
-                    backcover_img: cab.has_image(bid).then_some(bid),
-                    release,
-                    info,
-                    section: panel_section,
-                    scroll: panel_scroll,
-                    favorite: Some(e.rom.favorite),
-                    achievements: ra_identified.is_some(),
-                    achievements_reason: ra_identified.and_then(|g| {
-                        if g.unsupported {
-                            Some("versão sem suporte".to_string())
-                        } else if g.achievements == 0 {
-                            Some("sem conquistas".to_string())
-                        } else {
-                            None
-                        }
-                    }),
-                    manual_first_page: manual_path
-                        .is_some()
-                        .then(|| manual_page_id(&e.rom.sha1, 1)),
-                    award_img,
-                    igdb,
-                    hltb,
-                }
+        let panel_key = focused.map(|e| {
+            format!(
+                "{}|{:?}|{}|{}|{}{}{}|{}",
+                e.rom.sha1,
+                panel_section,
+                panel_scroll,
+                e.rom.favorite,
+                cab.has_image(wheel_id(&e.rom.sha1)) as u8,
+                cab.has_image(cartridge_id(&e.rom.sha1)) as u8,
+                cab.has_image(backcover_id(&e.rom.sha1)) as u8,
+                cab.has_image(manual_page_id(&e.rom.sha1, 1)) as u8,
+            )
+        });
+        let panel_fresh = match (&panel_built, &panel_key) {
+            (Some((k, at)), Some(now_key)) => {
+                k == now_key && at.elapsed() < std::time::Duration::from_millis(500)
             }
-            None => ShelfPanelInfo {
-                title: "nenhum jogo encontrado".to_string(),
-                logo_img: None,
-                cartridge_img: None,
-                backcover_img: None,
-                release: None,
-                info: Vec::new(),
-                section: PanelSection::Informacoes,
-                scroll: 0,
-                favorite: None,
-                achievements: false,
-                achievements_reason: None,
-                manual_first_page: None,
-                award_img: None,
-                igdb: None,
-                hltb: None,
-            },
+            _ => false,
         };
-        cab.set_shelf_panel(shelf_panel);
+        let shelf_panel = if panel_fresh {
+            None
+        } else {
+            panel_built = panel_key.map(|k| (k, Instant::now()));
+            Some(match focused {
+                Some(e) => {
+                    let wid = wheel_id(&e.rom.sha1);
+                    let cid = cartridge_id(&e.rom.sha1);
+                    let bid = backcover_id(&e.rom.sha1);
+                    let save_title = crate::runner::rom_title(Path::new(&e.rom.path));
+                    let playtime =
+                        crate::runner::total_playtime_secs(&crate::dirs::saves_dir(), &save_title);
+                    // A tabela única embutida (serial → tudo): lançamento,
+                    // editora, região e nota da IGDB — sem DAT, sem rede.
+                    let infos = polystnx_domain::infos::lookup(&e.rom.sha1);
+                    let mut info: Vec<(String, String)> = Vec::new();
+                    if let Some(i) = &infos {
+                        // o lançamento vai pelo campo `release` do painel
+                        if let Some(editora) = &i.publisher {
+                            info.push(("editora".to_string(), editora.clone()));
+                        }
+                        if let Some(regiao) = &i.region {
+                            if regiao != "outra" {
+                                info.push(("região".to_string(), regiao.clone()));
+                            }
+                        }
+                    }
+                    let release = infos.as_ref().and_then(|i| i.year.clone());
+                    let mut award_img: Option<u64> = None;
+                    if let Some(Some(_)) = ra_games.get(&e.rom.sha1) {
+                        // "30 de 58 (52%)" — o tally custa um hash de ROM inteiro,
+                        // então fica cacheado por visita (e refresco quando o
+                        // completion progress do servidor chega).
+                        let tally = *ra_tally.entry(e.rom.sha1.clone()).or_insert_with(|| {
+                            ra_hashes.get(&e.rom.sha1).and_then(|h| {
+                                crate::ra::tally_from_cache(h, ra_completion.as_ref())
+                            })
+                        });
+                        // A medalha de prêmio do RA desenhada ao lado do número
+                        // da linha de conquistas (pixel-art gerada por
+                        // `medal_rgba`, uma textura por variante).
+                        if let Some((earned, total, award)) = tally {
+                            let pct = (earned * 100 + total / 2).checked_div(total).unwrap_or(0);
+                            info.push((
+                                "conquistas".to_string(),
+                                format!("{earned} de {total} ({pct}%)"),
+                            ));
+                            // "zerado (softcore)" / "mastered" — o prêmio em
+                            // palavras, junto das infos (plan revision).
+                            if let Some(a) = award {
+                                info.push(("status".to_string(), a.label().to_string()));
+                            }
+                            if let Some(medal) = award.map(|a| a.medal()) {
+                                let id = crate::ra::medal_image_id(medal);
+                                if !cab.has_image(id) {
+                                    let (w, h, rgba) = crate::ra::medal_rgba(medal);
+                                    cab.set_image(id, w, h, &rgba);
+                                }
+                                award_img = Some(id);
+                            }
+                        }
+                        // Os badges do set já baixando em background — a notificação
+                        // e a lista da estante os encontram em cache na hora.
+                        if badge_tried.insert(e.rom.sha1.clone()) {
+                            crate::ra::prefetch_badges(std::path::Path::new(&e.rom.path));
+                        }
+                    }
+                    info.extend(game_info_lines(e, playtime));
+                    // O bloco HowLongToBeat no fim da aba — os tempos vêm da
+                    // própria tabela única (nada de rede); jogo fora dela não
+                    // ganha bloco nenhum.
+                    // A seção de nota da IGDB + o HowLongToBeat, ambos da
+                    // tabela única — o HLTB fecha o painel.
+                    let igdb = infos
+                        .as_ref()
+                        .and_then(|i| i.nota.clone())
+                        .filter(|nota| !nota.is_empty())
+                        .map(|nota| polystnx_platform::IgdbSection {
+                            icon: igdb_icon_registered(cab),
+                            nota: format!("{nota} / 100"),
+                        });
+                    let hltb = infos
+                        .as_ref()
+                        .map(|i| hltb_bars(i, hltb_icon_registered(cab)));
+                    let manual_path = manual_paths
+                        .entry(e.rom.sha1.clone())
+                        .or_insert_with(|| find_local_manual(&manual_dir, &e.rom.path))
+                        .clone();
+                    // Preview: contagem + primeira página decodificadas uma vez
+                    // por jogo — a aba manual as mostra como as artes mostram
+                    // capa/cartucho (plan revision).
+                    if let Some(preview_path) = &manual_path {
+                        if manual_preview_tried.insert(e.rom.sha1.clone()) {
+                            let (ev_tx, ev_rx) = mpsc::channel();
+                            let preview_path = preview_path.clone();
+                            let preview_sha1 = e.rom.sha1.clone();
+                            std::thread::spawn(move || {
+                                let pages = crate::manual::page_count(&preview_path).unwrap_or(0);
+                                let _ = ev_tx.send(crate::manual::ManualEv::Ready {
+                                    sha1: preview_sha1.clone(),
+                                    pages,
+                                });
+                                if let Ok(Some(img)) =
+                                    crate::manual::render_page(&preview_path, 1, 512)
+                                {
+                                    let _ = ev_tx.send(crate::manual::ManualEv::Page {
+                                        sha1: preview_sha1.clone(),
+                                        page: 1,
+                                        w: img.w,
+                                        h: img.h,
+                                        rgba: img.rgba,
+                                    });
+                                }
+                            });
+                            manual_channels.push(ev_rx);
+                        }
+                    }
+                    let ra_state = ra_games.get(&e.rom.sha1);
+                    // Identificado (qualquer set) = botão desenhado — set vazio o
+                    // desenha DESATIVADO com o motivo (plan revision: "mostre o
+                    // botão mas mostre desativado", revendo o "nada de botão nem
+                    // 0 de 0"); hash marcado "versão não suportada" = desativado
+                    // com o motivo também; não identificado = nada de botão.
+                    let ra_identified = ra_state.and_then(|g| g.as_ref());
+                    ShelfPanelInfo {
+                        title: e.title().into_owned(),
+                        logo_img: cab.has_image(wid).then_some(wid),
+                        cartridge_img: cab.has_image(cid).then_some(cid),
+                        backcover_img: cab.has_image(bid).then_some(bid),
+                        release,
+                        info,
+                        section: panel_section,
+                        scroll: panel_scroll,
+                        favorite: Some(e.rom.favorite),
+                        achievements: ra_identified.is_some(),
+                        achievements_reason: ra_identified.and_then(|g| {
+                            if g.unsupported {
+                                Some("versão sem suporte".to_string())
+                            } else if g.achievements == 0 {
+                                Some("sem conquistas".to_string())
+                            } else {
+                                None
+                            }
+                        }),
+                        manual_first_page: manual_path
+                            .is_some()
+                            .then(|| manual_page_id(&e.rom.sha1, 1)),
+                        award_img,
+                        igdb,
+                        hltb,
+                    }
+                }
+                None => ShelfPanelInfo {
+                    title: "nenhum jogo encontrado".to_string(),
+                    logo_img: None,
+                    cartridge_img: None,
+                    backcover_img: None,
+                    release: None,
+                    info: Vec::new(),
+                    section: PanelSection::Informacoes,
+                    scroll: 0,
+                    favorite: None,
+                    achievements: false,
+                    achievements_reason: None,
+                    manual_first_page: None,
+                    award_img: None,
+                    igdb: None,
+                    hltb: None,
+                },
+            })
+        };
+        if let Some(shelf_panel) = shelf_panel {
+            cab.set_shelf_panel(shelf_panel);
+        }
 
         // --- draw (into a screen-sized buffer, then warped through the tube) --
         let page_ready = manual
@@ -2617,7 +2642,7 @@ pub fn run(
                         draw_expositor(d, x, y, grid.item_w as u32, grid.item_h as u32);
                     }
                     if hover_grid == Some(i) {
-                        draw_play_icon(d, x + grid.item_w as i32 - 26, y + grid.item_h as i32 - 26);
+                        draw_play_icon(d, x + grid.item_w - 26, y + grid.item_h - 26);
                     }
                 }
             }
@@ -2656,7 +2681,7 @@ pub fn run(
             }
         }
 
-        crate::runner::pace_frame(&mut next, frame);
+        crate::runner::pace_ui(&mut next, frame, plat, cab);
     }
 }
 
@@ -2674,7 +2699,7 @@ pub fn run_history(plat: &mut Platform, cab: &mut Cabinet, catalog: &Catalog) ->
 
     let mut sel: usize = 0;
     let mut top: usize = 0;
-    let frame = Duration::from_millis(16);
+    let frame = crate::runner::UI_FRAME;
 
     cab.set_shelf_panel(empty_shelf_panel());
     cab.set_close_button(true);
@@ -2715,6 +2740,7 @@ pub fn run_history(plat: &mut Platform, cab: &mut Cabinet, catalog: &Catalog) ->
 
         if let Some((x, y)) = m.click {
             let (ox, oy) = cab.window_to_output(x, y);
+            cab.try_tv_click(ox, oy);
             if cab.hit_close_button(ox, oy) {
                 return Ok(Pick::Quit);
             }
@@ -2946,7 +2972,9 @@ fn decode_art(path: &Path) -> Result<(u32, u32, Vec<u8>)> {
 /// Same decode, with an explicit size cap — the back cover's zoomed view
 /// re-decodes at full resolution so the enlargement stays crisp.
 fn decode_art_scaled(path: &Path, max: u32) -> Result<(u32, u32, Vec<u8>)> {
-    let img = image::open(path)?.thumbnail(max, max).to_rgba8();
+    let img = crate::imgutil::open_limited(path, crate::imgutil::ART_MAX_SIDE)?
+        .thumbnail(max, max)
+        .to_rgba8();
     let (w, h) = img.dimensions();
     Ok((w, h, img.into_raw()))
 }

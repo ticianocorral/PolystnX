@@ -175,6 +175,7 @@ THIRD-PARTY-NOTICES.md). An optional nointro.dat at the root gives games\n\
 their canonical No-Intro name.";
 
 fn main() -> Result<()> {
+    install_panic_hook();
     polystnx_app::dirs::migrate_legacy_data_root();
     // Log em ARQUIVO além do stderr: lançado pelo Finder o stderr se perde,
     // e diagnósticos como o fluxo de card/boot precisam do rastro. Um
@@ -210,6 +211,10 @@ fn main() -> Result<()> {
     for dir in [
         polystnx_app::dirs::roms_dir(),
         polystnx_app::dirs::core_dir(),
+        // A BIOS é fornecida por quem roda (nunca baixada): a pasta precisa
+        // existir na primeira execução para o jogador saber onde colocá-la.
+        polystnx_app::dirs::bios_dir(),
+        polystnx_app::dirs::memcards_dir(),
         polystnx_app::dirs::assets_dir().join("logo"),
         polystnx_app::dirs::assets_dir().join("cover"),
         polystnx_app::dirs::assets_dir().join("disc"),
@@ -267,6 +272,14 @@ fn main() -> Result<()> {
     let mut cab = plat
         .create_cabinet("PolystnX", 1280, 800, cfg.fullscreen)
         .map_err(|e| anyhow!(e.to_string()))?;
+    // A TV lembra o volume e o ajuste de imagem da última sessão.
+    cab.set_volume(cfg.tv_volume);
+    cab.set_picture(polystnx_platform::Picture {
+        brilho: cfg.tv_picture[0],
+        contraste: cfg.tv_picture[1],
+        cor: cfg.tv_picture[2],
+        nitidez: cfg.tv_picture[3],
+    });
     // DEBUG: autoplay — pula idle e estante, vai reto ao jogo. É o mesmo
     // mecanismo do lançamento por processo (abaixo) exposto para dev.
     if let Some(rom) = args.autoplay_rom.clone().or_else(|| {
@@ -521,16 +534,46 @@ fn main() -> Result<()> {
                 debug_shot_modal: None,
                 debug_cart_anim: None,
             };
-            match run_game(&mut plat, &mut cab, &spec, &mut cfg)? {
-                GameExit::Ejected { static_level } => {
+            // Um jogo que não abre (disco sumiu — microSD tirado no Deck —,
+            // CHD corrompido ou recusado pelo núcleo, núcleo estragado, sem
+            // saída de áudio) não derruba o app: avisa na tela e volta à
+            // tela inicial.
+            plat.set_game_session(true);
+            let result = run_game(&mut plat, &mut cab, &spec, &mut cfg);
+            plat.set_game_session(false);
+            plat.set_playing(false);
+            match result {
+                Ok(GameExit::Ejected { static_level }) => {
                     idle_static = static_level;
                     break 'shelf;
                 }
-                GameExit::Quit => break 'app,
+                Ok(GameExit::Quit) => break 'app,
+                Err(e) => {
+                    log::error!("o jogo não abriu: {e:#}");
+                    let body = format!(
+                        "não deu para ligar este disco. confira se o arquivo continua lá e é \
+                         um disco de PS1 válido (e se a BIOS está em bios/). {e:#}"
+                    );
+                    if message_screen(&mut plat, &mut cab, "o jogo não abriu", &body)? {
+                        break 'app;
+                    }
+                    idle_static = idle::RESTING_STATIC;
+                    break 'shelf;
+                }
             }
         }
     }
 
+    // Volume e imagem da TV: gravados ao sair, só se mudaram.
+    let pic = cab.picture();
+    let picture = [pic.brilho, pic.contraste, pic.cor, pic.nitidez];
+    if cab.volume() != cfg.tv_volume || picture != cfg.tv_picture {
+        cfg.tv_volume = cab.volume();
+        cfg.tv_picture = picture;
+        if let Err(e) = cfg.save() {
+            log::warn!("não gravou o volume/imagem da TV: {e:#}");
+        }
+    }
     log::info!("bye");
     Ok(())
 }
@@ -558,40 +601,93 @@ fn refresh_ra(cfg: &Config, cab: &mut Cabinet, shelf_opts: &mut ShelfOpts) {
 }
 
 fn no_core_screen(plat: &mut Platform, cab: &mut Cabinet) -> Result<bool> {
+    message_screen(
+        plat,
+        cab,
+        "núcleo não encontrado",
+        "para jogar é necessário o núcleo PCSX Rearmed: volte à tela inicial e \
+         clique em \"Baixar núcleo PCSX Rearmed\", baixe pelo menu de configurações \
+         ou coloque o arquivo em core/ à mão.",
+    )
+}
+
+/// Uma tela de aviso (título + texto) até o jogador confirmar ou voltar —
+/// teclado, mouse ou controle. Devolve `true` se o app inteiro deve sair.
+fn message_screen(plat: &mut Platform, cab: &mut Cabinet, title: &str, body: &str) -> Result<bool> {
+    let frame = polystnx_app::runner::UI_FRAME;
+    let mut next = std::time::Instant::now();
+    // Um A/B ainda segurado de antes não fecha o aviso antes de ser lido.
+    plat.prime_menu_edges();
     loop {
-        let m = plat.poll_menu(MenuMode::Nav);
+        // `CaptureKey`: qualquer tecla ou botão do controle volta cru — o
+        // aviso fecha com o que estiver na mão.
+        let m = plat.poll_menu(MenuMode::CaptureKey);
         if m.quit {
             return Ok(true);
         }
-        if m.nav
-            .iter()
-            .any(|n| matches!(n, MenuNav::Confirm | MenuNav::Back))
+        if let Some((x, y)) = m.click {
+            let (ox, oy) = cab.window_to_output(x, y);
+            cab.try_tv_click(ox, oy);
+            if cab.hit_close_button(ox, oy) {
+                return Ok(true);
+            }
+            if cab.hit_minimize_button(ox, oy) {
+                cab.minimize();
+            } else {
+                return Ok(false);
+            }
+        }
+        if m.captured_key.is_some()
+            || m.captured_pad.is_some()
+            || m.capture_cancelled
+            || m.nav
+                .iter()
+                .any(|n| matches!(n, MenuNav::Confirm | MenuNav::Back))
         {
             return Ok(false);
         }
         let render = |d: &mut Screen| {
-            d.text(40, 40, 2, (232, 232, 232), "núcleo não encontrado");
-            d.text_wrapped(
-                40,
-                90,
-                700,
-                1,
-                (150, 150, 158),
-                "para jogar é necessário o núcleo PCSX Rearmed: volte à tela inicial e \
-                 clique em \"Baixar núcleo PCSX Rearmed\", baixe pelo menu de configurações \
-                 ou coloque o arquivo em core/ à mão.",
-            );
+            d.text(40, 40, 2, (232, 232, 232), title);
+            d.text_wrapped(40, 90, 700, 1, (150, 150, 158), body);
             d.text(
                 40,
                 d.size().1 as i32 - 40,
                 1,
                 (150, 150, 158),
-                "enter ou esc: voltar pra estante",
+                "A, B, enter ou esc: voltar",
             );
         };
         cab.frame_2d((18, 18, 20), render);
-        std::thread::sleep(std::time::Duration::from_millis(16));
+        polystnx_app::runner::pace_ui(&mut next, frame, plat, cab);
     }
+}
+
+/// Um panic vai para o log E para `<raiz>/crash.log` (no Game Mode do Steam
+/// Deck ninguém vê o stderr): o app que "sumiu" deixa o porquê.
+fn install_panic_hook() {
+    let default = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        let bt = std::backtrace::Backtrace::force_capture();
+        log::error!("panic: {info}\n{bt}");
+        let path = polystnx_app::dirs::app_root().join("crash.log");
+        if let Ok(mut f) = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&path)
+        {
+            use std::io::Write;
+            let when = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs())
+                .unwrap_or(0);
+            let _ = writeln!(
+                f,
+                "--- PolystnX (unix {when}) v{}\n{info}\n{bt}",
+                env!("CARGO_PKG_VERSION")
+            );
+        }
+        default(info);
+    }));
 }
 
 /// A pasta de pacotes pendentes saiu de `saves/update/` e passou a ser

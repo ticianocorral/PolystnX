@@ -9,7 +9,7 @@ fn main() -> anyhow::Result<()> {
     let core_path = PathBuf::from(it.next().unwrap());
     let bios_dir = PathBuf::from(it.next().unwrap());
     let disc = PathBuf::from(it.next().unwrap());
-    let card = std::fs::read(&it.next().unwrap())?;
+    let card = std::fs::read(it.next().unwrap())?;
 
     std::fs::create_dir_all("/tmp/csp4").ok();
     let mut core = Core::load(&core_path)?;
@@ -76,7 +76,7 @@ fn main() -> anyhow::Result<()> {
                 .iter()
                 .step_by(97)
                 .map(|&b| b as u64)
-                .fold(0u64, |a, b| a.wrapping_mul(31).wrapping_add(b as u64))
+                .fold(0u64, |a, b| a.wrapping_mul(31).wrapping_add(b))
         })
         .unwrap_or(0);
     println!("[MC screen] frame {} hash {:#x}", frames, before_hash);
@@ -96,7 +96,7 @@ fn main() -> anyhow::Result<()> {
                 .iter()
                 .step_by(97)
                 .map(|&b| b as u64)
-                .fold(0u64, |a, b| a.wrapping_mul(31).wrapping_add(b as u64))
+                .fold(0u64, |a, b| a.wrapping_mul(31).wrapping_add(b))
         })
         .unwrap_or(0);
     println!(

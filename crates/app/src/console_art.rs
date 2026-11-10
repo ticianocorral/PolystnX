@@ -155,7 +155,10 @@ fn decode_preferred(
 /// Decode one image file to tightly-packed RGBA, downscaled for memory —
 /// `None` on any failure (the callers log and fall back).
 fn decode_bytes_at(path: &std::path::Path, max: u32) -> Option<(u32, u32, Vec<u8>)> {
-    let img = image::open(path).ok()?.thumbnail(max, max).to_rgba8();
+    let img = crate::imgutil::open_limited(path, crate::imgutil::ART_MAX_SIDE)
+        .ok()?
+        .thumbnail(max, max)
+        .to_rgba8();
     let (w, h) = img.dimensions();
     Some((w, h, img.into_raw()))
 }

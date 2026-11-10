@@ -87,6 +87,38 @@ impl PixelFormat {
     }
 }
 
+/// Buffers de pixels devolvidos pelo `Drop` do [`Frame`], prontos para o
+/// próximo `video_refresh_cb`: sem alocar ~1,2 MB por quadro (a 60 fps eram
+/// ~70 MB/s de malloc/free, mais a pressão no alocador do macOS/Deck). O
+/// quadro cruza threads (core → UI) e morre na UI; o pool é global.
+static PIXEL_POOL: std::sync::Mutex<Vec<Vec<u8>>> = std::sync::Mutex::new(Vec::new());
+const PIXEL_POOL_MAX: usize = 4;
+
+fn take_pixel_buf(len: usize) -> Vec<u8> {
+    let mut v = PIXEL_POOL
+        .lock()
+        .ok()
+        .and_then(|mut p| p.pop())
+        .unwrap_or_default();
+    v.clear();
+    v.reserve(len);
+    v
+}
+
+impl Drop for Frame {
+    fn drop(&mut self) {
+        let v = std::mem::take(&mut self.pixels);
+        if v.capacity() == 0 {
+            return;
+        }
+        if let Ok(mut p) = PIXEL_POOL.lock() {
+            if p.len() < PIXEL_POOL_MAX {
+                p.push(v);
+            }
+        }
+    }
+}
+
 /// One video frame handed up by the core. Owns its pixels.
 #[derive(Debug, Clone)]
 pub struct Frame {
@@ -186,8 +218,8 @@ pub struct Core {
     /// PCSX Rearmed SEGFAULTA em `retro_deinit` sem `init`; o contrato
     /// libretro manda exatamente isso).
     inited: bool,
-    #[allow(dead_code)]
-    lib: Library,
+    /// Mantém a biblioteca carregada enquanto houver símbolos dela em uso.
+    _lib: Library,
 }
 
 impl Core {
@@ -293,7 +325,7 @@ impl Core {
             valid_extensions,
             loaded: false,
             inited: false,
-            lib,
+            _lib: lib,
         })
     }
 
@@ -802,6 +834,12 @@ unsafe extern "C" fn environment_cb(cmd: c_uint, data: *mut c_void) -> bool {
             with_cb(|s| {
                 s.variables.clear();
                 while !(*p).key.is_null() {
+                    // Entrada sem `value` (núcleo mal-comportado): pulada, em vez
+                    // de um CStr::from_ptr(NULL) derrubando o app.
+                    if (*p).value.is_null() {
+                        p = p.add(1);
+                        continue;
+                    }
                     let key = CStr::from_ptr((*p).key).to_owned();
                     // value looks like "Description; opt_a|opt_b|opt_c"
                     let raw = CStr::from_ptr((*p).value).to_string_lossy();
@@ -1031,7 +1069,7 @@ unsafe extern "C" fn video_refresh_cb(
     with_cb(|s| {
         let bpp = s.pixel_format.bytes_per_pixel();
         let row_bytes = width as usize * bpp;
-        let mut pixels = Vec::with_capacity(row_bytes * height as usize);
+        let mut pixels = take_pixel_buf(row_bytes * height as usize);
         let src = data as *const u8;
         for row in 0..height as usize {
             let start = row * pitch;
