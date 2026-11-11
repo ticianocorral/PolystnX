@@ -156,7 +156,19 @@ pub(super) fn draw_panel(
     let tight_panel = inner_w < 360;
     let logo_h: i32 = if tight_panel { 84 } else { 110 };
     let mut cy = if panel.has_logo {
-        draw_image_absolute(canvas, images, PANEL_LOGO_IMG, x, y, inner_w, logo_h as u32);
+        // A logo fica numa caixa menor (70% da largura, 24 px a menos de
+        // altura): logos largas, de boa resolução, passavam por trás do
+        // anel do leitor de CD, que sobe 7 px acima do console.
+        let box_w = (inner_w as f32 * 0.70) as u32;
+        draw_image_absolute(
+            canvas,
+            images,
+            PANEL_LOGO_IMG,
+            x + (inner_w as i32 - box_w as i32) / 2,
+            y,
+            box_w,
+            (logo_h - 24) as u32,
+        );
         y + logo_h
     } else {
         draw_text_wrapped_absolute(
