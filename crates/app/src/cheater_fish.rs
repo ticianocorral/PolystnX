@@ -540,7 +540,8 @@ pub fn run(
                 MenuNav::End => sel = total - 1,
                 MenuNav::Confirm => activate = Some(sel),
                 // B: começa o jogo com o que estiver ligado.
-                MenuNav::Back => return Ok(FishOutcome::Start),
+                MenuNav::Back | MenuNav::Start => return Ok(FishOutcome::Start),
+                MenuNav::Alt | MenuNav::Select | MenuNav::TabPrev | MenuNav::TabNext => {}
             }
         }
         if let Some(idx) = activate {

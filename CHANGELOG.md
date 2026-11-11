@@ -6,6 +6,14 @@ inteiro compartilha uma versão (`[workspace.package]` em `Cargo.toml`).
 
 ## [Não lançado]
 
+### Controle
+- **Navegação com controle como no SixteeN**: o analógico esquerdo anda como o
+  D-pad nos menus; na estante, X/quadrado favorita o jogo sob o cursor,
+  Select abre o histórico, Start abre as configurações e LT/RT trocam a aba
+  do painel; na tela inicial Start abre as configurações; nas configurações
+  LT/RT trocam de seção (além de LB/RB); no Cheater Fish Start começa o jogo.
+- Removido o aviso verde "ANALOG LIGADO/DESLIGADO" ao apertar o botão ANALOG.
+
 ### Cheats
 - Jogo sem cheats no banco: o Cheater Fish abre mesmo assim,   "No Cheat Codes Available" (antes pulava direto para o jogo).
 - O Cheater Fish agora acha os cheats de jogos cujo nome no disco não tem o

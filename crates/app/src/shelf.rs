@@ -1656,6 +1656,48 @@ pub fn run(
                             sel = view.len().saturating_sub(1);
                         }
                         MenuNav::Back => return Ok(Pick::Back),
+                        // Select/Back: histórico; Start: configurações — os
+                        // mesmos atalhos do SixteeN.
+                        MenuNav::Select => return Ok(Pick::History),
+                        MenuNav::Start => return Ok(Pick::Settings),
+                        // X/quadrado: favoritar o jogo sob o cursor.
+                        MenuNav::Alt => {
+                            let picked = if in_fav {
+                                favorites.get(fav_idx)
+                            } else if in_recent {
+                                recent.get(recent_idx)
+                            } else {
+                                view.get(sel)
+                            };
+                            if let Some(e) = picked {
+                                let sha1 = e.rom.sha1.clone();
+                                let fav = !e.rom.favorite;
+                                if catalog.set_favorite(&sha1, fav).is_ok() {
+                                    if let Some(row) = all.iter_mut().find(|e| e.rom.sha1 == sha1) {
+                                        row.rom.favorite = fav;
+                                    }
+                                    applied_filter = None;
+                                }
+                            }
+                        }
+                        // LT/RT: troca a aba do painel (informações, capa
+                        // traseira, manual, disco).
+                        MenuNav::TabPrev | MenuNav::TabNext => {
+                            const TABS: [PanelSection; 4] = [
+                                PanelSection::Informacoes,
+                                PanelSection::CapaTraseira,
+                                PanelSection::Manual,
+                                PanelSection::Cartucho,
+                            ];
+                            let cur = TABS.iter().position(|t| *t == panel_section).unwrap_or(0);
+                            let next = if matches!(nav, MenuNav::TabNext) {
+                                (cur + 1) % TABS.len()
+                            } else {
+                                (cur + TABS.len() - 1) % TABS.len()
+                            };
+                            panel_section = TABS[next];
+                            panel_scroll = 0;
+                        }
                         MenuNav::Confirm => {
                             let picked = if in_fav {
                                 favorites.get(fav_idx)

@@ -1723,14 +1723,6 @@ pub fn run_game(
                     if on {
                         plat.rumble_pad(0, 40000, 40000);
                     }
-                    cab.push_osd(
-                        &[&format!(
-                            "ANALOG {} — analógico e vibração",
-                            if on { "LIGADO" } else { "DESLIGADO" }
-                        )],
-                        None,
-                        Duration::from_secs(2),
-                    );
                 }
                 UiEvent::Quit => {
                     if powered {

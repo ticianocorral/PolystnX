@@ -391,8 +391,9 @@ pub fn run(plat: &mut Platform, cab: &mut Cabinet, cfg: &mut Config) -> Result<b
                     }
                     MenuNav::Back => return Ok(false),
                     // LB/RB trocam de seção.
-                    MenuNav::PageUp | MenuNav::PageDown => {
-                        sec = step_section(sec, matches!(nav, MenuNav::PageDown));
+                    MenuNav::PageUp | MenuNav::PageDown | MenuNav::TabPrev | MenuNav::TabNext => {
+                        sec =
+                            step_section(sec, matches!(nav, MenuNav::PageDown | MenuNav::TabNext));
                         sel = 0;
                         controls_top = 0;
                     }

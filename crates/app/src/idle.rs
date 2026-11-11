@@ -890,6 +890,8 @@ pub fn run(
                     _ => {}
                 },
                 MenuNav::Back => return Ok(IdleExit::Quit),
+                // Start: Configurações direto, como no SixteeN.
+                MenuNav::Start if !core_missing => return Ok(IdleExit::OpenSettings),
                 _ => {}
             }
         }
