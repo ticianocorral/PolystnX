@@ -1267,6 +1267,8 @@ pub fn run_game(
     // game's all-time playtime (`total_playtime_secs`) once it ends.
     // O Cheater Fish já passou nesta sessão (só roda no primeiro ligar).
     let mut fish_done = false;
+    let session_start = Instant::now();
+    let mut auto_power_done = false;
     let mut powered_elapsed = Duration::ZERO;
     let mut powered_since = powered.then(Instant::now);
     let mut static_level = OFF_STATIC_LEVEL;
@@ -1717,6 +1719,16 @@ pub fn run_game(
         // que ninguém vê é bateria jogada fora. Na volta o livro de pausa
         // está esperando, como se o jogador tivesse pausado.
         let mut events = events;
+        // DEBUG: liga o console sozinho 3 s depois de abrir o jogo (o clique
+        // no POWER, para testes automatizados da tela do Cheater Fish).
+        if !auto_power_done
+            && !powered
+            && std::env::var_os("PSX_XPERIENCE_AUTOPOWER").is_some()
+            && session_start.elapsed() > Duration::from_secs(3)
+        {
+            auto_power_done = true;
+            events.push(UiEvent::Quit);
+        }
         if plat.window_hidden()
             && powered
             && !paused
@@ -1806,6 +1818,23 @@ pub fn run_game(
                                 )? {
                                     crate::cheater_fish::FishOutcome::Quit => {
                                         break 'run GameExit::Quit
+                                    }
+                                    // POWER durante o Cheater Fish: desliga sem
+                                    // começar o jogo (e o acessório volta no
+                                    // próximo ligar).
+                                    crate::cheater_fish::FishOutcome::PowerOff => {
+                                        fish_done = false;
+                                        cab.set_powered(false);
+                                        continue;
+                                    }
+                                    // OPEN/CLOSE: ejeta e volta à estante, como
+                                    // com o console desligado.
+                                    crate::cheater_fish::FishOutcome::Eject => {
+                                        cab.set_powered(false);
+                                        if has_cartridge_art {
+                                            cartridge_eject_animation(cab);
+                                        }
+                                        break 'run GameExit::Ejected { static_level };
                                     }
                                     crate::cheater_fish::FishOutcome::Start => {
                                         // O que ficou ligado vale a partir do

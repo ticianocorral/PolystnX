@@ -96,6 +96,12 @@ Auditoria de segurança alinhada com o SixteeN (1.3.2 → 1.8.1).
   tema da estante, sugestão da noite, flyback, burn-in ou idioma.
 
 ### Corrigido
+- **Cheater Fish: clique no console, teclado e controle.** Durante a tela do
+  acessório o painel lateral (POWER e OPEN/CLOSE) não respondia a cliques, e o
+  teclado não navegava (nos menus só mouse e controle valem). Agora: POWER
+  desliga sem começar o jogo, OPEN/CLOSE ejeta e volta à estante; setas/W/S,
+  PageUp/PageDown, Home/End, Enter/Espaço/Z (liga/desliga), Backspace/X/Esc
+  (começa o jogo) e os botões do controle — d-pad, A e B — fazem tudo.
 - **"O jogo não abriu" depois de "Renomear ROMs"**: a estante seguia
   apontando para o nome antigo do arquivo (o catálogo só era relido no
   "Atualizar"). Agora o catálogo é relido sempre que se volta das

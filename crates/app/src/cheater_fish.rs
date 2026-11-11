@@ -15,7 +15,7 @@ use std::time::{Duration, Instant};
 
 use anyhow::Result;
 use polystnx_domain::CheatDef;
-use polystnx_platform::{Cabinet, MenuMode, MenuNav, Platform};
+use polystnx_platform::{Cabinet, MenuInput, MenuMode, MenuNav, PanelButton, Platform};
 
 use crate::psx_gpu::{Font, Gpu, Rgb};
 
@@ -26,6 +26,65 @@ pub enum FishOutcome {
     Start,
     /// A janela foi fechada: o app inteiro sai.
     Quit,
+    /// Clicou no POWER do console: desliga, sem começar o jogo.
+    PowerOff,
+    /// Clicou no OPEN/CLOSE do console: ejeta o disco e volta à estante.
+    Eject,
+}
+
+/// O que o jogador fez num quadro, venha do mouse, do teclado ou do
+/// controle: as intenções de menu mais o que saiu do console.
+struct FishInput {
+    nav: Vec<MenuNav>,
+    /// Clique na janela, já em coordenadas de saída.
+    click: Option<(i32, i32)>,
+    quit: bool,
+}
+
+/// O nome SDL de uma tecla vira a intenção de menu equivalente. Nos menus o
+/// teclado não navega (só mouse e controle); aqui ele precisa, porque o
+/// Cheater Fish é uma tela de escolha longa.
+fn key_nav(name: &str) -> Option<MenuNav> {
+    Some(match name {
+        "Up" | "W" => MenuNav::Up,
+        "Down" | "S" => MenuNav::Down,
+        "PageUp" | "Page Up" => MenuNav::PageUp,
+        "PageDown" | "Page Down" => MenuNav::PageDown,
+        "Home" => MenuNav::Home,
+        "End" => MenuNav::End,
+        "Return" | "Enter" | "Keypad Enter" | "Space" | "Z" => MenuNav::Confirm,
+        "Backspace" | "X" => MenuNav::Back,
+        _ => return None,
+    })
+}
+
+/// Lê o quadro de entrada: mouse (clique), controle (os botões já vêm como
+/// intenções) e teclado (as teclas chegam cruas no modo `CaptureKey`; o
+/// Esc vira `Back`).
+fn read_input(plat: &mut Platform) -> FishInput {
+    let m: MenuInput = plat.poll_menu(MenuMode::CaptureKey);
+    let mut nav = m.nav;
+    if let Some(n) = m.captured_key.as_deref().and_then(key_nav) {
+        nav.push(n);
+    }
+    if m.capture_cancelled {
+        nav.push(MenuNav::Back);
+    }
+    FishInput {
+        nav,
+        click: m.click,
+        quit: m.quit,
+    }
+}
+
+/// O clique caiu num botão do console (a lateral)? POWER e OPEN/CLOSE
+/// continuam valendo durante o Cheater Fish, como numa TV de verdade.
+fn console_click(cab: &mut Cabinet, ox: i32, oy: i32) -> Option<FishOutcome> {
+    match cab.hit_panel_button(ox, oy) {
+        Some(PanelButton::Power) => Some(FishOutcome::PowerOff),
+        Some(PanelButton::Eject) => Some(FishOutcome::Eject),
+        _ => None,
+    }
 }
 
 /// Quanto dura a tela de carregamento (o jogador pode pular com A).
@@ -396,7 +455,7 @@ pub fn run(
 
     // 1) Carregamento: o peixe, o nome do jogo e a barra enchendo.
     while started.elapsed() < LOADING {
-        let m = plat.poll_menu(MenuMode::Nav);
+        let m = read_input(plat);
         if m.quit {
             return Ok(FishOutcome::Quit);
         }
@@ -406,8 +465,11 @@ pub fn run(
             if cab.hit_close_button(ox, oy) {
                 return Ok(FishOutcome::Quit);
             }
+            if let Some(out) = console_click(cab, ox, oy) {
+                return Ok(out);
+            }
         }
-        // A pula o carregamento.
+        // A (ou Enter/Espaço) pula o carregamento.
         if m.nav.iter().any(|n| matches!(n, MenuNav::Confirm)) {
             break;
         }
@@ -424,7 +486,7 @@ pub fn run(
     let mut top = 0usize;
     let mut layout = Layout::default();
     loop {
-        let m = plat.poll_menu(MenuMode::Nav);
+        let m = read_input(plat);
         if m.quit {
             return Ok(FishOutcome::Quit);
         }
@@ -435,9 +497,13 @@ pub fn run(
             if cab.hit_close_button(ox, oy) {
                 return Ok(FishOutcome::Quit);
             }
+            if let Some(out) = console_click(cab, ox, oy) {
+                return Ok(out);
+            }
             if cab.hit_minimize_button(ox, oy) {
                 cab.minimize();
             } else if let Some((sx, sy)) = cab.hit_screen_point(ox, oy) {
+                log::debug!("cheater fish: clique janela ({x},{y}) → tubo ({sx},{sy})");
                 // Do tubo (pixels de tela) para o quadro interno.
                 let (bw, _) = cab.shelf_buffer_size();
                 let k = bw as f32 / gpu.w as f32;
@@ -453,8 +519,8 @@ pub fn run(
         let page = layout.visible.max(1);
         for nav in &m.nav {
             match nav {
-                MenuNav::Up => sel = sel.saturating_sub(1),
-                MenuNav::Down => sel = (sel + 1).min(total - 1),
+                MenuNav::Up | MenuNav::Left => sel = sel.saturating_sub(1),
+                MenuNav::Down | MenuNav::Right => sel = (sel + 1).min(total - 1),
                 MenuNav::PageUp => sel = sel.saturating_sub(page),
                 MenuNav::PageDown => sel = (sel + page).min(total - 1),
                 MenuNav::Home => sel = 0,
@@ -462,7 +528,6 @@ pub fn run(
                 MenuNav::Confirm => activate = Some(sel),
                 // B: começa o jogo com o que estiver ligado.
                 MenuNav::Back => return Ok(FishOutcome::Start),
-                _ => {}
             }
         }
         if let Some(idx) = activate {
@@ -529,6 +594,17 @@ mod tests {
         for &(_, x, y, w, h) in &l.rows {
             assert!(x >= 0 && y >= 0 && x + w <= g.w && y + h <= g.h);
         }
+    }
+
+    #[test]
+    fn keyboard_keys_map_to_menu_intents() {
+        assert_eq!(key_nav("Up"), Some(MenuNav::Up));
+        assert_eq!(key_nav("Down"), Some(MenuNav::Down));
+        assert_eq!(key_nav("Return"), Some(MenuNav::Confirm));
+        assert_eq!(key_nav("Space"), Some(MenuNav::Confirm));
+        assert_eq!(key_nav("Backspace"), Some(MenuNav::Back));
+        assert_eq!(key_nav("PageDown"), Some(MenuNav::PageDown));
+        assert_eq!(key_nav("F13"), None);
     }
 
     #[test]
