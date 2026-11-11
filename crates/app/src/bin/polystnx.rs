@@ -429,6 +429,10 @@ fn main() -> Result<()> {
                     break 'app;
                 }
                 refresh_ra(&cfg, &mut cab, &mut shelf_opts);
+                // "Renomear ROMs" muda os arquivos de lugar: sem reabrir o
+                // catálogo a estante ficaria apontando para nomes que não
+                // existem mais ("o jogo não abriu").
+                catalog = open_catalog().with_context(|| "refreshing the catalog")?;
                 // A core download may have just finished.
                 core_path = args.core.clone().or_else(default_core_path);
                 cab.set_nameplate(&core_update::nameplate_text(core_path.as_deref()));
@@ -450,6 +454,7 @@ fn main() -> Result<()> {
                             break 'app;
                         }
                         refresh_ra(&cfg, &mut cab, &mut shelf_opts);
+                        catalog = open_catalog().with_context(|| "refreshing the catalog")?;
                         // A core download may have just finished.
                         core_path = args.core.clone().or_else(default_core_path);
                         cab.set_nameplate(&core_update::nameplate_text(core_path.as_deref()));
@@ -472,6 +477,7 @@ fn main() -> Result<()> {
                                 break 'app;
                             }
                             refresh_ra(&cfg, &mut cab, &mut shelf_opts);
+                            catalog = open_catalog().with_context(|| "refreshing the catalog")?;
                             core_path = args.core.clone().or_else(default_core_path);
                             cab.set_nameplate(&core_update::nameplate_text(core_path.as_deref()));
                             continue;
@@ -550,10 +556,18 @@ fn main() -> Result<()> {
                 Ok(GameExit::Quit) => break 'app,
                 Err(e) => {
                     log::error!("o jogo não abriu: {e:#}");
-                    let body = format!(
-                        "não deu para ligar este disco. confira se o arquivo continua lá e é \
-                         um disco de PS1 válido (e se a BIOS está em bios/). {e:#}"
-                    );
+                    let body = if !spec.rom.exists() {
+                        format!(
+                            "o arquivo do disco não está mais em {} — foi renomeado, movido ou \
+                             apagado. Volte à estante e use \"Atualizar\".",
+                            spec.rom.display()
+                        )
+                    } else {
+                        format!(
+                            "não deu para ligar este disco. confira se o arquivo é um disco de \
+                             PS1 válido (e se a BIOS está em bios/). {e:#}"
+                        )
+                    };
                     if message_screen(&mut plat, &mut cab, "o jogo não abriu", &body)? {
                         break 'app;
                     }

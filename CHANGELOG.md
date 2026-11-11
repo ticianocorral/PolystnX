@@ -42,6 +42,13 @@ Auditoria de segurança alinhada com o SixteeN (1.3.2 → 1.8.1).
 - `crates/app/examples/tv_shot.rs`: fotos do queixo e do vidro pelo caminho
   vivo do `present`.
 
+### Arte padrão
+- **Jogo sem arte vira um CD-R de prata numa caixa de CD transparente**, com
+  o nome e o ano escritos à caneta no disco (preta, azul ou vermelha, tremida
+  e inclinada — o sorteio vem do próprio jogo, então é sempre igual). Vale
+  para a grade e para a faixa de recentes; sai o modo "lista" que aparecia
+  quando nenhum jogo tinha capa.
+
 ### Cheater Fish
 - **Tela de cheats antes do jogo, no estilo GameShark** (o equivalente do
   Cheat Genius do SixteeN): ao ligar o console com um disco que tem cheats,
@@ -77,6 +84,13 @@ Auditoria de segurança alinhada com o SixteeN (1.3.2 → 1.8.1).
   checagem de updates; **jogo** com o Cheater Fish.
 - Só entram opções que fazem sentido no PlayStation: nada de mau contato,
   tema da estante, sugestão da noite, flyback, burn-in ou idioma.
+
+### Corrigido
+- **"O jogo não abriu" depois de "Renomear ROMs"**: a estante seguia
+  apontando para o nome antigo do arquivo (o catálogo só era relido no
+  "Atualizar"). Agora o catálogo é relido sempre que se volta das
+  configurações; e, se o arquivo do disco sumiu, o aviso diz isso e manda
+  usar "Atualizar" em vez de culpar o núcleo.
 
 ### Controle
 - **Botões da TV alcançáveis pelo controle na tela inicial** (como no

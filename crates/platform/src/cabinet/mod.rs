@@ -1165,6 +1165,89 @@ impl Screen<'_> {
             .render_geometry(&verts, None::<&Texture>, &indices[..]);
     }
 
+    /// Um quadrilátero cheio, de cantos livres (sentido horário) — a
+    /// etiqueta de papel torta do cartucho genérico.
+    pub fn quad(&mut self, pts: [(f32, f32); 4], c: (u8, u8, u8, u8)) {
+        let color = FColor::RGBA(
+            c.0 as f32 / 255.0,
+            c.1 as f32 / 255.0,
+            c.2 as f32 / 255.0,
+            c.3 as f32 / 255.0,
+        );
+        let verts = pts.map(|(x, y)| Vertex {
+            position: sdl3::render::FPoint::new(x, y),
+            color,
+            tex_coord: sdl3::render::FPoint::new(0.0, 0.0),
+        });
+        let _ = self
+            .canvas
+            .render_geometry(&verts, None::<&Texture>, &[0, 1, 2, 0, 2, 3][..]);
+    }
+
+    /// `s` escrito à mão: a linha corre inclinada `slope` (px por px) a
+    /// partir de `(x, y)`, e cada letra ganha um tremido próprio — sobe ou
+    /// desce um pouco, gira alguns graus, encolhe ou cresce um tico, sai
+    /// com mais ou menos tinta. O sorteio vem de `seed`, então o mesmo
+    /// texto sai sempre com a mesma letra. Devolve o avanço em x.
+    pub fn text_hand(
+        &mut self,
+        (x, y): (f32, f32),
+        slope: f32,
+        size: f32,
+        c: (u8, u8, u8),
+        s: &str,
+        seed: u32,
+    ) -> f32 {
+        let mut r = seed.wrapping_mul(2_654_435_761) | 1;
+        let mut rnd = move || {
+            r ^= r << 13;
+            r ^= r >> 17;
+            r ^= r << 5;
+            (r >> 8) as f32 / (1u32 << 24) as f32 * 2.0 - 1.0
+        };
+        let k = size / GLYPH_H as f32;
+        let adv = GLYPH_W as f32 * k * 0.92;
+        // Uma onda lenta na linha, de quem escreve sem régua.
+        let (wave_f, wave_p) = (0.6 + 0.3 * rnd(), rnd() * 3.0);
+        let angle = slope.atan().to_degrees() as f64;
+        let mut pen = 0.0f32;
+        for (i, ch) in s.chars().enumerate() {
+            let jit = (rnd(), rnd(), rnd(), rnd());
+            if ch != ' ' {
+                let idx = glyph_index(ch);
+                let g = 1.0 + 0.08 * jit.0;
+                let (gw, gh) = (GLYPH_W as f32 * k * g, GLYPH_H as f32 * k * g);
+                let lift = (i as f32 * wave_f + wave_p).sin() * size * 0.05 + jit.1 * size * 0.04;
+                let ink = 0.8 + 0.2 * jit.3;
+                self.font.set_color_mod(
+                    (c.0 as f32 * ink) as u8,
+                    (c.1 as f32 * ink) as u8,
+                    (c.2 as f32 * ink) as u8,
+                );
+                let src = Rect::new(idx as i32 * GLYPH_W as i32, 0, GLYPH_W, GLYPH_H);
+                let dst =
+                    sdl3::render::FRect::new(x + pen, y + pen * slope + lift + (size - gh), gw, gh);
+                // Duas passadas meio pixel ao lado: o traço da caneta, mais
+                // grosso que o da fonte.
+                for nudge in [0.0, size * 0.035] {
+                    let mut at = dst;
+                    at.x += nudge;
+                    let _ = self.canvas.copy_ex(
+                        self.font,
+                        src,
+                        at,
+                        angle + jit.2 as f64 * 6.0,
+                        None,
+                        false,
+                        false,
+                    );
+                }
+            }
+            pen += adv * (1.0 + 0.06 * jit.0);
+        }
+        pen
+    }
+
     pub fn outline(&mut self, x: i32, y: i32, w: u32, h: u32, thick: u32, c: (u8, u8, u8, u8)) {
         let t = thick as i32;
         self.fill(x, y, w, thick, c);

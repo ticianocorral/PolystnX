@@ -42,12 +42,6 @@ const HEADER_H: i32 = 28;
 const SCROLLBAR_W: u32 = 6;
 const SCROLLBAR_RESERVE: u32 = 16;
 
-/// Row height when the shelf falls back to a plain text list (no cover art
-/// loaded at all, plan §3.1) — a multicart-style menu instead of a grid of
-/// empty tiles.
-const LIST_ROW_H: u32 = 22;
-const LIST_GAP: u32 = 6;
-
 /// A "jogados recentemente" strip above the main grid/list (plan revision) —
 /// the last played games, always in a single row. Both strips scroll
 /// horizontally now (see `STRIP_CAP`), so no fixed five-item cap anymore.
@@ -101,7 +95,7 @@ const TILE_BG: (u8, u8, u8, u8) = (34, 34, 40, 255);
 const HILITE: (u8, u8, u8, u8) = (240, 200, 80, 255);
 const TEXT: (u8, u8, u8) = (232, 232, 232);
 const DIM: (u8, u8, u8) = (150, 150, 158);
-/// Text color on top of the `HILITE` selection bar in list mode — dark, for
+/// Text color on top of the `HILITE` selection bar (o histórico) — dark, for
 /// contrast against the bright fill.
 const HILITE_TEXT: (u8, u8, u8) = (24, 20, 12);
 /// How opaque the shelf sits over the resting TV static (plan §3.3) — era
@@ -534,6 +528,183 @@ fn pick_play(
     }
 }
 
+/// O nome como alguém escreveria à caneta: sem o "(USA)"/"(Europe)" do
+/// No-Intro e com o ", The" de volta para a frente.
+fn handwritten_title(title: &str) -> String {
+    let base = title.split(" (").next().unwrap_or(title).trim();
+    let (head, tail) = base.split_once(" - ").unwrap_or((base, ""));
+    let head = match head.strip_suffix(", The") {
+        Some(h) => format!("The {h}"),
+        None => head.to_string(),
+    };
+    if tail.is_empty() {
+        head
+    } else {
+        format!("{head} - {tail}")
+    }
+}
+
+/// Quebra `s` em até `max_lines` linhas de `cols` letras; a última leva
+/// "..." quando não coube tudo.
+fn wrap_lines(s: &str, cols: usize, max_lines: usize) -> Vec<String> {
+    let mut lines: Vec<String> = Vec::new();
+    let mut line = String::new();
+    for word in s.split_whitespace() {
+        let fits = line.is_empty() || line.chars().count() + 1 + word.chars().count() <= cols;
+        if !fits {
+            lines.push(std::mem::take(&mut line));
+        }
+        if !line.is_empty() {
+            line.push(' ');
+        }
+        line.push_str(word);
+    }
+    if !line.is_empty() {
+        lines.push(line);
+    }
+    for l in lines.iter_mut() {
+        if l.chars().count() > cols {
+            *l = l.chars().take(cols).collect();
+        }
+    }
+    if lines.len() > max_lines {
+        lines.truncate(max_lines);
+        let last = &mut lines[max_lines - 1];
+        let keep = cols.saturating_sub(3).min(last.chars().count());
+        *last = last.chars().take(keep).collect::<String>() + "...";
+    }
+    lines
+}
+
+/// O ano de lançamento da tabela embutida, para o CD escrito à mão.
+fn entry_year(entry: &CatalogEntry) -> Option<String> {
+    polystnx_domain::infos::lookup(&entry.rom.sha1).and_then(|i| i.year)
+}
+
+/// A arte que falta: uma caixa de CD transparente com um CD-R de prata
+/// dentro, o nome e o ano escritos à caneta direto no disco — o disco
+/// gravado, emprestado de um amigo. `seed` (do id da capa) sorteia a
+/// inclinação e a cor da caneta, sempre iguais para o mesmo jogo.
+#[doc(hidden)]
+pub fn draw_generic_cd(
+    d: &mut Screen,
+    title: &str,
+    year: Option<&str>,
+    seed: u32,
+    rect: (i32, i32, u32, u32),
+) {
+    const PLASTIC: (u8, u8, u8) = (146, 152, 164);
+    const SPINE: (u8, u8, u8) = (104, 110, 124);
+    const TRAY: (u8, u8, u8) = (44, 50, 64);
+    let (rx, ry, rw, rh) = rect;
+    // Caixa de CD: quase quadrada, pousada no meio do espaço.
+    let s = rw.min(rh) as i32;
+    if s < 24 {
+        return;
+    }
+    let (bx, by) = (rx + (rw as i32 - s) / 2, ry + (rh as i32 - s) / 2);
+    let sf = s as f32;
+    let solid = |c: (u8, u8, u8)| (c.0, c.1, c.2, 255);
+
+    // A caixa: sombra, plástico, lombada com os encaixes e o fio de luz.
+    d.fill(bx + 2, by + 3, s as u32, s as u32, (0, 0, 0, 80));
+    d.fill(bx, by, s as u32, s as u32, solid(PLASTIC));
+    let spine = ((sf * 0.07) as i32).max(3);
+    d.fill(bx, by, spine as u32, s as u32, solid(SPINE));
+    for k in 0..3 {
+        d.fill(
+            bx + 1,
+            by + (sf * (0.2 + 0.25 * k as f32)) as i32,
+            (spine - 2).max(1) as u32,
+            3,
+            (70, 74, 86, 255),
+        );
+    }
+    d.fill(bx, by, s as u32, 1, (255, 255, 255, 90));
+    d.outline(bx, by, s as u32, s as u32, 1, (206, 212, 226, 110));
+    // A bandeja escura onde o disco repousa.
+    let inset = ((sf * 0.06) as i32).max(2);
+    let (tx, ty) = (bx + spine + inset, by + inset);
+    let (tw, th) = (s - spine - 2 * inset, s - 2 * inset);
+    d.fill(tx, ty, tw as u32, th as u32, solid(TRAY));
+
+    // O disco de prata, um degradê de cima para baixo.
+    let r = (tw.min(th) as f32 * 0.47) as i32;
+    let (cx, cy) = (tx + tw / 2, ty + th / 2);
+    for dy in -r..=r {
+        let hw = ((r * r - dy * dy) as f32).sqrt() as i32;
+        let t = (dy + r) as f32 / (2 * r) as f32;
+        let lerp = |a: u8, b: u8| (a as f32 + (b as f32 - a as f32) * t) as u8;
+        d.fill(
+            cx - hw,
+            cy + dy,
+            (hw * 2 + 1) as u32,
+            1,
+            (lerp(222, 150), lerp(226, 156), lerp(234, 172), 255),
+        );
+    }
+    // O cubo: um anel mais claro e o furo no centro.
+    let hub = (r as f32 * 0.27) as i32;
+    for dy in -hub..=hub {
+        let hw = ((hub * hub - dy * dy) as f32).sqrt() as i32;
+        d.fill(
+            cx - hw,
+            cy + dy,
+            (hw * 2 + 1) as u32,
+            1,
+            (188, 194, 208, 255),
+        );
+    }
+    let hole = ((r as f32 * 0.1) as i32).max(1);
+    for dy in -hole..=hole {
+        let hw = ((hole * hole - dy * dy) as f32).sqrt() as i32;
+        d.fill(cx - hw, cy + dy, (hw * 2 + 1) as u32, 1, solid(TRAY));
+    }
+    // O reflexo do plástico por cima do canto de cima.
+    d.fill(tx, ty, tw as u32, 2, (255, 255, 255, 40));
+
+    // A caneta: preta quase sempre, às vezes azul ou vermelha.
+    let pick = |k: u32| (seed.rotate_left(k) % 1000) as f32 / 1000.0;
+    let ink = match (pick(7) * 5.0) as u32 {
+        0..=2 => (20, 20, 28),
+        3 => (26, 46, 140),
+        _ => (156, 30, 34),
+    };
+    let slope = (pick(3) - 0.5) * 0.12;
+    let size = (r as f32 * 0.19).clamp(8.0, 22.0);
+    let gap = size * 1.12;
+    // O avanço médio de uma letra de `text_hand` (célula 9x20, apertada).
+    let adv = size * 9.0 / 20.0 * 0.92 * 1.06;
+    // A corda do disco na linha mais alta da escrita.
+    let top_dy = -(r as f32) * 0.66;
+    let chord = 2.0 * ((r as f32).powi(2) - top_dy.powi(2)).sqrt();
+    let cols = (((chord - 8.0) / adv) as usize).max(4);
+    let lines = wrap_lines(&handwritten_title(title), cols, 3);
+    for (i, line) in lines.iter().enumerate() {
+        let x0 = cx as f32 - chord / 2.0 + 4.0 + pick(i as u32 * 5 + 1) * 3.0;
+        let y0 = cy as f32 + top_dy + i as f32 * gap;
+        d.text_hand(
+            (x0, y0),
+            slope,
+            size,
+            ink,
+            line,
+            seed.wrapping_add(i as u32 * 977),
+        );
+    }
+    if let Some(year) = year {
+        let w = year.chars().count() as f32 * size * 9.0 / 20.0;
+        d.text_hand(
+            (cx as f32 - w / 2.0, cy as f32 + r as f32 * 0.5),
+            slope,
+            size,
+            ink,
+            year,
+            seed ^ 0x5EED,
+        );
+    }
+}
+
 /// Whether `entry`'s title matches a filter query — empty matches everything,
 /// otherwise a case-insensitive substring test (plan revision: "colocar
 /// filtro para facilitar o encontro dos games na lista").
@@ -829,7 +1000,6 @@ struct GridLayout {
     item_h: i32,
     cols: usize,
     vis_rows: usize,
-    list_mode: bool,
 }
 
 impl GridLayout {
@@ -840,46 +1010,35 @@ impl GridLayout {
     /// Steam Deck (e qualquer tela onde 260px de tile rendem só 2 colunas):
     /// a grade nunca mostra menos que 3 colunas × 2 linhas — o tile encolhe,
     /// mantendo o 4:3, antes de perder uma coluna ou uma linha.
-    fn new(scr_w: u32, scr_h: u32, list_mode: bool, top_y: i32) -> Self {
+    fn new(scr_w: u32, scr_h: u32, top_y: i32) -> Self {
         let grid_w = scr_w.saturating_sub(MARGIN as u32 * 2 + SCROLLBAR_RESERVE);
-        let (cell_w, cell_h, item_w, item_h, cols, x0) = if list_mode {
-            let cell_h = (LIST_ROW_H + LIST_GAP) as i32;
-            (
-                grid_w as i32,
-                cell_h,
-                grid_w as i32,
-                LIST_ROW_H as i32,
-                1,
-                MARGIN,
-            )
-        } else {
-            let gap = GAP as i32;
-            // Colunas por resolução (plan revision): nas do Deck (720p/800p
-            // — grid_w ~754) a fileira leva 3 caixas grandes; de 1600×1000
-            // para cima (grid_w ~1044+) leva 5 — a largura de tela que
-            // sobra depois do painel decide.
-            let cols = if grid_w >= 900 { 5 } else { 3 };
-            // Encolhe o tile até a fileira caber `cols` colunas com gap.
-            let item_w = (TILE_W as i32)
-                .min((grid_w as i32 - gap * (cols - 1)) / cols)
-                .max(48);
-            let mut item_h = item_w * TILE_H as i32 / TILE_W as i32;
-            // E até 2 linhas couberem na altura (se a tela for baixa demais
-            // para os tiles já encolhidos pela largura).
-            let avail_h = scr_h as i32 - top_y - MARGIN;
-            let two_rows_h = (avail_h / 2 - gap).max(36);
-            if item_h > two_rows_h {
-                item_h = two_rows_h;
-            }
-            let item_w = item_h * TILE_W as i32 / TILE_H as i32;
-            let cell_w = item_w + gap;
-            let cell_h = item_h + gap;
-            // Alinhada à ESQUERDA (plan revision: "alinhar a estante da
-            // lista dos jogos a esquerda") — a grade nasce na margem e a
-            // sobra de largura fica toda à direita.
-            let x0 = MARGIN;
-            (cell_w, cell_h, item_w, item_h, cols as usize, x0)
-        };
+        let gap = GAP as i32;
+        // Colunas por resolução (plan revision): nas do Deck (720p/800p
+        // — grid_w ~754) a fileira leva 3 caixas grandes; de 1600×1000
+        // para cima (grid_w ~1044+) leva 5 — a largura de tela que
+        // sobra depois do painel decide.
+        let cols = if grid_w >= 900 { 5 } else { 3 };
+        // Encolhe o tile até a fileira caber `cols` colunas com gap.
+        let item_w = (TILE_W as i32)
+            .min((grid_w as i32 - gap * (cols - 1)) / cols)
+            .max(48);
+        let mut item_h = item_w * TILE_H as i32 / TILE_W as i32;
+        // E até 2 linhas couberem na altura (se a tela for baixa demais
+        // para os tiles já encolhidos pela largura).
+        let avail_h = scr_h as i32 - top_y - MARGIN;
+        let two_rows_h = (avail_h / 2 - gap).max(36);
+        if item_h > two_rows_h {
+            item_h = two_rows_h;
+        }
+        let item_w = item_h * TILE_W as i32 / TILE_H as i32;
+        let cell_w = item_w + gap;
+        let cell_h = item_h + gap;
+        // Alinhada à ESQUERDA (plan revision: "alinhar a estante da
+        // lista dos jogos a esquerda") — a grade nasce na margem e a
+        // sobra de largura fica toda à direita.
+        let x0 = MARGIN;
+        let (cell_w, cell_h, item_w, item_h, cols, x0) =
+            (cell_w, cell_h, item_w, item_h, cols as usize, x0);
         let vis_rows = ((scr_h as i32 - top_y - MARGIN) / cell_h).max(1) as usize;
         Self {
             x0,
@@ -890,7 +1049,6 @@ impl GridLayout {
             item_h,
             cols,
             vis_rows,
-            list_mode,
         }
     }
 
@@ -1283,10 +1441,6 @@ pub fn run(
             fav_scroll = fav_idx + 1 - strip_vis;
         }
 
-        // No cover art loaded anywhere in view yet: a text list (multicart
-        // menu) reads as deliberate, where a grid of empty tiles reads as
-        // broken (plan §3.1).
-        let list_mode = !view.iter().any(|e| cab.has_image(cover_id(&e.rom.sha1)));
         let fav_block_h = if show_fav {
             FAV_LABEL_H + RECENT_TILE_H as i32 + GAP as i32
         } else {
@@ -1323,7 +1477,7 @@ pub fn run(
         }
         let all_games_label_y = MARGIN + HEADER_H + fav_block_h + recent_block_h;
         let grid_top_y = all_games_label_y + ALL_GAMES_LABEL_H;
-        let grid = GridLayout::new(scr_w, scr_h, list_mode, grid_top_y);
+        let grid = GridLayout::new(scr_w, scr_h, grid_top_y);
         let recent_layout = RecentLayout::new(MARGIN + HEADER_H + fav_block_h + RECENT_LABEL_H);
         let fav_layout = RecentLayout::new(MARGIN + HEADER_H + FAV_LABEL_H);
         let filter_rect = filter_box_rect(scr_w);
@@ -2497,13 +2651,13 @@ pub fn run(
                     if d.has_image(id) {
                         d.image_fit(id, x + 4, y + 4, RECENT_TILE_W - 8, RECENT_TILE_H - 8);
                     } else {
-                        d.text_wrapped(
-                            x + 6,
-                            y + 8,
-                            RECENT_TILE_W - 12,
-                            1,
-                            DIM,
-                            &entry.title().to_uppercase(),
+                        let year = entry_year(entry);
+                        draw_generic_cd(
+                            d,
+                            &entry.title(),
+                            year.as_deref(),
+                            (id ^ (id >> 32)) as u32,
+                            (x + 4, y + 4, RECENT_TILE_W - 8, RECENT_TILE_H - 8),
                         );
                     }
                     if hover_fav == Some(i) {
@@ -2579,71 +2733,53 @@ pub fn run(
 
             d.text(MARGIN, all_games_label_y, 1, DIM, ALL_GAMES_TITLE);
 
-            if grid.list_mode {
-                // Multicart menu: a plain numbered list, selection as an
-                // inverted bar — no tile, no art, nothing pretending there's
-                // a cover coming.
-                for (i, entry) in view.iter().enumerate() {
-                    let Some((x, y)) = grid.cell_pos(i, top_row) else {
-                        continue;
-                    };
-                    let selected = !in_recent && i == sel;
-                    if selected {
-                        d.fill(x, y, grid.item_w as u32, grid.item_h as u32, HILITE);
-                    }
-                    let label = format!("{:03}  {}", i + 1, entry.title().to_uppercase());
-                    let color = if selected { HILITE_TEXT } else { TEXT };
-                    d.text(x + 6, y + 3, 1, color, &label);
+            // A madeira sob cada fileira visível — as caixas pousam
+            // nela (a prateleira mora no vão de GAP, sem mexer nos
+            // rects de clique).
+            for row in 0..grid.vis_rows {
+                let y = grid.y0 + row as i32 * grid.cell_h + grid.item_h;
+                draw_shelf_board(d, MARGIN, scr_w - MARGIN as u32 * 2, y, 14);
+            }
+            for (i, entry) in view.iter().enumerate() {
+                let Some((x, y)) = grid.cell_pos(i, top_row) else {
+                    continue;
+                };
+                let id = cover_id(&entry.rom.sha1);
+                // Capa vazada (render 3D em ângulo): sem tile cinza —
+                // a arte compõe na madeira, ancorada na base.
+                let vazada = d.image_vazado(id);
+                if !vazada {
+                    d.fill(x, y, grid.item_w as u32, grid.item_h as u32, TILE_BG);
                 }
-            } else {
-                // A madeira sob cada fileira visível — as caixas pousam
-                // nela (a prateleira mora no vão de GAP, sem mexer nos
-                // rects de clique).
-                for row in 0..grid.vis_rows {
-                    let y = grid.y0 + row as i32 * grid.cell_h + grid.item_h;
-                    draw_shelf_board(d, MARGIN, scr_w - MARGIN as u32 * 2, y, 14);
-                }
-                for (i, entry) in view.iter().enumerate() {
-                    let Some((x, y)) = grid.cell_pos(i, top_row) else {
-                        continue;
-                    };
-                    let id = cover_id(&entry.rom.sha1);
-                    // Capa vazada (render 3D em ângulo): sem tile cinza —
-                    // a arte compõe na madeira, ancorada na base.
-                    let vazada = d.image_vazado(id);
-                    if !vazada {
-                        d.fill(x, y, grid.item_w as u32, grid.item_h as u32, TILE_BG);
-                    }
-                    if d.has_image(id) {
-                        if vazada {
-                            d.image_fit_bottom(id, x, y, grid.item_w as u32, grid.item_h as u32);
-                        } else {
-                            d.image_fit(
-                                id,
-                                x + 4,
-                                y + 4,
-                                grid.item_w as u32 - 8,
-                                grid.item_h as u32 - 8,
-                            );
-                        }
+                if d.has_image(id) {
+                    if vazada {
+                        d.image_fit_bottom(id, x, y, grid.item_w as u32, grid.item_h as u32);
                     } else {
-                        d.text_wrapped(
-                            x + 8,
-                            y + 10,
-                            TILE_W - 16,
-                            1,
-                            DIM,
-                            &entry.title().to_uppercase(),
+                        d.image_fit(
+                            id,
+                            x + 4,
+                            y + 4,
+                            grid.item_w as u32 - 8,
+                            grid.item_h as u32 - 8,
                         );
                     }
-                    if !vazada {
-                        draw_box_dressing(d, x, y, grid.item_w as u32, grid.item_h as u32);
-                    } else {
-                        draw_expositor(d, x, y, grid.item_w as u32, grid.item_h as u32);
-                    }
-                    if hover_grid == Some(i) {
-                        draw_play_icon(d, x + grid.item_w - 26, y + grid.item_h - 26);
-                    }
+                } else {
+                    let year = entry_year(entry);
+                    draw_generic_cd(
+                        d,
+                        &entry.title(),
+                        year.as_deref(),
+                        (id ^ (id >> 32)) as u32,
+                        (x + 4, y + 4, grid.item_w as u32 - 8, grid.item_h as u32 - 8),
+                    );
+                }
+                if !vazada {
+                    draw_box_dressing(d, x, y, grid.item_w as u32, grid.item_h as u32);
+                } else {
+                    draw_expositor(d, x, y, grid.item_w as u32, grid.item_h as u32);
+                }
+                if hover_grid == Some(i) {
+                    draw_play_icon(d, x + grid.item_w - 26, y + grid.item_h - 26);
                 }
             }
 
@@ -3031,5 +3167,32 @@ mod cart_tests {
         assert_eq!(cart_size(652 * mib + 4096), "653 MB"); // Tekken 3 (Track 1 ~652 MB)
         assert_eq!(cart_size(mib), "1 MB");
         assert_eq!(cart_size(0), "0 MB");
+    }
+}
+
+#[cfg(test)]
+mod generic_art_tests {
+    use super::{handwritten_title, wrap_lines};
+
+    #[test]
+    fn handwritten_title_drops_tags_and_fronts_the_article() {
+        assert_eq!(handwritten_title("Tekken 3 (USA)"), "Tekken 3");
+        assert_eq!(
+            handwritten_title("Resident Evil 2 - Dual Shock Ver. (USA) (Disc 1)"),
+            "Resident Evil 2 - Dual Shock Ver."
+        );
+        assert_eq!(
+            handwritten_title("Legend of Dragoon, The (USA)"),
+            "The Legend of Dragoon"
+        );
+    }
+
+    #[test]
+    fn wrap_lines_breaks_on_words_and_marks_the_overflow() {
+        assert_eq!(wrap_lines("Crash Bandicoot", 8, 3), ["Crash", "Bandicoo"]);
+        assert_eq!(
+            wrap_lines("Final Fantasy VII International Edition", 8, 2),
+            ["Final", "Fanta..."]
+        );
     }
 }
