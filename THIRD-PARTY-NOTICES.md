@@ -170,3 +170,11 @@ acima). `cd_seek.wav` é um recorte de
 PlayStation publicado em
 [youtube.com/watch?v=5avty_d1rTI](https://www.youtube.com/watch?v=5avty_d1rTI),
 usado como efeito sonoro do leitor durante as hesitações do emulador.
+
+## Fonte dos botões do console (Inter Medium)
+
+As palavras POWER, RESET e OPEN gravadas nos botões do console usam a fonte
+[Inter](https://rsms.me/inter/) (Rasmus Andersson), peso Medium, embutida em
+`crates/platform/assets/Inter-Medium.otf` e licenciada sob a
+[SIL Open Font License 1.1](https://openfontlicense.org). A renderização usa a
+crate [ab_glyph](https://crates.io/crates/ab_glyph) (Apache-2.0).
