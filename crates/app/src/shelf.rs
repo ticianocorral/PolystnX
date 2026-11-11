@@ -30,7 +30,7 @@ use crate::idle;
 const TILE_W: u32 = 236;
 const TILE_H: u32 = 236;
 const GAP: u32 = 18;
-const MARGIN: i32 = 28;
+pub(crate) const MARGIN: i32 = 28;
 /// Room reserved at the header row for the "N games" label and the filter
 /// box — both sit above the grid/recent row, inside the tube like the rest
 /// of the shelf's own content.
@@ -155,6 +155,8 @@ pub struct ShelfOpts {
     /// that shows "conquistas: N" in the panel; `None` keeps the shelf
     /// entirely RA-free.
     pub ra: Option<(String, String, String)>,
+    /// O móvel da estante (`shelf_theme` no `polystnx.cfg`).
+    pub theme: crate::config::ShelfTheme,
 }
 
 impl Default for ShelfOpts {
@@ -166,6 +168,7 @@ impl Default for ShelfOpts {
             fade_in: None,
             preset_filter: None,
             ra: None,
+            theme: crate::config::ShelfTheme::Ps1,
         }
     }
 }
@@ -2720,9 +2723,28 @@ pub fn run(
             // A madeira sob cada fileira visível — as caixas pousam
             // nela (a prateleira mora no vão de GAP, sem mexer nos
             // rects de clique).
-            for row in 0..grid.vis_rows {
-                let y = grid.y0 + row as i32 * grid.cell_h + grid.item_h;
-                draw_shelf_board(d, MARGIN, scr_w - MARGIN as u32 * 2, y, 14);
+            if opts.theme == crate::config::ShelfTheme::Ps1 {
+                for row in 0..grid.vis_rows {
+                    let y = grid.y0 + row as i32 * grid.cell_h + grid.item_h;
+                    draw_shelf_board(d, MARGIN, scr_w - MARGIN as u32 * 2, y, 14);
+                }
+            } else {
+                crate::furniture::draw_back(d, opts.theme, scr_w, scr_h, grid.y0 + 1);
+                let tags: Vec<i32> = (0..grid.cols)
+                    .map(|c| grid.x0 + c as i32 * grid.cell_w + grid.item_w / 2)
+                    .collect();
+                for row in 0..grid.vis_rows {
+                    let y = grid.y0 + row as i32 * grid.cell_h + grid.item_h;
+                    crate::furniture::draw_shelf(
+                        d,
+                        opts.theme,
+                        MARGIN,
+                        scr_w - MARGIN as u32 * 2,
+                        y,
+                        14,
+                        &tags,
+                    );
+                }
             }
             for (i, entry) in view.iter().enumerate() {
                 let Some((x, y)) = grid.cell_pos(i, top_row) else {

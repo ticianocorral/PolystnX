@@ -79,8 +79,8 @@ fn row_count(sec: usize, cfg: &Config) -> usize {
         SEC_JOGO => 2,
         // tela cheia / som do jogo / volume da TV / brilho / contraste / cor / nitidez
         SEC_IMAGEM => 7,
-        // renomear ROMs
-        SEC_ESTANTE => 1,
+        // tema da estante / renomear ROMs
+        SEC_ESTANTE => 2,
         // núcleo / checar updates
         SEC_SISTEMA => 2,
         // usuário / token / senha / testar login / hardcore
@@ -505,7 +505,14 @@ fn activate_row(
             // sentidos).
             _ => step_tv_row(cfg, cab, i, 1, true),
         },
-        SEC_ESTANTE => *rename_status = Some(run_rom_rename()),
+        SEC_ESTANTE => {
+            if i == 0 {
+                cfg.shelf_theme = cfg.shelf_theme.cycle();
+                let _ = cfg.save();
+            } else {
+                *rename_status = Some(run_rom_rename());
+            }
+        }
         SEC_SISTEMA => match i {
             0 => start_core_download(core_status, core_worker),
             _ => {
@@ -585,6 +592,14 @@ fn adjust_row(cfg: &mut Config, sec: usize, sel: usize, cab: &mut Cabinet, right
             let _ = cfg.save();
         }
         (SEC_IMAGEM, 2..=6) => step_tv_row(cfg, cab, sel, if right { 1 } else { -1 }, false),
+        (SEC_ESTANTE, 0) => {
+            cfg.shelf_theme = if right {
+                cfg.shelf_theme.cycle()
+            } else {
+                cfg.shelf_theme.cycle_back()
+            };
+            let _ = cfg.save();
+        }
         (SEC_SISTEMA, 1) => {
             cfg.check_updates_on_start = !cfg.check_updates_on_start;
             let _ = cfg.save();
@@ -794,15 +809,34 @@ fn draw_imagem(d: &mut Screen, cfg: &Config, sel: usize) {
     );
 }
 
-/// "estante": o que mexe nos arquivos dos jogos.
-fn draw_estante(d: &mut Screen, _cfg: &Config, sel: usize, rename_status: Option<&str>) {
+/// O nome do móvel da estante na linha de configuração.
+fn shelf_theme_name(theme: crate::config::ShelfTheme) -> &'static str {
+    use crate::config::ShelfTheme::*;
+    match theme {
+        Ps1 => "PlayStation (padrão)",
+        Wood => "móvel de madeira",
+        Metal => "expositor de metal da locadora",
+        HiFi => "rack de som preto",
+        Memphis => "quarto anos 90",
+        Arcade => "fliperama",
+    }
+}
+
+/// "estante": o móvel e o que mexe nos arquivos dos jogos.
+fn draw_estante(d: &mut Screen, cfg: &Config, sel: usize, rename_status: Option<&str>) {
     let x = MARGIN;
     d.text(x, MARGIN, 2, TEXT, "estante");
-    let rows = [rename_status
-        .unwrap_or("Renomear ROMs para o padrão No-Intro")
-        .to_string()];
+    let rows = [
+        format!("Tema da estante: {}", shelf_theme_name(cfg.shelf_theme)),
+        rename_status
+            .unwrap_or("Renomear ROMs para o padrão No-Intro")
+            .to_string(),
+    ];
     draw_rows(d, x, &rows, sel);
-    draw_hint(d, "clique numa opção pra executar");
+    draw_hint(
+        d,
+        "clique ou setas trocam o móvel -- a estante muda ao voltar",
+    );
 }
 
 fn draw_sistema(d: &mut Screen, cfg: &Config, sel: usize, core_status: &CoreStatus) {

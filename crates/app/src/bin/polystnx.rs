@@ -342,6 +342,7 @@ fn main() -> Result<()> {
         fade_in: None,
         preset_filter: None,
         ra: None,
+        theme: cfg.shelf_theme,
     };
     refresh_ra(&cfg, &mut cab, &mut shelf_opts);
 
@@ -602,6 +603,7 @@ fn main() -> Result<()> {
 /// por senha acontece com o app aberto, e sem isto o token novo só seria
 /// visto no próximo arranque (o RA "sumia" até reiniciar).
 fn refresh_ra(cfg: &Config, cab: &mut Cabinet, shelf_opts: &mut ShelfOpts) {
+    shelf_opts.theme = cfg.shelf_theme;
     let on = !cfg.ra_user.is_empty() && cfg.ra_connect.is_some();
     cab.set_ra_status(on.then_some(RaStatus {
         hardcore: cfg.ra_hardcore,

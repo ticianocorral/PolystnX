@@ -21,6 +21,7 @@ pub mod core_update;
 pub mod dat_update;
 pub mod devmenu;
 pub mod dirs;
+pub mod furniture;
 pub mod generic_disc;
 pub mod idle;
 pub mod imgutil;

@@ -4,6 +4,17 @@ Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/);
 versionamento por [SemVer 2.0.0](https://semver.org/lang/pt-BR/). O workspace
 inteiro compartilha uma versão (`[workspace.package]` em `Cargo.toml`).
 
+## [Não lançado]
+
+### Estante
+- **Temas de móvel da estante, portados do SixteeN**: além do visual padrão
+  do PlayStation, a estante pode ser uma estante de madeira, o expositor de
+  metal da locadora, um rack de som preto, o quarto anos 90 (Memphis) ou um
+  fliperama com neon. Configurações > estante > "Tema da estante" (clique ou
+  setas) e `shelf_theme` no `polystnx.cfg` (`ps1`, `wood`, `metal`, `hifi`,
+  `memphis`, `arcade`; valor desconhecido mantém o tema atual). O padrão
+  segue idêntico ao de antes.
+
 ## [1.4.1-beta] - 2026-11-11
 
 Retoques do console e do Cheater Fish, filtro AV e o ANALOG de verdade.
