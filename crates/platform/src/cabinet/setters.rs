@@ -269,8 +269,13 @@ impl Cabinet {
         // cy' = cy*(1-W*cx^2) — divide out the partner axis' factor until it
         // stops moving (sub-pixel after three rounds; eight for free).
         // (o ganho de `crt_displace` sai primeiro; as bordas presas ficam nelas.)
+        // Desfaz a superelipse dos cantos (p = p' * q(p') / m(p')) e o ganho.
         let gain = 1.0 / (1.0 - CRT_WARP);
-        let (dx, dy) = (dx / gain, dy / gain);
+        let m = dx.abs().max(dy.abs());
+        let q =
+            (dx.abs().powf(CRT_CORNER_N) + dy.abs().powf(CRT_CORNER_N)).powf(1.0 / CRT_CORNER_N);
+        let k = if m > 1e-6 { q / m } else { 1.0 };
+        let (dx, dy) = (dx * k / gain, dy * k / gain);
         let (mut cx, mut cy) = (dx, dy);
         for _ in 0..8 {
             cy = dy / (1.0 - CRT_WARP * cx * cx);

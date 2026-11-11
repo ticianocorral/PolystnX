@@ -51,7 +51,7 @@ pub use self::tvset::{TvControl, TvPower};
 /// how much the corners darken; `GRID` is the mesh resolution.
 const CRT_WARP: f32 = 0.06;
 const CRT_VIGNETTE: f32 = 0.22;
-const CRT_GRID: usize = 32;
+const CRT_GRID: usize = 64;
 
 /// Cabinet around the tube. The screen is inset from the window by these
 /// fractions (a bit more at the bottom for the "chin"); everything outside is

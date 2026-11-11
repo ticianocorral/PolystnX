@@ -9,7 +9,7 @@ inteiro compartilha uma versão (`[workspace.package]` em `Cargo.toml`).
 ### TV
 - A imagem do jogo (e da estante) agora preenche os cantos da tela da TV: o
   barril do tubo não deixa mais o recesso arredondado nos cantos; o contorno
-  fica reto e a curvatura só aparece dentro da imagem.
+  fica um retângulo de cantos arredondados, como o vidro de uma TV de tubo.
 
 ### Cheats
 - Jogo sem cheats no banco: o Cheater Fish abre mesmo assim,   "No Cheat Codes Available" (antes pulava direto para o jogo).

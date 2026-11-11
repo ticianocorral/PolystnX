@@ -142,18 +142,27 @@ pub(super) fn panel_rect(out_w: u32, out_h: u32) -> Rect {
     Rect::new((out_w - w) as i32, 0, w, out_h)
 }
 
-/// O deslocamento do tubo para um ponto da grade (`cx`, `cy` em -1..1): o
-/// barril puxa os cantos para dentro, e o ganho `1 / (1 - WARP)` os traz de
-/// volta EXATAMENTE aos cantos do retângulo da tela (a imagem preenche os
-/// cantos da TV, sem o recesso arredondado do emulador). O que passaria da
-/// borda no meio dos lados é preso nela — o contorno fica reto, e a
-/// curvatura só aparece dentro da imagem.
+/// O quão arredondados ficam os cantos do tubo: expoente da superelipse
+/// (2 = elipse, ∞ = retângulo). 6 dá o canto de vidro de TV de tubo.
+pub(super) const CRT_CORNER_N: f32 = 6.0;
+
+/// O deslocamento do tubo para um ponto da grade (`cx`, `cy` em -1..1).
+/// O barril puxa os cantos para dentro e o ganho `1 / (1 - WARP)` traz o
+/// contorno de volta à borda da tela (sem o recesso do emulador); o que
+/// passaria dela no meio dos lados é preso nela. Por fim, a norma quadrada
+/// vira superelipse: o contorno fica um retângulo de cantos arredondados,
+/// como o vidro de uma TV de tubo, e a imagem inteira cabe nele.
 pub(super) fn crt_displace(cx: f32, cy: f32, warp: f32) -> (f32, f32) {
     let gain = 1.0 / (1.0 - warp);
-    (
-        (cx * (1.0 - warp * cy * cy) * gain).clamp(-1.0, 1.0),
-        (cy * (1.0 - warp * cx * cx) * gain).clamp(-1.0, 1.0),
-    )
+    let dx = (cx * (1.0 - warp * cy * cy) * gain).clamp(-1.0, 1.0);
+    let dy = (cy * (1.0 - warp * cx * cx) * gain).clamp(-1.0, 1.0);
+    let m = dx.abs().max(dy.abs());
+    let q = (dx.abs().powf(CRT_CORNER_N) + dy.abs().powf(CRT_CORNER_N)).powf(1.0 / CRT_CORNER_N);
+    if q < 1e-6 {
+        return (dx, dy);
+    }
+    let s = m / q;
+    (dx * s, dy * s)
 }
 
 /// Build a textured grid over `dst` whose vertex positions are barrel-distorted
