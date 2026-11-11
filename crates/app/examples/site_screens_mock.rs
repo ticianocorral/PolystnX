@@ -302,7 +302,6 @@ fn commands() -> Vec<(PanelButton, String, bool)> {
     use PanelButton::*;
     vec![
         (Notebook, "Anotações".to_string(), true),
-        (Cheats, "Cheats".to_string(), true),
         (PrintScreen, "Printscreen".to_string(), true),
         (SaveState, "Salvar".to_string(), true),
         (LoadState, "Carregar".to_string(), true),

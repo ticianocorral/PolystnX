@@ -14,7 +14,7 @@
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, Receiver};
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 use anyhow::Result;
 use polystnx_domain::{Catalog, CatalogEntry, Order};
@@ -41,12 +41,6 @@ const HEADER_H: i32 = 28;
 /// it visible, and how much more there is to see.
 const SCROLLBAR_W: u32 = 6;
 const SCROLLBAR_RESERVE: u32 = 16;
-
-/// Row height when the shelf falls back to a plain text list (no cover art
-/// loaded at all, plan §3.1) — a multicart-style menu instead of a grid of
-/// empty tiles.
-const LIST_ROW_H: u32 = 22;
-const LIST_GAP: u32 = 6;
 
 /// A "jogados recentemente" strip above the main grid/list (plan revision) —
 /// the last played games, always in a single row. Both strips scroll
@@ -101,7 +95,7 @@ const TILE_BG: (u8, u8, u8, u8) = (34, 34, 40, 255);
 const HILITE: (u8, u8, u8, u8) = (240, 200, 80, 255);
 const TEXT: (u8, u8, u8) = (232, 232, 232);
 const DIM: (u8, u8, u8) = (150, 150, 158);
-/// Text color on top of the `HILITE` selection bar in list mode — dark, for
+/// Text color on top of the `HILITE` selection bar (o histórico) — dark, for
 /// contrast against the bright fill.
 const HILITE_TEXT: (u8, u8, u8) = (24, 20, 12);
 /// How opaque the shelf sits over the resting TV static (plan §3.3) — era
@@ -213,7 +207,7 @@ fn cartridge_id(key: &str) -> u64 {
 /// Texture key de uma página do manual em PDF (plan revision: "colocar
 /// suporte para abrir manual pdf") — hash do sha1 + página com o bit alto
 /// da família badge (nunca colide com as chaves de arte do jogo).
-fn manual_page_id(sha1: &str, page: usize) -> u64 {
+pub(crate) fn manual_page_id(sha1: &str, page: usize) -> u64 {
     format!("{sha1}:{page}")
         .bytes()
         .fold(0x9E37_79B9_7F4A_7C15u64, |mut acc, b| {
@@ -250,17 +244,18 @@ fn find_local_manual(dir: &Path, rom_path: &str) -> Option<PathBuf> {
 }
 
 /// `(x, y, w, h)` em coordenadas de tela — o rect de um botão do leitor.
-type ViewBtn = (i32, i32, u32, u32);
+pub(crate) type ViewBtn = (i32, i32, u32, u32);
 
 /// O leitor de manual na TV (plan revision: "abrir na tv como o back cover
 /// com opção de ver as paginas") — página ampliada + `‹`/`›` + `voltar`.
 /// Devolve os rects dos três botões para o hit-test do frame seguinte.
-fn draw_manual_view(
+pub(crate) fn draw_manual_view(
     d: &mut Screen,
     sha1: &str,
     page: usize,
     pages: usize,
     page_ready: bool,
+    failed: bool,
 ) -> (ViewBtn, ViewBtn, ViewBtn) {
     let (w, h) = d.size();
     let (w, h) = (w as i32, h as i32);
@@ -294,6 +289,8 @@ fn draw_manual_view(
         d.image_fit(id, area.0, area.1, area.2, area.3);
     } else if pages > 0 {
         d.text(MARGIN, area.1 + 20, 1, DIM, "renderizando a página...");
+    } else if failed {
+        d.text(MARGIN, area.1 + 20, 1, DIM, "não deu para abrir o manual");
     } else {
         d.text(MARGIN, area.1 + 20, 1, DIM, "abrindo o manual...");
     }
@@ -534,6 +531,183 @@ fn pick_play(
     }
 }
 
+/// O nome como alguém escreveria à caneta: sem o "(USA)"/"(Europe)" do
+/// No-Intro e com o ", The" de volta para a frente.
+pub(crate) fn handwritten_title(title: &str) -> String {
+    let base = title.split(" (").next().unwrap_or(title).trim();
+    let (head, tail) = base.split_once(" - ").unwrap_or((base, ""));
+    let head = match head.strip_suffix(", The") {
+        Some(h) => format!("The {h}"),
+        None => head.to_string(),
+    };
+    if tail.is_empty() {
+        head
+    } else {
+        format!("{head} - {tail}")
+    }
+}
+
+/// Quebra `s` em até `max_lines` linhas de `cols` letras; a última leva
+/// "..." quando não coube tudo.
+pub(crate) fn wrap_lines(s: &str, cols: usize, max_lines: usize) -> Vec<String> {
+    let mut lines: Vec<String> = Vec::new();
+    let mut line = String::new();
+    for word in s.split_whitespace() {
+        let fits = line.is_empty() || line.chars().count() + 1 + word.chars().count() <= cols;
+        if !fits {
+            lines.push(std::mem::take(&mut line));
+        }
+        if !line.is_empty() {
+            line.push(' ');
+        }
+        line.push_str(word);
+    }
+    if !line.is_empty() {
+        lines.push(line);
+    }
+    for l in lines.iter_mut() {
+        if l.chars().count() > cols {
+            *l = l.chars().take(cols).collect();
+        }
+    }
+    if lines.len() > max_lines {
+        lines.truncate(max_lines);
+        let last = &mut lines[max_lines - 1];
+        let keep = cols.saturating_sub(3).min(last.chars().count());
+        *last = last.chars().take(keep).collect::<String>() + "...";
+    }
+    lines
+}
+
+/// O ano de lançamento da tabela embutida, para o CD escrito à mão.
+fn entry_year(entry: &CatalogEntry) -> Option<String> {
+    polystnx_domain::infos::lookup(&entry.rom.sha1).and_then(|i| i.year)
+}
+
+/// A arte que falta: uma caixa de CD transparente com um CD-R de prata
+/// dentro, o nome e o ano escritos à caneta direto no disco — o disco
+/// gravado, emprestado de um amigo. `seed` (do id da capa) sorteia a
+/// inclinação e a cor da caneta, sempre iguais para o mesmo jogo.
+#[doc(hidden)]
+pub fn draw_generic_cd(
+    d: &mut Screen,
+    title: &str,
+    year: Option<&str>,
+    seed: u32,
+    rect: (i32, i32, u32, u32),
+) {
+    const PLASTIC: (u8, u8, u8) = (146, 152, 164);
+    const SPINE: (u8, u8, u8) = (104, 110, 124);
+    const TRAY: (u8, u8, u8) = (44, 50, 64);
+    let (rx, ry, rw, rh) = rect;
+    // Caixa de CD: quase quadrada, pousada no meio do espaço.
+    let s = rw.min(rh) as i32;
+    if s < 24 {
+        return;
+    }
+    let (bx, by) = (rx + (rw as i32 - s) / 2, ry + (rh as i32 - s) / 2);
+    let sf = s as f32;
+    let solid = |c: (u8, u8, u8)| (c.0, c.1, c.2, 255);
+
+    // A caixa: sombra, plástico, lombada com os encaixes e o fio de luz.
+    d.fill(bx + 2, by + 3, s as u32, s as u32, (0, 0, 0, 80));
+    d.fill(bx, by, s as u32, s as u32, solid(PLASTIC));
+    let spine = ((sf * 0.07) as i32).max(3);
+    d.fill(bx, by, spine as u32, s as u32, solid(SPINE));
+    for k in 0..3 {
+        d.fill(
+            bx + 1,
+            by + (sf * (0.2 + 0.25 * k as f32)) as i32,
+            (spine - 2).max(1) as u32,
+            3,
+            (70, 74, 86, 255),
+        );
+    }
+    d.fill(bx, by, s as u32, 1, (255, 255, 255, 90));
+    d.outline(bx, by, s as u32, s as u32, 1, (206, 212, 226, 110));
+    // A bandeja escura onde o disco repousa.
+    let inset = ((sf * 0.06) as i32).max(2);
+    let (tx, ty) = (bx + spine + inset, by + inset);
+    let (tw, th) = (s - spine - 2 * inset, s - 2 * inset);
+    d.fill(tx, ty, tw as u32, th as u32, solid(TRAY));
+
+    // O disco de prata, um degradê de cima para baixo.
+    let r = (tw.min(th) as f32 * 0.47) as i32;
+    let (cx, cy) = (tx + tw / 2, ty + th / 2);
+    for dy in -r..=r {
+        let hw = ((r * r - dy * dy) as f32).sqrt() as i32;
+        let t = (dy + r) as f32 / (2 * r) as f32;
+        let lerp = |a: u8, b: u8| (a as f32 + (b as f32 - a as f32) * t) as u8;
+        d.fill(
+            cx - hw,
+            cy + dy,
+            (hw * 2 + 1) as u32,
+            1,
+            (lerp(222, 150), lerp(226, 156), lerp(234, 172), 255),
+        );
+    }
+    // O cubo: um anel mais claro e o furo no centro.
+    let hub = (r as f32 * 0.27) as i32;
+    for dy in -hub..=hub {
+        let hw = ((hub * hub - dy * dy) as f32).sqrt() as i32;
+        d.fill(
+            cx - hw,
+            cy + dy,
+            (hw * 2 + 1) as u32,
+            1,
+            (188, 194, 208, 255),
+        );
+    }
+    let hole = ((r as f32 * 0.1) as i32).max(1);
+    for dy in -hole..=hole {
+        let hw = ((hole * hole - dy * dy) as f32).sqrt() as i32;
+        d.fill(cx - hw, cy + dy, (hw * 2 + 1) as u32, 1, solid(TRAY));
+    }
+    // O reflexo do plástico por cima do canto de cima.
+    d.fill(tx, ty, tw as u32, 2, (255, 255, 255, 40));
+
+    // A caneta: preta quase sempre, às vezes azul ou vermelha.
+    let pick = |k: u32| (seed.rotate_left(k) % 1000) as f32 / 1000.0;
+    let ink = match (pick(7) * 5.0) as u32 {
+        0..=2 => (20, 20, 28),
+        3 => (26, 46, 140),
+        _ => (156, 30, 34),
+    };
+    let slope = (pick(3) - 0.5) * 0.12;
+    let size = (r as f32 * 0.19).clamp(8.0, 22.0);
+    let gap = size * 1.12;
+    // O avanço médio de uma letra de `text_hand` (célula 9x20, apertada).
+    let adv = size * 9.0 / 20.0 * 0.92 * 1.06;
+    // A corda do disco na linha mais alta da escrita.
+    let top_dy = -(r as f32) * 0.66;
+    let chord = 2.0 * ((r as f32).powi(2) - top_dy.powi(2)).sqrt();
+    let cols = (((chord - 8.0) / adv) as usize).max(4);
+    let lines = wrap_lines(&handwritten_title(title), cols, 3);
+    for (i, line) in lines.iter().enumerate() {
+        let x0 = cx as f32 - chord / 2.0 + 4.0 + pick(i as u32 * 5 + 1) * 3.0;
+        let y0 = cy as f32 + top_dy + i as f32 * gap;
+        d.text_hand(
+            (x0, y0),
+            slope,
+            size,
+            ink,
+            line,
+            seed.wrapping_add(i as u32 * 977),
+        );
+    }
+    if let Some(year) = year {
+        let w = year.chars().count() as f32 * size * 9.0 / 20.0;
+        d.text_hand(
+            (cx as f32 - w / 2.0, cy as f32 + r as f32 * 0.5),
+            slope,
+            size,
+            ink,
+            year,
+            seed ^ 0x5EED,
+        );
+    }
+}
+
 /// Whether `entry`'s title matches a filter query — empty matches everything,
 /// otherwise a case-insensitive substring test (plan revision: "colocar
 /// filtro para facilitar o encontro dos games na lista").
@@ -552,13 +726,13 @@ fn game_info_lines(entry: &CatalogEntry, playtime_secs: u64) -> Vec<(String, Str
     ]
 }
 
-/// O id fixo da textura do ícone "H" do HowLongToBeat — 0x484C5442 é "HLTB"
-/// em ASCII. Registrada uma vez (como as medalhas do RA), lida por todo
-/// painel que tiver bloco de tempos.
-
 /// O id fixo da textura da logo da IGDB — 0x49474442 é "IGDB" em ASCII.
 /// Registrada uma vez, lida pelo cabeçalho da seção de nota.
 const IGDB_ICON_IMG: u64 = 0x4947_4442;
+
+/// O id fixo da textura do ícone "H" do HowLongToBeat — 0x484C5442 é "HLTB"
+/// em ASCII. Registrada uma vez (como as medalhas do RA), lida por todo
+/// painel que tiver bloco de tempos.
 const HLTB_ICON_IMG: u64 = 0x484C_5442;
 
 /// O bloco HowLongToBeat do painel — as 4 barras do card do site (história
@@ -829,7 +1003,6 @@ struct GridLayout {
     item_h: i32,
     cols: usize,
     vis_rows: usize,
-    list_mode: bool,
 }
 
 impl GridLayout {
@@ -840,46 +1013,35 @@ impl GridLayout {
     /// Steam Deck (e qualquer tela onde 260px de tile rendem só 2 colunas):
     /// a grade nunca mostra menos que 3 colunas × 2 linhas — o tile encolhe,
     /// mantendo o 4:3, antes de perder uma coluna ou uma linha.
-    fn new(scr_w: u32, scr_h: u32, list_mode: bool, top_y: i32) -> Self {
+    fn new(scr_w: u32, scr_h: u32, top_y: i32) -> Self {
         let grid_w = scr_w.saturating_sub(MARGIN as u32 * 2 + SCROLLBAR_RESERVE);
-        let (cell_w, cell_h, item_w, item_h, cols, x0) = if list_mode {
-            let cell_h = (LIST_ROW_H + LIST_GAP) as i32;
-            (
-                grid_w as i32,
-                cell_h,
-                grid_w as i32,
-                LIST_ROW_H as i32,
-                1,
-                MARGIN,
-            )
-        } else {
-            let gap = GAP as i32;
-            // Colunas por resolução (plan revision): nas do Deck (720p/800p
-            // — grid_w ~754) a fileira leva 3 caixas grandes; de 1600×1000
-            // para cima (grid_w ~1044+) leva 5 — a largura de tela que
-            // sobra depois do painel decide.
-            let cols = if grid_w >= 900 { 5 } else { 3 };
-            // Encolhe o tile até a fileira caber `cols` colunas com gap.
-            let item_w = (TILE_W as i32)
-                .min((grid_w as i32 - gap * (cols - 1)) / cols)
-                .max(48);
-            let mut item_h = item_w * TILE_H as i32 / TILE_W as i32;
-            // E até 2 linhas couberem na altura (se a tela for baixa demais
-            // para os tiles já encolhidos pela largura).
-            let avail_h = scr_h as i32 - top_y - MARGIN;
-            let two_rows_h = (avail_h / 2 - gap).max(36);
-            if item_h > two_rows_h {
-                item_h = two_rows_h;
-            }
-            let item_w = item_h * TILE_W as i32 / TILE_H as i32;
-            let cell_w = item_w + gap;
-            let cell_h = item_h + gap;
-            // Alinhada à ESQUERDA (plan revision: "alinhar a estante da
-            // lista dos jogos a esquerda") — a grade nasce na margem e a
-            // sobra de largura fica toda à direita.
-            let x0 = MARGIN;
-            (cell_w, cell_h, item_w, item_h, cols as usize, x0)
-        };
+        let gap = GAP as i32;
+        // Colunas por resolução (plan revision): nas do Deck (720p/800p
+        // — grid_w ~754) a fileira leva 3 caixas grandes; de 1600×1000
+        // para cima (grid_w ~1044+) leva 5 — a largura de tela que
+        // sobra depois do painel decide.
+        let cols = if grid_w >= 900 { 5 } else { 3 };
+        // Encolhe o tile até a fileira caber `cols` colunas com gap.
+        let item_w = (TILE_W as i32)
+            .min((grid_w as i32 - gap * (cols - 1)) / cols)
+            .max(48);
+        let mut item_h = item_w * TILE_H as i32 / TILE_W as i32;
+        // E até 2 linhas couberem na altura (se a tela for baixa demais
+        // para os tiles já encolhidos pela largura).
+        let avail_h = scr_h as i32 - top_y - MARGIN;
+        let two_rows_h = (avail_h / 2 - gap).max(36);
+        if item_h > two_rows_h {
+            item_h = two_rows_h;
+        }
+        let item_w = item_h * TILE_W as i32 / TILE_H as i32;
+        let cell_w = item_w + gap;
+        let cell_h = item_h + gap;
+        // Alinhada à ESQUERDA (plan revision: "alinhar a estante da
+        // lista dos jogos a esquerda") — a grade nasce na margem e a
+        // sobra de largura fica toda à direita.
+        let x0 = MARGIN;
+        let (cell_w, cell_h, item_w, item_h, cols, x0) =
+            (cell_w, cell_h, item_w, item_h, cols as usize, x0);
         let vis_rows = ((scr_h as i32 - top_y - MARGIN) / cell_h).max(1) as usize;
         Self {
             x0,
@@ -890,7 +1052,6 @@ impl GridLayout {
             item_h,
             cols,
             vis_rows,
-            list_mode,
         }
     }
 
@@ -971,7 +1132,7 @@ impl RecentLayout {
 /// an empty ROMs folder is the expected first-launch state for a portable,
 /// autoexecutável app, not a misconfiguration.
 fn empty_roms_screen(plat: &mut Platform, cab: &mut Cabinet) -> Result<Pick> {
-    let frame = Duration::from_millis(16);
+    let frame = crate::runner::UI_FRAME;
     cab.set_shelf_panel(empty_shelf_panel());
     cab.set_close_button(true);
     let refresh_rect = refresh_button_rect(cab.shelf_screen_size().0);
@@ -985,6 +1146,7 @@ fn empty_roms_screen(plat: &mut Platform, cab: &mut Cabinet) -> Result<Pick> {
         }
         if let Some((x, y)) = m.click {
             let (ox, oy) = cab.window_to_output(x, y);
+            cab.try_tv_click(ox, oy);
             if cab.hit_close_button(ox, oy) {
                 return Ok(Pick::Quit);
             }
@@ -1122,7 +1284,7 @@ pub fn run(
     let mut filter_query = opts.preset_filter.clone().unwrap_or_default();
     let mut filter_draft = String::new();
     let mut editing_filter = false;
-    let frame = Duration::from_millis(16);
+    let frame = crate::runner::UI_FRAME;
     let mut next = Instant::now() + frame;
     let mut frame_no = 0u64;
     // The filtered/sorted listings are rebuilt only when the applied filter
@@ -1171,6 +1333,11 @@ pub fn run(
     // chegam — para qualquer jogo, não só o primeiro aberto.
     let mut badge_ids: std::collections::HashMap<String, u64> = std::collections::HashMap::new();
     let mut badge_tried: HashSet<String> = HashSet::new();
+    // Quando o painel foi montado e com quê: reconstruí-lo custa ler o
+    // playtime.txt, clonar infos e formatar textos, e fazia isso 60×/s com
+    // o jogo parado. Só refaz quando a chave muda ou a cada 500 ms (o que
+    // chega de fora — tally do RA, badges — entra nessa janela).
+    let mut panel_built: Option<(String, Instant)> = None;
     // Earned do servidor para os [x] da lista de conquistas (uma tentativa
     // por jogo por visita — o disco cacheia por game id): o worker une no
     // arquivo local `retroachievements/ra-earned/<hash>.json` e devolve o
@@ -1196,19 +1363,6 @@ pub fn run(
 
     loop {
         frame_no += 1;
-        // DEBUG: auto-abre o primeiro jogo após N frames — bissecção do
-        // quadrado da Metal (a estante rodou de verdade antes do jogo).
-        if let Ok(n) = std::env::var("PSX_XPERIENCE_SHELF_FRAMES") {
-            if let Ok(n) = n.parse::<u64>() {
-                if frame_no == n {
-                    if let Some(e) = view.first() {
-                        let logo_dir = crate::dirs::assets_dir().join("logo");
-                        let cart_dir = crate::dirs::assets_dir().join("disc");
-                        return Ok(pick_play(catalog, &logo_dir, &cart_dir, e));
-                    }
-                }
-            }
-        }
         if opts.max_frames.is_some_and(|n| frame_no > n) {
             return Ok(Pick::Quit);
         }
@@ -1290,10 +1444,6 @@ pub fn run(
             fav_scroll = fav_idx + 1 - strip_vis;
         }
 
-        // No cover art loaded anywhere in view yet: a text list (multicart
-        // menu) reads as deliberate, where a grid of empty tiles reads as
-        // broken (plan §3.1).
-        let list_mode = !view.iter().any(|e| cab.has_image(cover_id(&e.rom.sha1)));
         let fav_block_h = if show_fav {
             FAV_LABEL_H + RECENT_TILE_H as i32 + GAP as i32
         } else {
@@ -1330,7 +1480,7 @@ pub fn run(
         }
         let all_games_label_y = MARGIN + HEADER_H + fav_block_h + recent_block_h;
         let grid_top_y = all_games_label_y + ALL_GAMES_LABEL_H;
-        let grid = GridLayout::new(scr_w, scr_h, list_mode, grid_top_y);
+        let grid = GridLayout::new(scr_w, scr_h, grid_top_y);
         let recent_layout = RecentLayout::new(MARGIN + HEADER_H + fav_block_h + RECENT_LABEL_H);
         let fav_layout = RecentLayout::new(MARGIN + HEADER_H + FAV_LABEL_H);
         let filter_rect = filter_box_rect(scr_w);
@@ -1462,6 +1612,7 @@ pub fn run(
                 }
                 if let Some((x, y)) = m.click {
                     let (ox, oy) = cab.window_to_output(x, y);
+                    cab.try_tv_click(ox, oy);
                     if cab.hit_close_button(ox, oy) {
                         return Ok(Pick::Quit);
                     }
@@ -1599,6 +1750,7 @@ pub fn run(
                 // without a gamepad now.
                 if let Some((x, y)) = m.click {
                     let (ox, oy) = cab.window_to_output(x, y);
+                    cab.try_tv_click(ox, oy);
                     if cab.hit_close_button(ox, oy) {
                         return Ok(Pick::Quit);
                     }
@@ -2137,7 +2289,10 @@ pub fn run(
                         continue;
                     }
                     if let Some(path) = crate::ra::badge_path(&a.badge) {
-                        if let Ok(img) = image::open(&path).map(|i| i.to_rgba8()) {
+                        if let Ok(img) =
+                            crate::imgutil::open_limited(&path, crate::imgutil::BADGE_MAX_SIDE)
+                                .map(|i| i.to_rgba8())
+                        {
                             let id = badge_image_id(&a.badge);
                             cab.set_image(id, img.width(), img.height(), img.as_raw());
                             badge_ids.insert(a.badge.clone(), id);
@@ -2239,172 +2394,199 @@ pub fn run(
         // outside the tube): whatever's focused right now, DAT extras and
         // all when the DAT had any ("se o DAT tiver informacoes do jogo,
         // preencher no painel").
-        let shelf_panel = match focused {
-            Some(e) => {
-                let wid = wheel_id(&e.rom.sha1);
-                let cid = cartridge_id(&e.rom.sha1);
-                let bid = backcover_id(&e.rom.sha1);
-                let save_title = crate::runner::rom_title(Path::new(&e.rom.path));
-                let playtime =
-                    crate::runner::total_playtime_secs(&crate::dirs::saves_dir(), &save_title);
-                // A tabela única embutida (serial → tudo): lançamento,
-                // editora, região e nota da IGDB — sem DAT, sem rede.
-                let infos = polystnx_domain::infos::lookup(&e.rom.sha1);
-                let mut info: Vec<(String, String)> = Vec::new();
-                if let Some(i) = &infos {
-                    // o lançamento vai pelo campo `release` do painel
-                    if let Some(editora) = &i.publisher {
-                        info.push(("editora".to_string(), editora.clone()));
-                    }
-                    if let Some(regiao) = &i.region {
-                        if regiao != "outra" {
-                            info.push(("região".to_string(), regiao.clone()));
-                        }
-                    }
-                }
-                let release = infos.as_ref().and_then(|i| i.year.clone());
-                let mut award_img: Option<u64> = None;
-                if let Some(Some(_)) = ra_games.get(&e.rom.sha1) {
-                    // "30 de 58 (52%)" — o tally custa um hash de ROM inteiro,
-                    // então fica cacheado por visita (e refresco quando o
-                    // completion progress do servidor chega).
-                    let tally = *ra_tally.entry(e.rom.sha1.clone()).or_insert_with(|| {
-                        ra_hashes
-                            .get(&e.rom.sha1)
-                            .and_then(|h| crate::ra::tally_from_cache(h, ra_completion.as_ref()))
-                    });
-                    // A medalha de prêmio do RA desenhada ao lado do número
-                    // da linha de conquistas (pixel-art gerada por
-                    // `medal_rgba`, uma textura por variante).
-                    if let Some((earned, total, award)) = tally {
-                        let pct = (earned * 100 + total / 2).checked_div(total).unwrap_or(0);
-                        info.push((
-                            "conquistas".to_string(),
-                            format!("{earned} de {total} ({pct}%)"),
-                        ));
-                        // "zerado (softcore)" / "mastered" — o prêmio em
-                        // palavras, junto das infos (plan revision).
-                        if let Some(a) = award {
-                            info.push(("status".to_string(), a.label().to_string()));
-                        }
-                        if let Some(medal) = award.map(|a| a.medal()) {
-                            let id = crate::ra::medal_image_id(medal);
-                            if !cab.has_image(id) {
-                                let (w, h, rgba) = crate::ra::medal_rgba(medal);
-                                cab.set_image(id, w, h, &rgba);
-                            }
-                            award_img = Some(id);
-                        }
-                    }
-                    // Os badges do set já baixando em background — a notificação
-                    // e a lista da estante os encontram em cache na hora.
-                    if badge_tried.insert(e.rom.sha1.clone()) {
-                        crate::ra::prefetch_badges(std::path::Path::new(&e.rom.path));
-                    }
-                }
-                info.extend(game_info_lines(e, playtime));
-                // O bloco HowLongToBeat no fim da aba — os tempos vêm da
-                // própria tabela única (nada de rede); jogo fora dela não
-                // ganha bloco nenhum.
-                // A seção de nota da IGDB + o HowLongToBeat, ambos da
-                // tabela única — o HLTB fecha o painel.
-                let igdb = infos
-                    .as_ref()
-                    .and_then(|i| i.nota.clone())
-                    .filter(|nota| !nota.is_empty())
-                    .map(|nota| polystnx_platform::IgdbSection {
-                        icon: igdb_icon_registered(cab),
-                        nota: format!("{nota} / 100"),
-                    });
-                let hltb = infos
-                    .as_ref()
-                    .map(|i| hltb_bars(i, hltb_icon_registered(cab)));
-                let manual_path = manual_paths
-                    .entry(e.rom.sha1.clone())
-                    .or_insert_with(|| find_local_manual(&manual_dir, &e.rom.path))
-                    .clone();
-                // Preview: contagem + primeira página decodificadas uma vez
-                // por jogo — a aba manual as mostra como as artes mostram
-                // capa/cartucho (plan revision).
-                if let Some(preview_path) = &manual_path {
-                    if manual_preview_tried.insert(e.rom.sha1.clone()) {
-                        let (ev_tx, ev_rx) = mpsc::channel();
-                        let preview_path = preview_path.clone();
-                        let preview_sha1 = e.rom.sha1.clone();
-                        std::thread::spawn(move || {
-                            let pages = crate::manual::page_count(&preview_path).unwrap_or(0);
-                            let _ = ev_tx.send(crate::manual::ManualEv::Ready {
-                                sha1: preview_sha1.clone(),
-                                pages,
-                            });
-                            if let Ok(Some(img)) = crate::manual::render_page(&preview_path, 1, 512)
-                            {
-                                let _ = ev_tx.send(crate::manual::ManualEv::Page {
-                                    sha1: preview_sha1.clone(),
-                                    page: 1,
-                                    w: img.w,
-                                    h: img.h,
-                                    rgba: img.rgba,
-                                });
-                            }
-                        });
-                        manual_channels.push(ev_rx);
-                    }
-                }
-                let ra_state = ra_games.get(&e.rom.sha1);
-                // Identificado (qualquer set) = botão desenhado — set vazio o
-                // desenha DESATIVADO com o motivo (plan revision: "mostre o
-                // botão mas mostre desativado", revendo o "nada de botão nem
-                // 0 de 0"); hash marcado "versão não suportada" = desativado
-                // com o motivo também; não identificado = nada de botão.
-                let ra_identified = ra_state.and_then(|g| g.as_ref());
-                ShelfPanelInfo {
-                    title: e.title().into_owned(),
-                    logo_img: cab.has_image(wid).then_some(wid),
-                    cartridge_img: cab.has_image(cid).then_some(cid),
-                    backcover_img: cab.has_image(bid).then_some(bid),
-                    release,
-                    info,
-                    section: panel_section,
-                    scroll: panel_scroll,
-                    favorite: Some(e.rom.favorite),
-                    achievements: ra_identified.is_some(),
-                    achievements_reason: ra_identified.and_then(|g| {
-                        if g.unsupported {
-                            Some("versão sem suporte".to_string())
-                        } else if g.achievements == 0 {
-                            Some("sem conquistas".to_string())
-                        } else {
-                            None
-                        }
-                    }),
-                    manual_first_page: manual_path
-                        .is_some()
-                        .then(|| manual_page_id(&e.rom.sha1, 1)),
-                    award_img,
-                    igdb,
-                    hltb,
-                }
+        let panel_key = focused.map(|e| {
+            format!(
+                "{}|{:?}|{}|{}|{}{}{}|{}",
+                e.rom.sha1,
+                panel_section,
+                panel_scroll,
+                e.rom.favorite,
+                cab.has_image(wheel_id(&e.rom.sha1)) as u8,
+                cab.has_image(cartridge_id(&e.rom.sha1)) as u8,
+                cab.has_image(backcover_id(&e.rom.sha1)) as u8,
+                cab.has_image(manual_page_id(&e.rom.sha1, 1)) as u8,
+            )
+        });
+        let panel_fresh = match (&panel_built, &panel_key) {
+            (Some((k, at)), Some(now_key)) => {
+                k == now_key && at.elapsed() < std::time::Duration::from_millis(500)
             }
-            None => ShelfPanelInfo {
-                title: "nenhum jogo encontrado".to_string(),
-                logo_img: None,
-                cartridge_img: None,
-                backcover_img: None,
-                release: None,
-                info: Vec::new(),
-                section: PanelSection::Informacoes,
-                scroll: 0,
-                favorite: None,
-                achievements: false,
-                achievements_reason: None,
-                manual_first_page: None,
-                award_img: None,
-                igdb: None,
-                hltb: None,
-            },
+            _ => false,
         };
-        cab.set_shelf_panel(shelf_panel);
+        let shelf_panel = if panel_fresh {
+            None
+        } else {
+            panel_built = panel_key.map(|k| (k, Instant::now()));
+            Some(match focused {
+                Some(e) => {
+                    let wid = wheel_id(&e.rom.sha1);
+                    let cid = cartridge_id(&e.rom.sha1);
+                    let bid = backcover_id(&e.rom.sha1);
+                    let save_title = crate::runner::rom_title(Path::new(&e.rom.path));
+                    let playtime =
+                        crate::runner::total_playtime_secs(&crate::dirs::saves_dir(), &save_title);
+                    // A tabela única embutida (serial → tudo): lançamento,
+                    // editora, região e nota da IGDB — sem DAT, sem rede.
+                    let infos = polystnx_domain::infos::lookup(&e.rom.sha1);
+                    let mut info: Vec<(String, String)> = Vec::new();
+                    if let Some(i) = &infos {
+                        // o lançamento vai pelo campo `release` do painel
+                        if let Some(editora) = &i.publisher {
+                            info.push(("editora".to_string(), editora.clone()));
+                        }
+                        if let Some(regiao) = &i.region {
+                            if regiao != "outra" {
+                                info.push(("região".to_string(), regiao.clone()));
+                            }
+                        }
+                    }
+                    let release = infos.as_ref().and_then(|i| i.year.clone());
+                    let mut award_img: Option<u64> = None;
+                    if let Some(Some(_)) = ra_games.get(&e.rom.sha1) {
+                        // "30 de 58 (52%)" — o tally custa um hash de ROM inteiro,
+                        // então fica cacheado por visita (e refresco quando o
+                        // completion progress do servidor chega).
+                        let tally = *ra_tally.entry(e.rom.sha1.clone()).or_insert_with(|| {
+                            ra_hashes.get(&e.rom.sha1).and_then(|h| {
+                                crate::ra::tally_from_cache(h, ra_completion.as_ref())
+                            })
+                        });
+                        // A medalha de prêmio do RA desenhada ao lado do número
+                        // da linha de conquistas (pixel-art gerada por
+                        // `medal_rgba`, uma textura por variante).
+                        if let Some((earned, total, award)) = tally {
+                            let pct = (earned * 100 + total / 2).checked_div(total).unwrap_or(0);
+                            info.push((
+                                "conquistas".to_string(),
+                                format!("{earned} de {total} ({pct}%)"),
+                            ));
+                            // "zerado (softcore)" / "mastered" — o prêmio em
+                            // palavras, junto das infos (plan revision).
+                            if let Some(a) = award {
+                                info.push(("status".to_string(), a.label().to_string()));
+                            }
+                            if let Some(medal) = award.map(|a| a.medal()) {
+                                let id = crate::ra::medal_image_id(medal);
+                                if !cab.has_image(id) {
+                                    let (w, h, rgba) = crate::ra::medal_rgba(medal);
+                                    cab.set_image(id, w, h, &rgba);
+                                }
+                                award_img = Some(id);
+                            }
+                        }
+                        // Os badges do set já baixando em background — a notificação
+                        // e a lista da estante os encontram em cache na hora.
+                        if badge_tried.insert(e.rom.sha1.clone()) {
+                            crate::ra::prefetch_badges(std::path::Path::new(&e.rom.path));
+                        }
+                    }
+                    info.extend(game_info_lines(e, playtime));
+                    // O bloco HowLongToBeat no fim da aba — os tempos vêm da
+                    // própria tabela única (nada de rede); jogo fora dela não
+                    // ganha bloco nenhum.
+                    // A seção de nota da IGDB + o HowLongToBeat, ambos da
+                    // tabela única — o HLTB fecha o painel.
+                    let igdb = infos
+                        .as_ref()
+                        .and_then(|i| i.nota.clone())
+                        .filter(|nota| !nota.is_empty())
+                        .map(|nota| polystnx_platform::IgdbSection {
+                            icon: igdb_icon_registered(cab),
+                            nota: format!("{nota} / 100"),
+                        });
+                    let hltb = infos
+                        .as_ref()
+                        .map(|i| hltb_bars(i, hltb_icon_registered(cab)));
+                    let manual_path = manual_paths
+                        .entry(e.rom.sha1.clone())
+                        .or_insert_with(|| find_local_manual(&manual_dir, &e.rom.path))
+                        .clone();
+                    // Preview: contagem + primeira página decodificadas uma vez
+                    // por jogo — a aba manual as mostra como as artes mostram
+                    // capa/cartucho (plan revision).
+                    if let Some(preview_path) = &manual_path {
+                        if manual_preview_tried.insert(e.rom.sha1.clone()) {
+                            let (ev_tx, ev_rx) = mpsc::channel();
+                            let preview_path = preview_path.clone();
+                            let preview_sha1 = e.rom.sha1.clone();
+                            std::thread::spawn(move || {
+                                let pages = crate::manual::page_count(&preview_path).unwrap_or(0);
+                                let _ = ev_tx.send(crate::manual::ManualEv::Ready {
+                                    sha1: preview_sha1.clone(),
+                                    pages,
+                                });
+                                if let Ok(Some(img)) =
+                                    crate::manual::render_page(&preview_path, 1, 512)
+                                {
+                                    let _ = ev_tx.send(crate::manual::ManualEv::Page {
+                                        sha1: preview_sha1.clone(),
+                                        page: 1,
+                                        w: img.w,
+                                        h: img.h,
+                                        rgba: img.rgba,
+                                    });
+                                }
+                            });
+                            manual_channels.push(ev_rx);
+                        }
+                    }
+                    let ra_state = ra_games.get(&e.rom.sha1);
+                    // Identificado (qualquer set) = botão desenhado — set vazio o
+                    // desenha DESATIVADO com o motivo (plan revision: "mostre o
+                    // botão mas mostre desativado", revendo o "nada de botão nem
+                    // 0 de 0"); hash marcado "versão não suportada" = desativado
+                    // com o motivo também; não identificado = nada de botão.
+                    let ra_identified = ra_state.and_then(|g| g.as_ref());
+                    ShelfPanelInfo {
+                        title: e.title().into_owned(),
+                        logo_img: cab.has_image(wid).then_some(wid),
+                        cartridge_img: cab.has_image(cid).then_some(cid),
+                        backcover_img: cab.has_image(bid).then_some(bid),
+                        release,
+                        info,
+                        section: panel_section,
+                        scroll: panel_scroll,
+                        favorite: Some(e.rom.favorite),
+                        achievements: ra_identified.is_some(),
+                        achievements_reason: ra_identified.and_then(|g| {
+                            if g.unsupported {
+                                Some("versão sem suporte".to_string())
+                            } else if g.achievements == 0 {
+                                Some("sem conquistas".to_string())
+                            } else {
+                                None
+                            }
+                        }),
+                        manual_first_page: manual_path
+                            .is_some()
+                            .then(|| manual_page_id(&e.rom.sha1, 1)),
+                        award_img,
+                        igdb,
+                        hltb,
+                    }
+                }
+                None => ShelfPanelInfo {
+                    title: "nenhum jogo encontrado".to_string(),
+                    logo_img: None,
+                    cartridge_img: None,
+                    backcover_img: None,
+                    release: None,
+                    info: Vec::new(),
+                    section: PanelSection::Informacoes,
+                    scroll: 0,
+                    favorite: None,
+                    achievements: false,
+                    achievements_reason: None,
+                    manual_first_page: None,
+                    award_img: None,
+                    igdb: None,
+                    hltb: None,
+                },
+            })
+        };
+        if let Some(shelf_panel) = shelf_panel {
+            cab.set_shelf_panel(shelf_panel);
+        }
 
         // --- draw (into a screen-sized buffer, then warped through the tube) --
         let page_ready = manual
@@ -2428,7 +2610,7 @@ pub fn run(
         };
         let render = |d: &mut Screen| {
             if let Some(m) = &manual {
-                manual_rects = draw_manual_view(d, &m.sha1, m.page, m.pages, page_ready);
+                manual_rects = draw_manual_view(d, &m.sha1, m.page, m.pages, page_ready, false);
                 return;
             }
             if ach_view {
@@ -2472,13 +2654,13 @@ pub fn run(
                     if d.has_image(id) {
                         d.image_fit(id, x + 4, y + 4, RECENT_TILE_W - 8, RECENT_TILE_H - 8);
                     } else {
-                        d.text_wrapped(
-                            x + 6,
-                            y + 8,
-                            RECENT_TILE_W - 12,
-                            1,
-                            DIM,
-                            &entry.title().to_uppercase(),
+                        let year = entry_year(entry);
+                        draw_generic_cd(
+                            d,
+                            &entry.title(),
+                            year.as_deref(),
+                            (id ^ (id >> 32)) as u32,
+                            (x + 4, y + 4, RECENT_TILE_W - 8, RECENT_TILE_H - 8),
                         );
                     }
                     if hover_fav == Some(i) {
@@ -2554,71 +2736,53 @@ pub fn run(
 
             d.text(MARGIN, all_games_label_y, 1, DIM, ALL_GAMES_TITLE);
 
-            if grid.list_mode {
-                // Multicart menu: a plain numbered list, selection as an
-                // inverted bar — no tile, no art, nothing pretending there's
-                // a cover coming.
-                for (i, entry) in view.iter().enumerate() {
-                    let Some((x, y)) = grid.cell_pos(i, top_row) else {
-                        continue;
-                    };
-                    let selected = !in_recent && i == sel;
-                    if selected {
-                        d.fill(x, y, grid.item_w as u32, grid.item_h as u32, HILITE);
-                    }
-                    let label = format!("{:03}  {}", i + 1, entry.title().to_uppercase());
-                    let color = if selected { HILITE_TEXT } else { TEXT };
-                    d.text(x + 6, y + 3, 1, color, &label);
+            // A madeira sob cada fileira visível — as caixas pousam
+            // nela (a prateleira mora no vão de GAP, sem mexer nos
+            // rects de clique).
+            for row in 0..grid.vis_rows {
+                let y = grid.y0 + row as i32 * grid.cell_h + grid.item_h;
+                draw_shelf_board(d, MARGIN, scr_w - MARGIN as u32 * 2, y, 14);
+            }
+            for (i, entry) in view.iter().enumerate() {
+                let Some((x, y)) = grid.cell_pos(i, top_row) else {
+                    continue;
+                };
+                let id = cover_id(&entry.rom.sha1);
+                // Capa vazada (render 3D em ângulo): sem tile cinza —
+                // a arte compõe na madeira, ancorada na base.
+                let vazada = d.image_vazado(id);
+                if !vazada {
+                    d.fill(x, y, grid.item_w as u32, grid.item_h as u32, TILE_BG);
                 }
-            } else {
-                // A madeira sob cada fileira visível — as caixas pousam
-                // nela (a prateleira mora no vão de GAP, sem mexer nos
-                // rects de clique).
-                for row in 0..grid.vis_rows {
-                    let y = grid.y0 + row as i32 * grid.cell_h + grid.item_h;
-                    draw_shelf_board(d, MARGIN, scr_w - MARGIN as u32 * 2, y, 14);
-                }
-                for (i, entry) in view.iter().enumerate() {
-                    let Some((x, y)) = grid.cell_pos(i, top_row) else {
-                        continue;
-                    };
-                    let id = cover_id(&entry.rom.sha1);
-                    // Capa vazada (render 3D em ângulo): sem tile cinza —
-                    // a arte compõe na madeira, ancorada na base.
-                    let vazada = d.image_vazado(id);
-                    if !vazada {
-                        d.fill(x, y, grid.item_w as u32, grid.item_h as u32, TILE_BG);
-                    }
-                    if d.has_image(id) {
-                        if vazada {
-                            d.image_fit_bottom(id, x, y, grid.item_w as u32, grid.item_h as u32);
-                        } else {
-                            d.image_fit(
-                                id,
-                                x + 4,
-                                y + 4,
-                                grid.item_w as u32 - 8,
-                                grid.item_h as u32 - 8,
-                            );
-                        }
+                if d.has_image(id) {
+                    if vazada {
+                        d.image_fit_bottom(id, x, y, grid.item_w as u32, grid.item_h as u32);
                     } else {
-                        d.text_wrapped(
-                            x + 8,
-                            y + 10,
-                            TILE_W - 16,
-                            1,
-                            DIM,
-                            &entry.title().to_uppercase(),
+                        d.image_fit(
+                            id,
+                            x + 4,
+                            y + 4,
+                            grid.item_w as u32 - 8,
+                            grid.item_h as u32 - 8,
                         );
                     }
-                    if !vazada {
-                        draw_box_dressing(d, x, y, grid.item_w as u32, grid.item_h as u32);
-                    } else {
-                        draw_expositor(d, x, y, grid.item_w as u32, grid.item_h as u32);
-                    }
-                    if hover_grid == Some(i) {
-                        draw_play_icon(d, x + grid.item_w as i32 - 26, y + grid.item_h as i32 - 26);
-                    }
+                } else {
+                    let year = entry_year(entry);
+                    draw_generic_cd(
+                        d,
+                        &entry.title(),
+                        year.as_deref(),
+                        (id ^ (id >> 32)) as u32,
+                        (x + 4, y + 4, grid.item_w as u32 - 8, grid.item_h as u32 - 8),
+                    );
+                }
+                if !vazada {
+                    draw_box_dressing(d, x, y, grid.item_w as u32, grid.item_h as u32);
+                } else {
+                    draw_expositor(d, x, y, grid.item_w as u32, grid.item_h as u32);
+                }
+                if hover_grid == Some(i) {
+                    draw_play_icon(d, x + grid.item_w - 26, y + grid.item_h - 26);
                 }
             }
 
@@ -2656,7 +2820,7 @@ pub fn run(
             }
         }
 
-        crate::runner::pace_frame(&mut next, frame);
+        crate::runner::pace_ui(&mut next, frame, plat, cab);
     }
 }
 
@@ -2674,7 +2838,7 @@ pub fn run_history(plat: &mut Platform, cab: &mut Cabinet, catalog: &Catalog) ->
 
     let mut sel: usize = 0;
     let mut top: usize = 0;
-    let frame = Duration::from_millis(16);
+    let frame = crate::runner::UI_FRAME;
 
     cab.set_shelf_panel(empty_shelf_panel());
     cab.set_close_button(true);
@@ -2715,6 +2879,7 @@ pub fn run_history(plat: &mut Platform, cab: &mut Cabinet, catalog: &Catalog) ->
 
         if let Some((x, y)) = m.click {
             let (ox, oy) = cab.window_to_output(x, y);
+            cab.try_tv_click(ox, oy);
             if cab.hit_close_button(ox, oy) {
                 return Ok(Pick::Quit);
             }
@@ -2946,7 +3111,9 @@ fn decode_art(path: &Path) -> Result<(u32, u32, Vec<u8>)> {
 /// Same decode, with an explicit size cap — the back cover's zoomed view
 /// re-decodes at full resolution so the enlargement stays crisp.
 fn decode_art_scaled(path: &Path, max: u32) -> Result<(u32, u32, Vec<u8>)> {
-    let img = image::open(path)?.thumbnail(max, max).to_rgba8();
+    let img = crate::imgutil::open_limited(path, crate::imgutil::ART_MAX_SIDE)?
+        .thumbnail(max, max)
+        .to_rgba8();
     let (w, h) = img.dimensions();
     Ok((w, h, img.into_raw()))
 }
@@ -3003,5 +3170,32 @@ mod cart_tests {
         assert_eq!(cart_size(652 * mib + 4096), "653 MB"); // Tekken 3 (Track 1 ~652 MB)
         assert_eq!(cart_size(mib), "1 MB");
         assert_eq!(cart_size(0), "0 MB");
+    }
+}
+
+#[cfg(test)]
+mod generic_art_tests {
+    use super::{handwritten_title, wrap_lines};
+
+    #[test]
+    fn handwritten_title_drops_tags_and_fronts_the_article() {
+        assert_eq!(handwritten_title("Tekken 3 (USA)"), "Tekken 3");
+        assert_eq!(
+            handwritten_title("Resident Evil 2 - Dual Shock Ver. (USA) (Disc 1)"),
+            "Resident Evil 2 - Dual Shock Ver."
+        );
+        assert_eq!(
+            handwritten_title("Legend of Dragoon, The (USA)"),
+            "The Legend of Dragoon"
+        );
+    }
+
+    #[test]
+    fn wrap_lines_breaks_on_words_and_marks_the_overflow() {
+        assert_eq!(wrap_lines("Crash Bandicoot", 8, 3), ["Crash", "Bandicoo"]);
+        assert_eq!(
+            wrap_lines("Final Fantasy VII International Edition", 8, 2),
+            ["Final", "Fanta..."]
+        );
     }
 }

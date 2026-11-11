@@ -130,6 +130,18 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+      - name: Check the core assets exist
+        # The in-app core download fetches these from CORE_ASSET_TAG
+        # (core_update.rs); a missing zip means a 404 on every platform.
+        run: |
+          TAG="$(grep -o 'CORE_ASSET_TAG: &str = "[^"]*"' crates/app/src/core_update.rs | cut -d'"' -f2)"
+          for t in x86_64-unknown-linux-gnu aarch64-apple-darwin x86_64-apple-darwin x86_64-pc-windows-msvc; do
+            curl -fsSIL -o /dev/null \
+              "https://github.com/${{ github.repository }}/releases/download/$TAG/pcsx_rearmed_libretro-$t.zip" \
+              || { echo "::error::core asset pcsx_rearmed_libretro-$t.zip missing from release $TAG"; exit 1; }
+          done
       - uses: actions/download-artifact@v4
       - name: Attach to the release
         env:

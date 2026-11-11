@@ -31,7 +31,6 @@ fn main() -> anyhow::Result<()> {
         "Super Mario World (USA)",
         &[
             (PanelButton::Notebook, "Anotações".to_string(), true),
-            (PanelButton::Cheats, "Cheats".to_string(), true),
             (PanelButton::PrintScreen, "Printscreen".to_string(), true),
             (PanelButton::SaveState, "Salvar".to_string(), true),
             (PanelButton::LoadState, "Carregar".to_string(), true),

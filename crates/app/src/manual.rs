@@ -59,7 +59,7 @@ pub fn render_page(path: &Path, page: usize, max: u32) -> Result<Option<PageImag
     let Some((w, h, bytes)) = largest_page_image(&doc, page_id) else {
         return Ok(None);
     };
-    let img = image::load_from_memory(&bytes)
+    let img = crate::imgutil::decode_limited(&bytes, crate::imgutil::ART_MAX_SIDE)
         .ok()
         .or_else(|| raw_to_image(w, h, &bytes))
         .context("decodificando a imagem da página")?;
@@ -112,7 +112,10 @@ fn largest_page_image(doc: &PdfDocument, page_id: lopdf::ObjectId) -> Option<(i6
         let Some(h) = get_resolve(doc, &dict_obj, b"Height").and_then(|o| int_of(&o)) else {
             continue;
         };
-        if w <= 0 || h <= 0 {
+        // Dimensões vêm do PDF (arquivo de fora): fora de 1..=ART_MAX_SIDE a
+        // imagem nem entra — e `w * h` abaixo nunca estoura.
+        let side = i64::from(crate::imgutil::ART_MAX_SIDE);
+        if w <= 0 || h <= 0 || w > side || h > side {
             continue;
         }
         let Some(data) = stream_data(doc, stream) else {
@@ -204,9 +207,23 @@ fn stream_data(doc: &PdfDocument, stream: &Stream) -> Option<Vec<u8>> {
     // é suportado (scans usam exatamente um).
     if let [f] = filters.as_slice() {
         if f.as_slice() == b"FlateDecode" {
-            let mut s = stream.clone();
-            s.decompress().ok()?;
-            return Some(s.content);
+            // Teto de expansão: uma stream de poucos KB pode inflar para GBs
+            // (zip bomb dentro do PDF). Atingir o teto descarta a stream.
+            use std::io::Read;
+            const MAX_DECOMPRESSED: u64 = 96 * 1024 * 1024;
+            let mut out = Vec::new();
+            let mut zlib =
+                flate2::read::ZlibDecoder::new(&stream.content[..]).take(MAX_DECOMPRESSED);
+            if zlib.read_to_end(&mut out).is_err() || out.len() as u64 >= MAX_DECOMPRESSED {
+                let mut raw =
+                    flate2::read::DeflateDecoder::new(&stream.content[..]).take(MAX_DECOMPRESSED);
+                let mut alt = Vec::new();
+                if raw.read_to_end(&mut alt).is_ok() && (alt.len() as u64) < MAX_DECOMPRESSED {
+                    return Some(alt);
+                }
+                return None;
+            }
+            return Some(out);
         }
         if f.as_slice() == b"DCTDecode" {
             return Some(stream.content.clone());

@@ -141,8 +141,37 @@ pub fn create_blank(dir: &Path) -> io::Result<PathBuf> {
     for b in card[BLOCK..].iter_mut() {
         *b = 0xFF;
     }
-    std::fs::write(&path, card)?;
+    polystnx_domain::fsutil::write_atomic(&path, card)?;
     Ok(path)
+}
+
+/// Pode gravar a SRAM (com `sram_used` saves) por cima de `dest`?
+/// Recusa — com o motivo — quando o arquivo existe mas não é um card de
+/// 128 KB legível (DexDrive `.gme`, `.mcd` com cabeçalho, erro de leitura:
+/// o slot ficou vazio na sessão e gravar ali destruiria o original) e
+/// quando a SRAM vem sem saves sobre um card com saves. Arquivo que não
+/// existe pode ser criado.
+pub fn overwrite_check(dest: &Path, sram_used: usize) -> Result<(), String> {
+    let bytes = match std::fs::read(dest) {
+        Ok(b) => b,
+        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(()),
+        Err(e) => return Err(format!("{} não lê ({e})", dest.display())),
+    };
+    if bytes.len() != CARD_SIZE || &bytes[0..2] != b"MC" {
+        return Err(format!(
+            "{} não é um card .mcr de 128 KB ({} bytes)",
+            dest.display(),
+            bytes.len()
+        ));
+    }
+    let dest_used = used_slots(&bytes) as usize;
+    if sram_used == 0 && dest_used > 0 {
+        return Err(format!(
+            "SRAM do core sem saves e {} com {dest_used} save(s)",
+            dest.display()
+        ));
+    }
+    Ok(())
 }
 
 /// Apaga o arquivo do card.
@@ -165,8 +194,33 @@ pub fn rename(path: &Path, new_name: &str) -> io::Result<PathBuf> {
         return Err(io::Error::new(io::ErrorKind::InvalidInput, "nome vazio"));
     }
     let new_path = path.with_file_name(clean).with_extension("mcr");
+    // `rename` do Unix substitui o destino em silêncio: "A" → "B" com um
+    // B.mcr existente apagava o B. Só segue se o destino não existe ou é o
+    // MESMO arquivo (só a caixa muda, num APFS/NTFS sem distinção).
+    if new_path != path {
+        if let Ok(dst) = std::fs::metadata(&new_path) {
+            if !same_file(&std::fs::metadata(path)?, &dst) {
+                return Err(io::Error::new(
+                    io::ErrorKind::AlreadyExists,
+                    "já existe um card com esse nome",
+                ));
+            }
+        }
+    }
     std::fs::rename(path, &new_path)?;
     Ok(new_path)
+}
+
+#[cfg(unix)]
+fn same_file(a: &std::fs::Metadata, b: &std::fs::Metadata) -> bool {
+    use std::os::unix::fs::MetadataExt;
+    a.dev() == b.dev() && a.ino() == b.ino()
+}
+
+#[cfg(not(unix))]
+fn same_file(_: &std::fs::Metadata, _: &std::fs::Metadata) -> bool {
+    // Sem inode à mão: na dúvida, recusa (o pior caso é pedir outro nome).
+    false
 }
 
 /// O nome do card (stem do arquivo) — o que vai no adesivo do slot.
@@ -347,6 +401,7 @@ mod tests {
         // `used == 0`; qualquer save real (o Tekken grava 51 00) conta como
         // em uso. Escrever o primeiro por cima do segundo era o apagão.
         let dir = std::env::temp_dir().join(format!("mc-test4-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
 
         let mut blank = vec![0u8; CARD_SIZE];
@@ -413,6 +468,41 @@ mod tests {
         assert_eq!(new.file_name().unwrap(), "Meu_Card_2.mcr");
         assert!(new.exists());
         assert!(!path.exists());
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn rename_refuses_to_clobber_another_card() {
+        let dir =
+            std::env::temp_dir().join(format!("mc-test-rename-clobber-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let a = dir.join("A.mcr");
+        let b = dir.join("B.mcr");
+        std::fs::write(&a, b"a").unwrap();
+        std::fs::write(&b, card_with_one_save()).unwrap();
+        let err = rename(&a, "B").unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::AlreadyExists);
+        assert_eq!(std::fs::read(&b).unwrap(), card_with_one_save());
+        assert!(a.exists());
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn overwrite_check_guards_foreign_and_full_cards() {
+        let dir = std::env::temp_dir().join(format!("mc-test-overwrite-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        // não existe: pode criar
+        assert!(overwrite_check(&dir.join("novo.mcr"), 0).is_ok());
+        // formato estranho (DexDrive): nunca
+        let gme = dir.join("dex.mcr");
+        std::fs::write(&gme, vec![1u8; CARD_SIZE + 3904]).unwrap();
+        assert!(overwrite_check(&gme, 3).is_err());
+        // card com save: SRAM vazia não, SRAM com save sim
+        let full = dir.join("full.mcr");
+        std::fs::write(&full, card_with_one_save()).unwrap();
+        assert!(overwrite_check(&full, 0).is_err());
+        assert!(overwrite_check(&full, 1).is_ok());
         std::fs::remove_dir_all(&dir).ok();
     }
 }

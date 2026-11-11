@@ -34,10 +34,21 @@ polystnx-ra.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 ureq.workspace = true
+noto-sans-mono-bitmap = { version = "0.3", default-features = false, features = [
+    "bold",
+    "regular",
+    "size_16",
+    "size_20",
+    "size_32",
+    "unicode-basic-latin",
+] }
+sha2.workspace = true
+hex.workspace = true
 toml = "0.8"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
-zip = { version = "8", default-features = false, features = ["deflate"] }
-lopdf = "0.36"
+zip = { version = "9", default-features = false, features = ["deflate"] }
+lopdf = "0.42"
+flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
 
 [target.'cfg(windows)'.build-dependencies]
 winres = "0.1"

@@ -41,3 +41,6 @@ screenscraper.toml
 
 # pacotes locais da Fase 5 (o CI regenera por tag)
 /dist/
+
+# Zips do core gerados por packaging/prepare-core-asset.sh (sobem na release, não no git)
+packaging/core-asset/

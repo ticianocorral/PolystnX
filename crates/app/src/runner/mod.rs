@@ -17,6 +17,17 @@ use polystnx_platform::{
 
 use crate::config::Config;
 
+mod paths;
+pub use self::paths::*;
+mod cards;
+use self::cards::*;
+mod pace;
+pub use self::pace::*;
+mod cheats;
+use self::cheats::*;
+mod notes;
+use self::notes::*;
+
 /// How often to flush battery SRAM to disk while playing (frames ≈ 10 s).
 /// Save-state slots, `0`..`9`.
 const SLOTS: u8 = 10;
@@ -128,210 +139,6 @@ const PAD: [(Button, polystnx_platform::PadButton); 14] = {
         (Button::R2, P::R2),
     ]
 };
-
-/// A path-hostile character in a game title, replaced with `_` so it can't
-/// escape its parent directory or fail to create — shared by every per-game
-/// folder (`saves/<title>/`, `notes/<title>/`), and by `rom_rename` (plan
-/// revision) when it turns a No-Intro name into a ROM file name.
-pub(crate) fn sanitize_dir_name(title: &str) -> String {
-    let safe: String = title
-        .trim()
-        .chars()
-        .map(|c| {
-            if c.is_ascii_control()
-                || matches!(c, '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|')
-            {
-                '_'
-            } else {
-                c
-            }
-        })
-        .collect();
-    if safe.is_empty() {
-        "___".to_string()
-    } else {
-        safe
-    }
-}
-
-/// `save_dir/<game title>/` — one folder per game, named for a human
-/// browsing it rather than the ROM hash (plan revision — mirrors
-/// `note_dir`: readability over rename-proofing nobody asked for here).
-fn game_dir(save_dir: &Path, title: &str) -> PathBuf {
-    save_dir.join(sanitize_dir_name(title))
-}
-
-/// `save_dir/<title>/<slot>.state` — plain slot number, no hash prefix
-/// (plan revision).
-fn state_file(save_dir: &Path, title: &str, slot: u8) -> PathBuf {
-    game_dir(save_dir, title).join(format!("{slot}.state"))
-}
-
-/// `save_dir/<title>/<slot>.disc` — the disc file name the state was made
-/// on (plano §3.1: um state amarra o disco em que foi salvo; restaurar com
-/// outro disco no drive é lixo).
-fn disc_stamp_path(save_dir: &Path, title: &str, slot: u8) -> PathBuf {
-    game_dir(save_dir, title).join(format!("{slot}.disc"))
-}
-
-/// The disc's file name, for the state stamps (`jogo.chd`).
-fn disc_name(rom: &Path) -> String {
-    rom.file_name()
-        .map(|s| s.to_string_lossy().into_owned())
-        .unwrap_or_default()
-}
-
-/// `save_dir/<title>/sram.srm` — battery SRAM, one file per game (plan
-/// revision — used to be `<hash>.srm` directly under `save_dir`).
-/// `save_dir/<title>/cheats.txt` — plain text either way, so the extension
-/// might as well say so (plan revision — used to be `<hash>.cheats`).
-fn cheat_state_path(save_dir: &Path, title: &str) -> PathBuf {
-    game_dir(save_dir, title).join("cheats.txt")
-}
-
-/// `save_dir/<title>/playtime.txt` — total seconds ever spent powered on,
-/// plain text like `cheats.txt` (plan revision: "mostrar tempo total de
-/// jogo do game").
-fn playtime_path(save_dir: &Path, title: &str) -> PathBuf {
-    game_dir(save_dir, title).join("playtime.txt")
-}
-
-/// The per-game folder name `run_game` itself uses — the ROM's file stem,
-/// not the shelf's `CatalogEntry::title()` (which prefers a No-Intro/
-/// internal name when one exists). Exposed so the shelf can read
-/// `total_playtime_secs` for the exact folder a session actually wrote to,
-/// instead of guessing at a name that might not match.
-pub fn rom_title(rom_path: &Path) -> String {
-    rom_path
-        .file_stem()
-        .map(|s| s.to_string_lossy().into_owned())
-        .unwrap_or_else(|| "???".to_string())
-}
-
-/// Total time this game has spent powered on, across every session ever
-/// played — `0` for a game never played (no file yet) or a corrupt one
-/// (never worth failing the panel over one bad number).
-pub fn total_playtime_secs(save_dir: &Path, title: &str) -> u64 {
-    fs::read_to_string(playtime_path(save_dir, title))
-        .ok()
-        .and_then(|s| s.trim().parse().ok())
-        .unwrap_or(0)
-}
-
-/// Add this session's powered-on seconds to the running total and save it
-/// back — best-effort, same as the other per-game sidecars; a `0` (the
-/// console was never turned on this session) skips the write entirely.
-fn add_playtime(save_dir: &Path, title: &str, secs: u64) {
-    if secs == 0 {
-        return;
-    }
-    let total = total_playtime_secs(save_dir, title) + secs;
-    let _ = fs::create_dir_all(game_dir(save_dir, title));
-    let _ = fs::write(playtime_path(save_dir, title), total.to_string());
-}
-
-/// Rows for the "Salvar" modal (plan revision — replaces the old slot
-/// cycler): one per save-state slot, always clickable (saving overwrites
-/// whatever was there), labelled "(vazio)" for slots with nothing in them
-/// yet purely as information.
-fn save_slot_rows(save_dir: &Path, title: &str) -> Vec<(String, bool)> {
-    (0..SLOTS)
-        .map(|s| {
-            let filled = state_file(save_dir, title, s).exists();
-            let label = if filled {
-                format!("Slot {s}")
-            } else {
-                format!("Slot {s} (vazio)")
-            };
-            (label, true)
-        })
-        .collect()
-}
-
-/// Rows for the "Carregar" modal, mirroring `save_slot_rows` — an empty
-/// slot is disabled instead of just noted, since there's nothing to load.
-fn load_slot_rows(save_dir: &Path, title: &str) -> Vec<(String, bool)> {
-    (0..SLOTS)
-        .map(|s| {
-            let filled = state_file(save_dir, title, s).exists();
-            let label = if filled {
-                format!("Slot {s}")
-            } else {
-                format!("Slot {s} (vazio)")
-            };
-            (label, filled)
-        })
-        .collect()
-}
-
-/// O arquivo que o PCSX Rearmed usa para o card do SLOT 2 (o core o cria
-/// no save dir com memcard2 habilitado e o escreve ao sair).
-/// O arquivo do card do SLOT 1 no PCSX Rearmed — a fonte de verdade do
-/// core no boot; o SAVE_RAM é espelho e NÃO sobrevive à sessão.
-const MC1_SHARED_FILE: &str = "pcsx-card1.mcd";
-
-/// Os `.mcr` da pasta, ordenados — a fonte das duas vistas da biblioteca.
-fn list_cards(dir: &Path) -> Vec<PathBuf> {
-    fs::read_dir(dir)
-        .into_iter()
-        .flatten()
-        .flatten()
-        .map(|e| e.path())
-        .filter(|p| {
-            p.extension()
-                .and_then(|e| e.to_str())
-                .map(|e| e.eq_ignore_ascii_case("mcr"))
-                .unwrap_or(false)
-        })
-        .collect()
-}
-
-/// A biblioteca com a informação de cada card (plano revision: "lista com
-/// todos existentes, com as infos dos blocos salvos neles, inclusive com os
-/// ícones dos jogos"): ícone do primeiro save + "N/15 blocos" no rótulo.
-/// A linha 0 é sempre "(criar cartão novo)".
-type CardModalRow = (String, bool, Option<(u32, u32, Vec<u8>)>);
-
-fn card_rows_with_icons(dir: &Path, current: Option<&Path>) -> (Vec<CardModalRow>, Vec<PathBuf>) {
-    let mut cards = list_cards(dir);
-    cards.sort();
-    let mut rows = vec![("(criar cartão novo)".to_string(), true, None)];
-    for card in &cards {
-        let name = card
-            .file_stem()
-            .map(|s| s.to_string_lossy().into_owned())
-            .unwrap_or_default();
-        let info = crate::memcard::inspect(card);
-        let (label, icon) = match info {
-            Some(info) => {
-                // Um card só vive em um slot — o rótulo diz qual.
-                let where_ = if current == Some(card.as_path()) {
-                    " - no slot 1"
-                } else {
-                    ""
-                };
-                (
-                    format!("{name} - {}/15 blocos{}", info.used, where_),
-                    info.saves
-                        .first()
-                        .and_then(|s| s.icon.clone())
-                        .map(|d| (16u32, 16u32, d)),
-                )
-            }
-            None => (format!("{name} - inválido"), None),
-        };
-        rows.push((label, true, icon));
-    }
-    (rows, cards)
-}
-
-// --- core em thread própria (plano revision: "faca tudo") ------------------
-//
-// O core bloqueia: boot, troca BIOS→jogo e FMV pesada seguram
-// `core.run()` por centenas de ms — e com o loop sequencial, nada era
-// redesenhado (quadro congelado, disco parado). O worker dono do core
-// responde a comandos; a interface continua desenhando a 60 fps o último
-// quadro recebido, com o disco girando por relógio.
 
 /// Snapshot de entrada de um tick — o `Input` da plataforma não é Send.
 #[derive(Default)]
@@ -565,72 +372,12 @@ fn spawn_core_worker(
     (tx, orx, handle)
 }
 
-/// Encaixa `path` num slot de memory card (`mem_id` 0 = slot 1, 1 = slot 2
-/// no libretro): o conteúdo vira a memória da sessão e o flush passa a
-/// apontar para o arquivo. Card sem arquivo ainda nasce do core na próxima
-/// materialização.
-fn seat_card(tx: &std::sync::mpsc::Sender<CoreCmd>, current: &mut Option<PathBuf>, path: PathBuf) {
-    // Modo Libretro: o card entra pela MEMÓRIA (WriteMem no SAVE_RAM).
-    // Com o console desligado o core está só pausado — o conteúdo fica na
-    // memória até o power-on. Com LIGADO, o caminho do modal usa ReseedCards
-    // (WriteMem em sessão é sobrescrito pelo core — probe). A persistência
-    // no arquivo do card é do flush/saída, não daqui.
-    match fs::read(&path) {
-        Ok(bytes) => {
-            let n = bytes.len();
-            let _ = tx.send(CoreCmd::WriteMem {
-                id: MEMORY_SAVE_RAM,
-                bytes,
-            });
-            log::info!("card: {} no SAVE_RAM ({n} bytes)", path.display());
-        }
-        Err(e) => {
-            log::info!(
-                "card: {} ainda não existe ({e}) — o core formata",
-                path.display()
-            );
-        }
-    }
-    *current = Some(path);
-}
-
 /// How long a silent action's button shows "feito!" after firing (plan
 /// revision, fixing a real report: clicking Nota gave zero on-screen
 /// feedback, so a player clicked it seven times thinking nothing happened —
 /// it had, every time). Long enough to register as intentional, short
 /// enough to not look stuck.
 const FLASH_DURATION: Duration = Duration::from_millis(900);
-
-/// Advance `next` by one frame and wait for it: sleep the bulk of the wait,
-/// then spin only the last ~200µs (a plain `thread::sleep` can overshoot;
-/// spinning 2 ms inteiros por frame era queimar ~12% de um núcleo — CPU
-/// que o core do emulador precisa quando o sistema está estrangulado, como
-/// no gaming mode). Falls back to resyncing when the loop fell behind, so
-/// it never spirals. Shared by runner/shelf/idle/settings.
-pub(crate) fn pace_frame(next: &mut Instant, frame_time: Duration) {
-    *next += frame_time;
-    let now = Instant::now();
-    if *next <= now {
-        if polystnx_platform::trace_enabled() {
-            let late = now - *next;
-            if late > Duration::from_millis(2) {
-                log::warn!(
-                    "trace: frame atrasado {:.1} ms (loop não fechou o budget)",
-                    late.as_secs_f64() * 1e3
-                );
-            }
-        }
-        *next = now; // fell behind; resync so we don't spiral
-        return;
-    }
-    let wait = *next - now;
-    if wait > Duration::from_millis(1) {
-        std::thread::sleep(wait - Duration::from_millis(1));
-    }
-    while Instant::now() < *next {
-        std::thread::yield_now();
-    }
-}
 
 /// Grade de luma amostrada do quadro XRGB8888 (48×36) — o "igual?" barato
 /// entre quadros reais consecutivos. A tela PARADA é a assinatura do freeze
@@ -699,10 +446,8 @@ fn reset_pressed(flash: &HashMap<PanelButton, Instant>) -> bool {
 /// `draw_rocker`). Salvar/Carregar/Printscreen no longer carry a slot
 /// number in their label (plan revision — confusing next to the old
 /// cyclers): clicking any of the three now opens a modal to pick one, so
-/// the label just names the action. Cheats (plan revision — split out of
-/// the notebook) is absent entirely when `has_cheats` is false — this
-/// cartridge has no curated codes, so a button that always opened an empty
-/// checklist would just be clutter. Conquistas (plan revision: "mostre o
+/// the label just names the action. Cheats are no longer here: they are
+/// chosen in the Cheater Fish, before the game. Conquistas (plan revision: "mostre o
 /// botão mas mostre desativado") is the opposite policy: present whenever
 /// the RA account is configured, `enabled: false` when the game has no set
 /// (the click still lands — the runner answers with an OSD). Games are
@@ -711,7 +456,6 @@ fn reset_pressed(flash: &HashMap<PanelButton, Instant>) -> bool {
 /// left to list here.
 fn command_rows(
     flash: &HashMap<PanelButton, Instant>,
-    has_cheats: bool,
     ra_on: bool,
     has_achievements: bool,
     all_slots_pinned: bool,
@@ -730,9 +474,6 @@ fn command_rows(
             "Conquistas".to_string(),
             has_achievements,
         ));
-    }
-    if has_cheats {
-        rows.push((PanelButton::Cheats, "Cheats".to_string(), true));
     }
     rows.push((
         PanelButton::PrintScreen,
@@ -770,7 +511,7 @@ fn power_off_burst(plat: &Platform, cab: &mut Cabinet) -> f32 {
     // revision); the visual burst plays either way.
     let has_sfx = crate::sfx::play(cab, crate::sfx::Sfx::PowerOff);
     let audio = (!has_sfx).then(|| plat.open_audio(RATE).ok()).flatten();
-    let frame = Duration::from_millis(16);
+    let frame = UI_FRAME;
     let mut rng: u32 = 0x1234_5678;
     let start = Instant::now();
 
@@ -812,7 +553,7 @@ fn power_on_burst(plat: &Platform, cab: &mut Cabinet) {
     const SPAN: Duration = Duration::from_millis(120);
     let has_sfx = crate::sfx::play(cab, crate::sfx::Sfx::PowerOn);
     let audio = (!has_sfx).then(|| plat.open_audio(RATE).ok()).flatten();
-    let frame = Duration::from_millis(16);
+    let frame = UI_FRAME;
     let mut rng: u32 = 0x8765_4321;
     let start = Instant::now();
 
@@ -870,7 +611,7 @@ fn live_session_time(elapsed: Duration, since: Option<Instant>) -> Duration {
 /// runs the live loop for a few frames).
 fn cartridge_insert_animation(cab: &mut Cabinet) {
     const SPAN: Duration = Duration::from_millis(520);
-    let frame = Duration::from_millis(16);
+    let frame = UI_FRAME;
     let start = Instant::now();
 
     while start.elapsed() < SPAN {
@@ -896,7 +637,7 @@ fn cartridge_insert_animation(cab: &mut Cabinet) {
 /// state left over to reset here.
 fn cartridge_eject_animation(cab: &mut Cabinet) {
     const SPAN: Duration = Duration::from_millis(430);
-    let frame = Duration::from_millis(16);
+    let frame = UI_FRAME;
     let start = Instant::now();
 
     while start.elapsed() < SPAN {
@@ -907,53 +648,12 @@ fn cartridge_eject_animation(cab: &mut Cabinet) {
     }
 }
 
-/// One `0`/`1` per line, in the curated list's order. Missing/short/garbled
-/// files just mean "start with everything off" — nothing to migrate.
-fn load_cheat_state(path: &Path, len: usize) -> Vec<bool> {
-    let mut state = vec![false; len];
-    if let Ok(text) = fs::read_to_string(path) {
-        for (slot, line) in state.iter_mut().zip(text.lines()) {
-            *slot = line.trim() == "1";
-        }
-    }
-    state
-}
-
-fn save_cheat_state(path: &Path, state: &[bool]) {
-    let text: String = state
-        .iter()
-        .map(|&on| if on { "1\n" } else { "0\n" })
-        .collect();
-    if let Err(e) = fs::write(path, text) {
-        log::warn!("cheat state flush failed: {e}");
-    }
-}
-
-/// `(description, on)` pairs for the panel — cheap enough to rebuild on every
-/// toggle/navigate, there are only ever a handful.
-fn cheat_rows(defs: &[polystnx_domain::CheatDef], state: &[bool]) -> Vec<(String, bool)> {
-    defs.iter()
-        .zip(state)
-        .map(|(d, &on)| (d.desc.to_string(), on))
-        .collect()
-}
-
-/// `cheat_rows`' pairs, formatted for the Cheats modal's row grid (plan
-/// revision — its own menu, not a page in the notebook): every row stays
-/// `enabled: true` (toggling is always available, unlike a save/load/print
-/// slot that can be dimmed), with an `[x]`/`[ ]` mark standing in for the
-/// on/off state a modal row otherwise has no way to show.
-fn cheat_modal_rows(cheats: &[(String, bool)]) -> Vec<(String, bool)> {
-    cheats
-        .iter()
-        .map(|(desc, on)| (format!("{}{desc}", if *on { "[x] " } else { "[ ] " }), true))
-        .collect()
-}
-
 /// Decode scraped art (panel logo, note thumbnail, …) small enough for its
 /// slot, keeping alpha for transparent logos.
 fn decode_art(path: &Path, max: u32) -> Result<(u32, u32, Vec<u8>)> {
-    let img = image::open(path)?.thumbnail(max, max).to_rgba8();
+    let img = crate::imgutil::open_limited(path, crate::imgutil::ART_MAX_SIDE)?
+        .thumbnail(max, max)
+        .to_rgba8();
     let (w, h) = img.dimensions();
     Ok((w, h, img.into_raw()))
 }
@@ -998,391 +698,39 @@ fn frame_to_rgb8(frame: &EmuFrame) -> image::RgbImage {
     img
 }
 
-/// Fixed note slots per game (plan revision, replacing an open-ended
-/// timestamped list): a screenshot into the notebook always lands in one of
-/// these, chosen by the player, same shape as the save-state slots.
-const NOTE_SLOTS: u8 = 15;
-/// Max characters a slot's caption may hold — short, it's a label, not a
-/// page (contrast `NOTE_CHAR_LIMIT` for the free-text notebook page).
-const SLOT_NAME_LIMIT: usize = 40;
-
-/// Which of three things the app's one text editor is currently editing
-/// (plan revision) — they share all the input-polling plumbing, just write
-/// to a different place, have a different character limit, and (for
-/// `PrintName`) render in the modal instead of the notebook.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum NoteEdit {
-    None,
-    /// Editing the notebook's currently-shown text-note slot (plan
-    /// revision — used to always append a fresh, blank page to an
-    /// unbounded, unreadable log; now edits whichever of the 15 slots the
-    /// left page is showing, pre-filled with its saved content). Saving an
-    /// empty draft deletes the slot instead of writing one.
-    Text,
-    /// Renaming the notebook's currently-shown print slot's caption (from
-    /// "Nomear print" on the notebook's right page).
-    SlotName,
-    /// Naming the print just captured into this slot (plan revision — the
-    /// Printscreen modal's second step): unlike `SlotName`, committing this
-    /// one also writes `runner::print_capture`'s image to disk for the first
-    /// time — the capture and the name land together.
-    PrintName(u8),
-    /// Renomear um memory card (o alvo vive em `card_rename`) — commit
-    /// renomeia o `.mcr` na biblioteca.
-    CardRename,
-    /// Typing the Cheats modal's search filter (plan revision — the
-    /// libretro-database expansion made some games' lists long enough that
-    /// finding one by eye/scroll alone stopped being practical). Unlike
-    /// every other `NoteEdit`, committing this one writes nothing to
-    /// disk — it just updates `Cabinet`'s in-memory filter and returns to
-    /// the Cheats modal's row grid rather than closing it.
-    CheatSearch,
-}
-
-impl NoteEdit {
-    fn limit(self) -> usize {
-        match self {
-            NoteEdit::None => 0,
-            NoteEdit::Text => NOTE_CHAR_LIMIT,
-            NoteEdit::SlotName
-            | NoteEdit::PrintName(_)
-            | NoteEdit::CheatSearch
-            | NoteEdit::CardRename => SLOT_NAME_LIMIT,
-        }
-    }
-
-    fn heading(self) -> &'static str {
-        match self {
-            NoteEdit::None => "",
-            NoteEdit::Text => "editando anotação (vazio apaga, clique fora cancela)",
-            NoteEdit::SlotName => "renomeando o print (clique fora cancela)",
-            NoteEdit::PrintName(_) => "nome do print (opcional)",
-            NoteEdit::CheatSearch => "buscar cheat (vazio mostra todos)",
-            NoteEdit::CardRename => "renomear memory card (clique fora cancela)",
-        }
-    }
-}
-
-/// A save/load-state or print slot picker, or the cheats checklist (plan
-/// revision) — mutually exclusive with `paused` (the notebook has no
-/// slot-picking or cheats of its own any more) and gates gameplay stepping
-/// the same way `paused` does, so the frozen frame behind the dialog doesn't
-/// keep moving while a choice is pending.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Modal {
-    None,
-    SaveSlot,
-    LoadSlot,
-    /// Picking which of the 15 note slots to save the just-grabbed print
-    /// into — see `runner::print_capture`.
-    PrintSlot,
-    /// The curated cheats checklist (plan revision — split out of the
-    /// notebook into its own menu). Unlike the other three, a pick
-    /// (`ModalPick`) toggles a row in place and leaves the modal open
-    /// instead of closing it.
-    Cheats,
-    /// The achievements list (plan: `docs/plano-retroachievements.md`,
-    /// fase 4) — read-only rows with the earned state; a pick just closes.
-    Achievements,
-    /// A biblioteca de memory cards (plano §3): os `.mcr` de `memcards/` —
-    /// escolher um encaixa no slot 1 (só desligado; a trava é no
-    /// `OpenCards`), e a primeira linha cria um cartão novo.
-    Cards,
-    /// As ações sobre o card escolhido (usar/renomear/apagar) — o alvo e o
-    /// slot vivem em `card_action`.
-    CardsAction,
-    /// A confirmação do apagar (destrutivo — nunca apaga direto).
-    CardsConfirm,
-}
-
-/// One note slot's protection/caption (plan revision) — everything defaults
-/// to "untouched" (not pinned, no caption) for a slot nobody's set either on.
-#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
-struct SlotMeta {
-    #[serde(default)]
-    pinned: bool,
-    #[serde(default)]
-    label: String,
-}
-
-/// `notes_dir/<title>/slots.json`'s shape: which of the 15 photo slots and
-/// which of the 15 text-note slots (plan revision — the two are numbered
-/// independently, slot 3's photo and slot 3's text share nothing but a
-/// number) are pinned or captioned. Absent entries mean the default
-/// (`SlotMeta::default()`) — most slots never need a real entry.
-#[derive(Debug, Default, serde::Serialize, serde::Deserialize)]
-struct NotesMeta {
-    #[serde(default)]
-    slots: std::collections::BTreeMap<u8, SlotMeta>,
-    #[serde(default)]
-    text_slots: std::collections::BTreeMap<u8, SlotMeta>,
-}
-
-impl NotesMeta {
-    fn slot(&self, slot: u8) -> SlotMeta {
-        self.slots.get(&slot).cloned().unwrap_or_default()
-    }
-
-    fn text_slot(&self, slot: u8) -> SlotMeta {
-        self.text_slots.get(&slot).cloned().unwrap_or_default()
-    }
-}
-
-/// Every one of the 15 slots resists overwrite — Printscreen has nowhere
-/// left to put a new capture (plan revision: "avisar quando 15 fixados").
-fn all_slots_pinned(meta: &NotesMeta) -> bool {
-    (1..=NOTE_SLOTS).all(|s| meta.slot(s).pinned)
-}
-
-/// Rows for the Printscreen modal's slot-picking step (plan revision): one
-/// per note slot, in order, labelled with its number plus whether it's
-/// filled/pinned; a pinned slot is disabled, same protection `NoteCapture`
-/// used to enforce by auto-redirecting instead.
-fn print_slot_rows(notes_dir: &Path, title: &str, meta: &NotesMeta) -> Vec<(String, bool)> {
-    (1..=NOTE_SLOTS)
-        .map(|s| {
-            let m = meta.slot(s);
-            let filled = note_slot_path(notes_dir, title, s).exists();
-            let label = if m.pinned {
-                format!("Slot {s} (fixado)")
-            } else if filled {
-                format!("Slot {s}")
-            } else {
-                format!("Slot {s} (vazio)")
-            };
-            (label, !m.pinned)
-        })
-        .collect()
-}
-
-fn notes_meta_path(notes_dir: &Path, title: &str) -> PathBuf {
-    note_dir(notes_dir, title).join("slots.json")
-}
-
-/// Missing or unreadable is just "nothing pinned or captioned yet", not an
-/// error — same tolerant read as the rest of this portable app's sidecars.
-fn load_notes_meta(notes_dir: &Path, title: &str) -> NotesMeta {
-    fs::read_to_string(notes_meta_path(notes_dir, title))
-        .ok()
-        .and_then(|s| serde_json::from_str(&s).ok())
-        .unwrap_or_default()
-}
-
-fn save_notes_meta(notes_dir: &Path, title: &str, meta: &NotesMeta) {
-    let dir = note_dir(notes_dir, title);
-    if fs::create_dir_all(&dir).is_err() {
-        return;
-    }
-    if let Ok(s) = serde_json::to_string_pretty(meta) {
-        if let Err(e) = fs::write(notes_meta_path(notes_dir, title), s) {
-            log::warn!("saving note slot metadata failed: {e}");
-        }
-    }
-}
-
-/// `notes_dir/<game title>/` — one folder per game, named for a human
-/// browsing it rather than the ROM hash (plan revision: readability over
-/// rename-proofing, since the player picked this explicitly). Mirrors
-/// `game_dir` (`saves/<title>/`) — same sanitizing, same tradeoff.
-fn note_dir(notes_dir: &Path, title: &str) -> PathBuf {
-    notes_dir.join(sanitize_dir_name(title))
-}
-
-/// `notes_dir/<title>/01.png` .. `15.png` — 1-indexed to match the slot
-/// numbers shown on screen.
-fn note_slot_path(notes_dir: &Path, title: &str, slot: u8) -> PathBuf {
-    note_dir(notes_dir, title).join(format!("{slot:02}.png"))
-}
-
-/// `notes_dir/<title>/notas.txt` — the old, pre-revision unbounded
-/// free-text append log. Nothing writes here any more (see
-/// `note_text_slot_path`, the 15-slot replacement) — this path only still
-/// exists so `migrate_legacy_text_notes` can find and split up whatever an
-/// earlier version of the app already wrote there.
-fn legacy_note_text_path(notes_dir: &Path, title: &str) -> PathBuf {
-    note_dir(notes_dir, title).join("notas.txt")
-}
-
-/// `notes_dir/<title>/01.txt` .. `15.txt` — 1-indexed to match the slot
-/// numbers shown on screen, numbered independently of the photo slots
-/// (`note_slot_path`) even though they share the same range: a `.png` and
-/// a `.txt` never collide, so slot 3's photo and slot 3's text are just two
-/// unrelated files that happen to both say "3".
-fn note_text_slot_path(notes_dir: &Path, title: &str, slot: u8) -> PathBuf {
-    note_dir(notes_dir, title).join(format!("{slot:02}.txt"))
-}
-
-/// Save the current frame into note `slot` (1..=15), overwriting whatever
-/// was there before — same "pick a slot, it replaces what's in it" model as
-/// save states.
-fn save_note_image(notes_dir: &Path, title: &str, slot: u8, frame: &EmuFrame) -> Result<()> {
-    let dir = note_dir(notes_dir, title);
-    fs::create_dir_all(&dir).with_context(|| format!("creating {}", dir.display()))?;
-    let path = note_slot_path(notes_dir, title, slot);
-    frame_to_rgb8(frame)
-        .save(&path)
-        .with_context(|| format!("saving note image {}", path.display()))
-}
-
-/// Text-note `slot`'s saved content (plan revision — one of the 15,
-/// mirroring the photo slots), or `None` for an empty slot — a
-/// whitespace-only file counts as empty too, same as an empty draft never
-/// got saved as one to begin with.
-fn read_text_slot(notes_dir: &Path, title: &str, slot: u8) -> Option<String> {
-    fs::read_to_string(note_text_slot_path(notes_dir, title, slot))
-        .ok()
-        .filter(|s| !s.trim().is_empty())
-}
-
-/// Save `text` into note-text `slot` (1..=15), overwriting whatever was
-/// there before — same "pick a slot, it replaces what's in it" model
-/// `save_note_image` already uses for the photo slots.
-fn save_text_slot(notes_dir: &Path, title: &str, slot: u8, text: &str) -> Result<()> {
-    let dir = note_dir(notes_dir, title);
-    fs::create_dir_all(&dir).with_context(|| format!("creating {}", dir.display()))?;
-    let path = note_text_slot_path(notes_dir, title, slot);
-    fs::write(&path, text).with_context(|| format!("saving text note {}", path.display()))
-}
-
-/// Clear note-text `slot` — a missing file already means "empty", so this
-/// is not an error either way.
-fn delete_text_slot(notes_dir: &Path, title: &str, slot: u8) {
-    let _ = fs::remove_file(note_text_slot_path(notes_dir, title, slot));
-}
-
-/// One-time upgrade from the old unbounded `notas.txt` append log into the
-/// new 15 numbered slots (plan revision — "I wrote something and can't see
-/// it again" was a real complaint: the old log had no viewer at all, just
-/// a button that always appended a blank page). A no-op the moment any
-/// text slot already exists, so a game already using the new format is
-/// never re-split or overwritten. Entries in the old log were separated by
-/// a blank line (`append_note_text` used to write `"{text}\n\n"`); the
-/// first 15 non-empty ones become slots 1..=15, in the order they were
-/// written. `notas.txt` itself is left in place afterward rather than
-/// deleted — cheap insurance against a bug here losing anyone's notes
-/// outright — but nothing reads it again once this has run once.
-fn migrate_legacy_text_notes(notes_dir: &Path, title: &str) {
-    if (1..=NOTE_SLOTS).any(|s| note_text_slot_path(notes_dir, title, s).is_file()) {
-        return;
-    }
-    let Ok(contents) = fs::read_to_string(legacy_note_text_path(notes_dir, title)) else {
-        return;
-    };
-    let pages: Vec<&str> = contents
-        .split("\n\n")
-        .map(str::trim)
-        .filter(|p| !p.is_empty())
-        .collect();
-    if pages.is_empty() {
-        return;
-    }
-    let mut migrated = 0;
-    for (slot, page) in (1..=NOTE_SLOTS).zip(pages) {
-        match save_text_slot(notes_dir, title, slot, page) {
-            Ok(()) => migrated += 1,
-            Err(e) => log::warn!("migrating legacy note into slot {slot} failed: {e}"),
-        }
-    }
-    log::info!("notas.txt: migrated {migrated} page(s) into numbered text-note slots");
-}
-
-/// Panel display cap for a pinned text note (plan revision) — the full
-/// slot can run up to `NOTE_CHAR_LIMIT`, way more than the side panel has
-/// comfortable room for alongside everything else already in it. Mirrors
-/// `note_thumb`'s own smaller size (200px) for the panel vs. the full
-/// 900px the pause book gets.
-const PANEL_NOTE_SNIPPET_CHARS: usize = 120;
-
-/// Truncate `text` to at most `max_chars`, with a trailing `...` if it
-/// didn't already fit — see `PANEL_NOTE_SNIPPET_CHARS`.
-fn panel_text_snippet(text: &str, max_chars: usize) -> String {
-    if text.chars().count() <= max_chars {
-        return text.to_string();
-    }
-    let head: String = text.chars().take(max_chars.saturating_sub(3)).collect();
-    format!("{head}...")
-}
-
-/// Recompute the panel's notebook block from what's actually on disk: how
-/// many of the 15 print slots are pinned (plan revision — used to be how
-/// many were filled, shown regardless of pin; a slot nobody deliberately
-/// featured showing up in the always-visible panel anyway was the actual
-/// complaint), a thumbnail if there's a pinned one to show, and a pinned
-/// text note's content if there's one of those too — independent of the
-/// photo side ("mostrar apenas uma nota e/ou uma imagem"), so either, both,
-/// or neither can end up in the panel. Both sides pick the same way: the
-/// currently-viewed slot if it's itself pinned, else the lowest-numbered
-/// pinned one, else none. Call at game start, after every capture/write,
-/// after cycling either slot, and after every pin toggle (either kind) —
-/// cheap, at most 30 file-exists checks.
-fn refresh_notes(
-    cab: &mut Cabinet,
-    notes_dir: &Path,
-    title: &str,
-    slot: u8,
-    text_slot: u8,
-    meta: &NotesMeta,
-) {
-    let count = (1..=NOTE_SLOTS).filter(|&s| meta.slot(s).pinned).count();
-    let thumb_slot = if meta.slot(slot).pinned {
-        Some(slot)
-    } else {
-        (1..=NOTE_SLOTS).find(|&s| meta.slot(s).pinned)
-    };
-    let thumb = thumb_slot.and_then(|s| note_thumb(notes_dir, title, s, 200));
-
-    let text_pin_slot = if meta.text_slot(text_slot).pinned {
-        Some(text_slot)
-    } else {
-        (1..=NOTE_SLOTS).find(|&s| meta.text_slot(s).pinned)
-    };
-    let text = text_pin_slot
-        .and_then(|s| read_text_slot(notes_dir, title, s))
-        .map(|t| panel_text_snippet(&t, PANEL_NOTE_SNIPPET_CHARS));
-
-    cab.set_notes(
-        count,
-        thumb.as_ref().map(|(w, h, d)| (*w, *h, d.as_slice())),
-        text.as_deref(),
-    );
-}
-
-/// Decode note `slot`'s image if it's filled, `max` pixels on the long
-/// side — `None` for an empty slot or a decode failure either way.
-fn note_thumb(notes_dir: &Path, title: &str, slot: u8, max: u32) -> Option<(u32, u32, Vec<u8>)> {
-    let path = note_slot_path(notes_dir, title, slot);
-    path.is_file()
-        .then(|| decode_art(&path, max))
-        .and_then(Result::ok)
-}
-
-/// Push note `slot`'s current image, pin state, and caption onto the pause
-/// book's right page — the `set_pause_page` call every slot-change (or
-/// pin/rename) site needs.
-fn show_note_slot(cab: &mut Cabinet, notes_dir: &Path, title: &str, slot: u8, meta: &NotesMeta) {
-    let thumb = note_thumb(notes_dir, title, slot, 900);
-    let m = meta.slot(slot);
-    cab.set_pause_page(
-        (slot - 1) as usize,
-        m.pinned,
-        &m.label,
-        thumb.as_ref().map(|(w, h, d)| (*w, *h, d.as_slice())),
-    );
-}
-
-/// Push text-note `slot`'s saved content and pin state onto the pause
-/// book's left page (plan revision, mirrors `show_note_slot`) — the
-/// `set_pause_text_page` call every slot-change (or pin/write/delete)
-/// site needs.
-fn show_text_slot(cab: &mut Cabinet, notes_dir: &Path, title: &str, slot: u8, meta: &NotesMeta) {
-    let content = read_text_slot(notes_dir, title, slot);
-    let pinned = meta.text_slot(slot).pinned;
-    cab.set_pause_text_page((slot - 1) as usize, pinned, content.as_deref());
-}
-
 /// Load the core + ROM and run until the player leaves, drawing into `cab` (the
 /// one persistent window). `plat` and `cab` both outlive the call so `polystnx`
 /// can reuse them for the next screen.
+/// Enfileira o áudio do quadro passando pelo volume da TV (0..=16). TV
+/// desligada: nada toca (e a fila é limpa — ao religar, o áudio volta no
+/// tempo do jogo). Volume cheio: a fila recebe a amostra como veio.
+pub(crate) fn queue_game_audio(
+    audio: &polystnx_platform::AudioOut,
+    cab: &Cabinet,
+    samples: &[i16],
+    vol_buf: &mut Vec<i16>,
+) {
+    if !cab.tv_on() {
+        audio.clear();
+        return;
+    }
+    let vol = cab.volume() as i32;
+    if vol == 0 {
+        return; // mudo, nada entra na fila
+    }
+    if vol >= 16 {
+        audio.queue(samples);
+        return;
+    }
+    vol_buf.clear();
+    vol_buf.extend(
+        samples
+            .iter()
+            .map(|&s| (s as i32 * vol / 16).clamp(i16::MIN as i32, i16::MAX as i32) as i16),
+    );
+    audio.queue(vol_buf);
+}
+
 /// Guarda o quadro no buffer reutilizado do `last_frame` (565 converte
 /// para XRGB8888; 888 copia como veio).
 fn store_into(frame: &EmuFrame, buf: &mut Vec<u8>) {
@@ -1471,8 +819,22 @@ pub fn run_game(
             Ok(bytes) if bytes.len() == crate::memcard::CARD_SIZE => {
                 card_seed = Some(bytes);
             }
-            Ok(_) => log::warn!("card 1: {} não tem 128 KB — slot vazio", card1.display()),
-            Err(e) => log::warn!("card 1: lendo {}: {e} — slot vazio", card1.display()),
+            // Card que existe mas não serve: o slot fica vazio E desencaixado
+            // — senão o flush gravaria a SRAM da sessão por cima dele.
+            Ok(_) => {
+                log::warn!("card 1: {} não tem 128 KB — slot vazio", card1.display());
+                current_card = None;
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                log::info!(
+                    "card 1: {} ainda não existe — o core formata",
+                    card1.display()
+                );
+            }
+            Err(e) => {
+                log::warn!("card 1: lendo {}: {e} — slot vazio", card1.display());
+                current_card = None;
+            }
         }
     } else {
         log::info!("card 1: slot vazio — sem card pra salvar");
@@ -1625,7 +987,6 @@ pub fn run_game(
     let mut pending_reseed: Option<std::sync::mpsc::Receiver<bool>> = None;
     let commands = command_rows(
         &flash,
-        !cheat_defs.is_empty(),
         ra_on,
         ra_session.is_some(),
         all_slots_pinned(&notes_meta),
@@ -1671,7 +1032,9 @@ pub fn run_game(
     crate::console_art::load_cd_reader(cab);
     crate::console_art::load_cd_seat(cab);
     crate::console_art::load_mc_logo(cab);
-    let cartridge_img = decode_panel_art(&spec.cartridge, "disco");
+    // Sem arte de disco, o console gira o CD genérico (prata, com o nome).
+    let cartridge_img = decode_panel_art(&spec.cartridge, "disco")
+        .or_else(|| Some(crate::generic_disc::generic_disc(&title)));
     let has_cartridge_art = cartridge_img.is_some();
     cab.set_panel(
         logo_img.as_ref().map(|(w, h, d)| (*w, *h, d.as_slice())),
@@ -1756,42 +1119,9 @@ pub fn run_game(
                         NoteEdit::PrintName(1).heading(),
                     );
                 }
-                "cheats" => {
-                    cab.set_modal(
-                        "Cheats",
-                        &cheat_modal_rows(&cheat_rows(&cheat_defs, &cheat_state)),
-                    );
-                    cab.set_modal_searchable(true);
-                }
-                // Previews the search box already filtered, without a live
-                // GUI to type into it — the filter word is fixed (dev/
-                // testing only, not configurable from the CLI).
-                "cheats-search" => {
-                    cab.set_modal(
-                        "Cheats",
-                        &cheat_modal_rows(&cheat_rows(&cheat_defs, &cheat_state)),
-                    );
-                    cab.set_modal_searchable(true);
-                    cab.set_modal_search("infinit");
-                }
-                // Previews the on/off state filter, forcing the first
-                // cheat on first so "Ligados" has something to show
-                // (dev/testing only — no CLI way to pick which).
-                "cheats-filtered" => {
-                    let mut state = cheat_state.clone();
-                    if let Some(first) = state.first_mut() {
-                        *first = true;
-                    }
-                    cab.set_modal(
-                        "Cheats",
-                        &cheat_modal_rows(&cheat_rows(&cheat_defs, &state)),
-                    );
-                    cab.set_modal_searchable(true);
-                    cab.set_modal_filter(Some(true));
-                }
                 other => {
                     log::warn!(
-                        "--debug-shot-modal {other}: unknown, expected save/load/print/print-name/cheats/cheats-search/cheats-filtered"
+                        "--debug-shot-modal {other}: unknown, expected save/load/print/print-name"
                     )
                 }
             }
@@ -1827,10 +1157,14 @@ pub fn run_game(
     }
 
     // --- audio -----------------------------------------------------------
-    let audio = plat
-        .open_audio(av.sample_rate.round().max(8000.0) as u32)
-        .map_err(|e| anyhow!(e.to_string()))?;
+    // Sem dispositivo de áudio o jogo roda mudo em vez de não abrir.
+    let audio_rate = av.sample_rate.round().max(8000.0) as u32;
+    let audio = plat.open_audio(audio_rate).unwrap_or_else(|e| {
+        log::warn!("áudio do jogo não abriu, seguindo mudo: {e}");
+        polystnx_platform::AudioOut::muted(audio_rate)
+    });
     let mut input = plat.new_input();
+    let (badge_tx, badge_rx) = std::sync::mpsc::channel::<(u64, (u32, u32, Vec<u8>))>();
 
     let mut paused = false;
     let frame_time = Duration::from_secs_f64(1.0 / av.fps.max(1.0));
@@ -1845,6 +1179,8 @@ pub fn run_game(
     let mut last_dims: Option<(u32, u32)> = None;
     // Don't let the audio queue run more than ~0.15 s ahead (latency creep).
     let audio_cap = (av.sample_rate / 6.0) as usize;
+    // Buffer de rascunho do volume da TV — reaproveitado a cada quadro.
+    let mut vol_buf: Vec<i16> = Vec::new();
     // Vigia da câmera lenta: o jogo corre à velocidade do tick da UI (um
     // Run do core por tick) — se o core entregar menos de ~55 quadros/s por
     // 3 s seguidos (fora do boot e das janelas furadas por pausa/modal),
@@ -1862,10 +1198,6 @@ pub fn run_game(
     // (runs/s, renderer, fila e descartes de áudio) que faz QUALQUER log
     // carregar o diagnóstico sem precisar reproduzir com TRACE ligado.
     let mut perf_windows: u32 = 0;
-    // Janelas desde o último retrato NA TELA: a cada 30 s de jogo, 2 s de
-    // "~N FPS / SOM DESCARTADO M" no chin — quem relata de fora lê o número
-    // direto na TV, sem terminal nem arquivo de log.
-    let mut perf_osd_windows: u32 = 0;
     // Painel do modo dev (quando ligado no menu dev): fps a cada janela e
     // leituras de sistema throttled para 2 s (temperatura varre as zonas
     // térmicas do sysfs; RAM lê /proc/self/status).
@@ -1895,6 +1227,9 @@ pub fn run_game(
     // this session, `powered_since` is when the current stretch began (`None`
     // while off). Also the running total this session contributes to the
     // game's all-time playtime (`total_playtime_secs`) once it ends.
+    // O Cheater Fish já passou nesta sessão (só roda no primeiro ligar).
+    let session_start = Instant::now();
+    let mut auto_power_done = false;
     let mut powered_elapsed = Duration::ZERO;
     let mut powered_since = powered.then(Instant::now);
     let mut static_level = OFF_STATIC_LEVEL;
@@ -1956,7 +1291,7 @@ pub fn run_game(
                         in_flight = false;
                         frames += 1;
                         if audio.queued_frames() < audio_cap {
-                            audio.queue(&out.audio);
+                            queue_game_audio(&audio, cab, &out.audio, &mut vol_buf);
                         }
                         if let Some(frame) = &out.frame {
                             store_into(frame, &mut last_frame);
@@ -1995,16 +1330,9 @@ pub fn run_game(
                             // caminho que produza esse par (seed perdido,
                             // sessão sem seed) é um bug — e o arquivo da
                             // biblioteca é a única cópia do save.
-                            let dest_used = crate::memcard::inspect(&dest)
-                                .map(|i| i.used)
-                                .unwrap_or(0);
-                            if used == 0 && dest_used > 0 {
-                                log::warn!(
-                                    "card 1: SRAM do core sem saves e {} com {} save(s) — escrita cancelada",
-                                    dest.display(),
-                                    dest_used
-                                );
-                            } else if std::fs::write(&dest, &sram).is_ok() {
+                            if let Err(why) = crate::memcard::overwrite_check(&dest, used) {
+                                log::warn!("card 1: {why} — escrita cancelada");
+                            } else if polystnx_domain::fsutil::write_atomic(&dest, &sram).is_ok() {
                                 log::info!(
                                     "card 1: {} atualizado ({} bytes, {used} saves visíveis)",
                                     dest.display(),
@@ -2020,6 +1348,12 @@ pub fn run_game(
     }
 
     let exit = 'run: loop {
+        // Badges de conquista que as threads terminaram de baixar/decodificar.
+        while let Ok((id, (w, h, rgba))) = badge_rx.try_recv() {
+            cab.set_image(id, w, h, &rgba);
+        }
+        // Descanso de tela: bloqueado só com o jogo de fato correndo.
+        plat.set_playing(powered && !paused && modal == Modal::None && !plat.window_hidden());
         // A animação do memory card (plan revision: "ao inserir deve animar
         // entrando de baixo pra cima; ao ejetar, de cima pra baixo"): o
         // gatilho e o relógio correm AQUI, no primeiro statemente do laço —
@@ -2057,10 +1391,7 @@ pub fn run_game(
         if note_edit != NoteEdit::None {
             // Naming a fresh print (plan revision) renders in the modal, not
             // the notebook — everything else about polling/typing is shared.
-            let in_modal = matches!(
-                note_edit,
-                NoteEdit::PrintName(_) | NoteEdit::CheatSearch | NoteEdit::CardRename
-            );
+            let in_modal = matches!(note_edit, NoteEdit::PrintName(_) | NoteEdit::CardRename);
             let te = plat.poll_text_entry();
             if te.quit {
                 break 'run GameExit::Quit;
@@ -2158,7 +1489,6 @@ pub fn run_game(
                             }
                         }
                     }
-                    NoteEdit::CheatSearch => cab.set_modal_search(note_draft.trim()),
                     NoteEdit::CardRename => {
                         if let Some(path) = card_rename.take() {
                             match crate::memcard::rename(&path, note_draft.trim()) {
@@ -2192,17 +1522,9 @@ pub fn run_game(
             if save || cancel {
                 if in_modal {
                     cab.set_modal_draft(None, 0, "");
-                    if matches!(note_edit, NoteEdit::CheatSearch) {
-                        // Searching narrows the same Cheats modal rather
-                        // than acting on a pick — stay in it, just back on
-                        // the (maybe newly filtered) row grid, unlike
-                        // every other in-modal edit here, which is always
-                        // a one-shot action that closes the dialog.
-                    } else {
-                        modal = Modal::None;
-                        print_capture = None;
-                        cab.clear_modal();
-                    }
+                    modal = Modal::None;
+                    print_capture = None;
+                    cab.clear_modal();
                 } else {
                     cab.set_pause_draft(None, 0, "");
                 }
@@ -2229,7 +1551,7 @@ pub fn run_game(
             } else {
                 cab.present_pause();
             }
-            pace_frame(&mut next, frame_time);
+            pace_ui(&mut next, UI_FRAME, plat, cab);
             continue;
         }
 
@@ -2248,14 +1570,15 @@ pub fn run_game(
                     // gameplay included (plan revision: "mostrar o fechar e
                     // minimizar em todas as telas"). Checked before every
                     // in-screen hit-test.
+                    cab.try_tv_click(ox, oy);
                     if cab.hit_close_button(ox, oy) {
                         Some(UiEvent::CloseRequested)
                     } else if cab.hit_minimize_button(ox, oy) {
                         cab.minimize();
                         None
                     } else if modal != Modal::None {
-                        // Not reachable during the naming/searching step —
-                        // that's `NoteEdit::PrintName`/`CheatSearch`, polled
+                        // Not reachable during the naming step —
+                        // that's `NoteEdit::PrintName`, polled
                         // via `poll_text_entry` instead (above), so `Click`
                         // never comes through `plat.poll()` while it's open.
                         match cab.hit_modal_button(ox, oy) {
@@ -2263,10 +1586,6 @@ pub fn run_game(
                             Some(PanelButton::ModalCancel) => Some(UiEvent::ModalCancel),
                             Some(PanelButton::ModalScrollUp) => Some(UiEvent::ModalScrollUp),
                             Some(PanelButton::ModalScrollDown) => Some(UiEvent::ModalScrollDown),
-                            Some(PanelButton::ModalSearchStart) => Some(UiEvent::ModalSearchStart),
-                            Some(PanelButton::ModalFilterAll) => Some(UiEvent::ModalFilterAll),
-                            Some(PanelButton::ModalFilterOn) => Some(UiEvent::ModalFilterOn),
-                            Some(PanelButton::ModalFilterOff) => Some(UiEvent::ModalFilterOff),
                             _ => None,
                         }
                     } else if paused {
@@ -2293,7 +1612,6 @@ pub fn run_game(
                             PanelButton::Eject => Some(UiEvent::Eject),
                             PanelButton::Reset => Some(UiEvent::Reset),
                             PanelButton::Notebook => Some(UiEvent::TogglePause),
-                            PanelButton::Cheats => Some(UiEvent::OpenCheatsModal),
                             PanelButton::Achievements => Some(UiEvent::OpenAchievementsModal),
                             PanelButton::Cards1 => Some(UiEvent::OpenCards),
                             PanelButton::Analog1 => Some(UiEvent::AnalogToggle(0)),
@@ -2309,6 +1627,7 @@ pub fn run_game(
                             PanelButton::Insert
                             | PanelButton::Settings
                             | PanelButton::Dev
+                            | PanelButton::ConsoleManual
                             | PanelButton::CoreDownload
                             | PanelButton::PauseContinue
                             | PanelButton::PauseNotePrev
@@ -2326,17 +1645,39 @@ pub fn run_game(
                             | PanelButton::ModalConfirm
                             | PanelButton::ModalCancel
                             | PanelButton::ModalScrollUp
-                            | PanelButton::ModalScrollDown
-                            | PanelButton::ModalSearchStart
-                            | PanelButton::ModalFilterAll
-                            | PanelButton::ModalFilterOn
-                            | PanelButton::ModalFilterOff => None,
+                            | PanelButton::ModalScrollDown => None,
                         })
                     }
                 }
                 other => Some(other),
             })
             .collect();
+        // Sem som de jogo a tocar (desligado, pausado, menu aberto): o
+        // dispositivo dorme, e o PipeWire pode suspender a saída.
+        audio.set_paused(!powered || paused || modal != Modal::None);
+        // Janela minimizada com o jogo correndo: pausa — emular e desenhar o
+        // que ninguém vê é bateria jogada fora. Na volta o livro de pausa
+        // está esperando, como se o jogador tivesse pausado.
+        let mut events = events;
+        // DEBUG: liga o console sozinho 3 s depois de abrir o jogo (o clique
+        // no POWER, para testes automatizados da tela do Cheater Fish).
+        if !auto_power_done
+            && !powered
+            && std::env::var_os("PSX_XPERIENCE_AUTOPOWER").is_some()
+            && session_start.elapsed() > Duration::from_secs(3)
+        {
+            auto_power_done = true;
+            events.push(UiEvent::Quit);
+        }
+        if plat.window_hidden()
+            && powered
+            && !paused
+            && modal == Modal::None
+            && !events.iter().any(|e| matches!(e, UiEvent::TogglePause))
+        {
+            log::info!("janela escondida: pausando o jogo");
+            events.push(UiEvent::TogglePause);
+        }
         for ev in events {
             match ev {
                 UiEvent::ToggleLid => {
@@ -2401,6 +1742,58 @@ pub fn run_game(
                         // vez de um "nada acontece" depois do clique.
                         // A luz do Power acende NO CLIQUE — antes do ritual.
                         cab.set_powered(true);
+                        // Cheater Fish: a cada ligar, a tela de cheats (estilo
+                        // GameShark) vem ANTES de o jogo começar — é o único
+                        // lugar onde se escolhe cheats.
+                        {
+                            if cfg.cheater_fish && !cheat_defs.is_empty() && !ra_hardcore_active {
+                                match crate::cheater_fish::run(
+                                    plat,
+                                    cab,
+                                    &title,
+                                    &cheat_defs,
+                                    &mut cheat_state,
+                                )? {
+                                    crate::cheater_fish::FishOutcome::Quit => {
+                                        break 'run GameExit::Quit
+                                    }
+                                    // POWER durante o Cheater Fish: desliga sem
+                                    // começar o jogo (e o acessório volta no
+                                    // próximo ligar).
+                                    crate::cheater_fish::FishOutcome::PowerOff => {
+                                        cab.set_powered(false);
+                                        continue;
+                                    }
+                                    // OPEN/CLOSE: ejeta e volta à estante, como
+                                    // com o console desligado.
+                                    crate::cheater_fish::FishOutcome::Eject => {
+                                        cab.set_powered(false);
+                                        if has_cartridge_art {
+                                            cartridge_eject_animation(cab);
+                                        }
+                                        break 'run GameExit::Ejected { static_level };
+                                    }
+                                    crate::cheater_fish::FishOutcome::Start => {
+                                        // O que ficou ligado vale a partir do
+                                        // primeiro quadro: reset e reaplica
+                                        // tudo, como no resto do runner.
+                                        drain_core!();
+                                        let _ = core_tx.send(CoreCmd::CheatReset);
+                                        for (j, (def, &on)) in
+                                            cheat_defs.iter().zip(&cheat_state).enumerate()
+                                        {
+                                            let _ = core_tx.send(CoreCmd::CheatSet {
+                                                i: j as u32,
+                                                on,
+                                                code: def.code.to_string(),
+                                            });
+                                        }
+                                        save_cheat_state(&cheat_path, &cheat_state);
+                                        cab.set_cheats(&cheat_rows(&cheat_defs, &cheat_state));
+                                    }
+                                }
+                            }
+                        }
                         if !in_flight {
                             let mut snap = PadSnapshot::default();
                             // UMA entrada (plan revision: o suporte ao
@@ -2624,22 +2017,6 @@ pub fn run_game(
                     modal = Modal::Achievements;
                     cab.set_modal(&format!("Conquistas {}/{}", earned.len(), total), &rows);
                 }
-                UiEvent::OpenCheatsModal if powered && !cheat_defs.is_empty() => {
-                    if ra_hardcore_active {
-                        cab.push_osd(
-                            &["MODO HARDCORE", "cheats bloqueados"],
-                            None,
-                            Duration::from_secs(3),
-                        );
-                        continue;
-                    }
-                    modal = Modal::Cheats;
-                    cab.set_modal(
-                        "Cheats",
-                        &cheat_modal_rows(&cheat_rows(&cheat_defs, &cheat_state)),
-                    );
-                    cab.set_modal_searchable(true);
-                }
                 UiEvent::OpenCards => {
                     // Troca quente (plan revision): funciona ligado — o SRAM
                     // do card atual é descarregado no arquivo dele antes do
@@ -2662,8 +2039,7 @@ pub fn run_game(
                 }
                 UiEvent::ModalPick(i) => match modal {
                     // Save/load/print never have more than 15 rows — safe
-                    // to narrow back to `u8` (`ModalPick` is `u16` only
-                    // because the Cheats modal, below, can run past 255).
+                    // to narrow back to `u8`.
                     Modal::SaveSlot => {
                         let path = state_file(&spec.save_dir, &title, i as u8);
                         drain_core!();
@@ -2671,12 +2047,12 @@ pub fn run_game(
                         let _ = core_tx.send(CoreCmd::SaveState { tx: st_tx });
                         let saved = st_rx.recv().ok();
                         match saved.filter(|s| !s.is_empty()) {
-                            Some(s) => match fs::write(&path, &s) {
+                            Some(s) => match polystnx_domain::fsutil::write_atomic(&path, &s) {
                                 Ok(_) => {
                                     log::info!("slot {i}: saved ({} KiB)", s.len() / 1024);
                                     // Carimbo do disco (plano §3.1): qual
                                     // disco estava no drive quando salvou.
-                                    let _ = fs::write(
+                                    let _ = polystnx_domain::fsutil::write_atomic(
                                         disc_stamp_path(&spec.save_dir, &title, i as u8),
                                         disc_name(&spec.rom),
                                     );
@@ -2684,9 +2060,23 @@ pub fn run_game(
                                     modal = Modal::None;
                                     cab.clear_modal();
                                 }
-                                Err(e) => log::warn!("slot {i}: save failed: {e}"),
+                                Err(e) => {
+                                    log::warn!("slot {i}: save failed: {e}");
+                                    cab.push_osd(
+                                        &["NÃO SALVOU", "erro ao gravar o state"],
+                                        None,
+                                        Duration::from_secs(4),
+                                    );
+                                }
                             },
-                            None => log::warn!("core doesn't support save states"),
+                            None => {
+                                log::warn!("core doesn't support save states");
+                                cab.push_osd(
+                                    &["NÃO SALVOU", "o núcleo não gerou o state"],
+                                    None,
+                                    Duration::from_secs(4),
+                                );
+                            }
                         }
                     }
                     Modal::LoadSlot => {
@@ -2721,8 +2111,22 @@ pub fn run_game(
                             }
                             // An empty/rejected slot just stays disabled in the
                             // modal — nothing to load, nothing changes.
-                            Ok(_) => log::warn!("slot {i}: core rejected the state"),
-                            Err(_) => log::warn!("slot {i}: empty"),
+                            Ok(_) => {
+                                log::warn!("slot {i}: core rejected the state");
+                                cab.push_osd(
+                                    &["NÃO CARREGOU", "state vazio ou recusado"],
+                                    None,
+                                    Duration::from_secs(4),
+                                );
+                            }
+                            Err(e) => {
+                                log::warn!("slot {i}: não leu o state: {e}");
+                                cab.push_osd(
+                                    &["NÃO CARREGOU", "slot vazio ou ilegível"],
+                                    None,
+                                    Duration::from_secs(4),
+                                );
+                            }
                         }
                     }
                     Modal::PrintSlot => {
@@ -2743,37 +2147,6 @@ pub fn run_game(
                     Modal::Achievements => {
                         modal = Modal::None;
                         cab.clear_modal();
-                    }
-                    Modal::Cheats => {
-                        let idx = i as usize;
-                        if idx < cheat_defs.len() {
-                            cheat_state[idx] = !cheat_state[idx];
-                            // A single `cheat_set(idx, false, ...)` isn't
-                            // enough to actually undo a sustained memory
-                            // patch on every core (a real report: the row
-                            // showed off, the effect stayed on) — reset and
-                            // reapply every cheat's current state, the same
-                            // belt-and-suspenders sequence the boot-time
-                            // load above already uses.
-                            drain_core!();
-                            let _ = core_tx.send(CoreCmd::CheatReset);
-                            for (j, (def, &on)) in cheat_defs.iter().zip(&cheat_state).enumerate() {
-                                let _ = core_tx.send(CoreCmd::CheatSet {
-                                    i: j as u32,
-                                    on,
-                                    code: def.code.to_string(),
-                                });
-                            }
-                            save_cheat_state(&cheat_path, &cheat_state);
-                            let rows = cheat_rows(&cheat_defs, &cheat_state);
-                            cab.set_cheats(&rows);
-                            cab.set_modal("Cheats", &cheat_modal_rows(&rows));
-                            log::info!(
-                                "cheat {:?}: {}",
-                                cheat_defs[idx].desc,
-                                if cheat_state[idx] { "on" } else { "off" }
-                            );
-                        }
                     }
                     Modal::Cards => {
                         let dir = crate::dirs::memcards_dir();
@@ -3086,23 +2459,6 @@ pub fn run_game(
                 }
                 UiEvent::ModalScrollUp if modal != Modal::None => cab.scroll_modal(-1),
                 UiEvent::ModalScrollDown if modal != Modal::None => cab.scroll_modal(1),
-                UiEvent::ModalSearchStart if modal == Modal::Cheats => {
-                    note_edit = NoteEdit::CheatSearch;
-                    note_draft = cab.modal_search_query().to_string();
-                    cab.set_modal_draft(
-                        Some(&note_draft),
-                        NoteEdit::CheatSearch.limit(),
-                        NoteEdit::CheatSearch.heading(),
-                    );
-                    plat.start_text_input(cab);
-                }
-                UiEvent::ModalFilterAll if modal == Modal::Cheats => cab.set_modal_filter(None),
-                UiEvent::ModalFilterOn if modal == Modal::Cheats => {
-                    cab.set_modal_filter(Some(true))
-                }
-                UiEvent::ModalFilterOff if modal == Modal::Cheats => {
-                    cab.set_modal_filter(Some(false))
-                }
                 // The rest only make sense with the console on (or, for the
                 // pause-book trio, only while actually paused); ignored
                 // otherwise. `Click` never reaches this match — it's already
@@ -3112,14 +2468,9 @@ pub fn run_game(
                 | UiEvent::OpenSaveModal
                 | UiEvent::OpenLoadModal
                 | UiEvent::OpenAchievementsModal
-                | UiEvent::OpenCheatsModal
                 | UiEvent::OpenPrintModal
                 | UiEvent::ModalScrollUp
                 | UiEvent::ModalScrollDown
-                | UiEvent::ModalSearchStart
-                | UiEvent::ModalFilterAll
-                | UiEvent::ModalFilterOn
-                | UiEvent::ModalFilterOff
                 | UiEvent::NotePrev
                 | UiEvent::NoteNext
                 | UiEvent::NoteWriteStart
@@ -3143,7 +2494,6 @@ pub fn run_game(
         if Some(sig) != prev_sig {
             cab.set_commands(&command_rows(
                 &flash,
-                !cheat_defs.is_empty(),
                 ra_on,
                 ra_session.is_some(),
                 all_pinned,
@@ -3182,7 +2532,7 @@ pub fn run_game(
             } else {
                 cab.present_static(OFF_STATIC_LEVEL);
             }
-            pace_frame(&mut next, frame_time);
+            pace_ui(&mut next, UI_FRAME, plat, cab);
             continue;
         }
 
@@ -3229,23 +2579,6 @@ pub fn run_game(
                                 polystnx_platform::sysinfo::process_ram_mb(),
                             );
                         }
-                        // Retrato NA TELA, a cada 30 s de jogo por 2 s: o
-                        // número que decide o diagnóstico (core a 60 = lado
-                        // da exibição; a 30 = core estrangulado) fica
-                        // visível na TV, sem terminal.
-                        perf_osd_windows += 1;
-                        if perf_osd_windows >= 30 {
-                            perf_osd_windows = 0;
-                            cab.push_osd(
-                                &[
-                                    &format!("~{fps:.0} FPS"),
-                                    &format!("SOM DESCARTADO {audio_dropped}"),
-                                ],
-                                None,
-                                Duration::from_secs(2),
-                            );
-                            audio_dropped = 0;
-                        }
                         // Boot de BIOS hesita de verdade — só vigia depois
                         // do console assentar (10 s do ligar).
                         let booted =
@@ -3277,7 +2610,7 @@ pub fn run_game(
                         note_request = Some(note_slot);
                     }
                     if audio.queued_frames() < audio_cap && !cfg.mute_game {
-                        audio.queue(&out.audio);
+                        queue_game_audio(&audio, cab, &out.audio, &mut vol_buf);
                     } else if !cfg.mute_game {
                         // Cap cheio: o quadro de áudio é descartado (a
                         // alternativa, bloquear, atrasaria o core). Conta
@@ -3325,27 +2658,20 @@ pub fn run_game(
                                 .as_ref()
                                 .expect("checked above")
                                 .submit_unlock(&unlock);
-                            let badge_img = unlock.badge.clone();
-                            if !badge_img.is_empty() {
-                                match crate::ra::badge_path(&badge_img) {
-                                    Some(path) => {
-                                        if let Ok((w, h, rgba)) = decode_art(&path, 512) {
-                                            cab.set_image(osd_badge_id(&unlock.badge), w, h, &rgba);
-                                        }
+                            // O badge: do cache ou baixado — numa thread, nunca no
+                            // laço do jogo (o download segurava o frame por
+                            // centenas de ms). O aviso sai na hora; a imagem entra
+                            // quando chegar (o laço drena `badge_rx` a cada quadro).
+                            let badge = unlock.badge.clone();
+                            if !badge.is_empty() {
+                                let tx = badge_tx.clone();
+                                std::thread::spawn(move || {
+                                    let path = crate::ra::badge_path(&badge)
+                                        .or_else(|| crate::ra::download_badge(&badge));
+                                    if let Some(img) = path.and_then(|p| decode_art(&p, 512).ok()) {
+                                        let _ = tx.send((osd_badge_id(&badge), img));
                                     }
-                                    None => {
-                                        if let Some(path) = crate::ra::download_badge(&badge_img) {
-                                            if let Ok((w, h, rgba)) = decode_art(&path, 512) {
-                                                cab.set_image(
-                                                    osd_badge_id(&unlock.badge),
-                                                    w,
-                                                    h,
-                                                    &rgba,
-                                                );
-                                            }
-                                        }
-                                    }
-                                }
+                                });
                             }
                             cab.push_osd(
                                 &[&unlock.title, &format!("+{} pts", unlock.points)],
@@ -3606,13 +2932,9 @@ pub fn run_game(
         if let Ok(Some(sram)) = rx.recv() {
             if let Some(dest) = &current_card {
                 let used = crate::memcard::used_slots(&sram) as usize;
-                let dest_used = crate::memcard::inspect(dest).map(|i| i.used).unwrap_or(0);
-                if used == 0 && dest_used > 0 {
-                    log::warn!(
-                        "card 1: SRAM do core sem saves e {} com {dest_used} — escrita cancelada",
-                        dest.display()
-                    );
-                } else if std::fs::write(dest, &sram).is_ok() {
+                if let Err(why) = crate::memcard::overwrite_check(dest, used) {
+                    log::warn!("card 1: {why} — escrita cancelada");
+                } else if polystnx_domain::fsutil::write_atomic(dest, &sram).is_ok() {
                     log::info!(
                         "card 1: {} sincronizado no fim da sessão ({} bytes, {used} saves visíveis)",
                         dest.display(),
@@ -3655,6 +2977,17 @@ pub fn run_game(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn sanitize_dir_name_never_escapes_the_parent() {
+        use super::sanitize_dir_name;
+        assert_eq!(sanitize_dir_name(".."), "___");
+        assert_eq!(sanitize_dir_name("."), "___");
+        assert_eq!(sanitize_dir_name(" ... "), "___");
+        assert_eq!(sanitize_dir_name("../etc"), ".._etc");
+        assert_eq!(sanitize_dir_name("Super Game (USA)."), "Super Game (USA)");
+        assert!(sanitize_dir_name(&"ã".repeat(300)).len() <= 200);
+    }
+
     use super::card_rows_with_icons;
     use super::{
         add_playtime, audio_mudo, cheat_state_path, delete_text_slot, frame_to_rgb8, game_dir,

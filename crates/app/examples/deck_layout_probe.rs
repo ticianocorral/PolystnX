@@ -31,7 +31,6 @@ fn main() -> anyhow::Result<()> {
     let commands = vec![
         (PanelButton::Notebook, "Anotações".to_string(), true),
         (PanelButton::Achievements, "Conquistas".to_string(), false),
-        (PanelButton::Cheats, "Cheats".to_string(), true),
         (PanelButton::PrintScreen, "Printscreen".to_string(), true),
         (PanelButton::SaveState, "Salvar".to_string(), true),
         (PanelButton::LoadState, "Carregar".to_string(), true),

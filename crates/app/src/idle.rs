@@ -24,7 +24,9 @@ use std::time::{Duration, Instant};
 use std::sync::mpsc;
 
 use anyhow::Result;
-use polystnx_platform::{Cabinet, MenuMode, MenuNav, PanelButton, Platform, Screen, UpdateArrow};
+use polystnx_platform::{
+    Cabinet, MenuMode, MenuNav, PadFocus, PanelButton, Platform, Screen, TvControl, UpdateArrow,
+};
 
 use crate::core_update::{self, CoreUpdateMsg};
 use crate::update_check::UpdateNotice;
@@ -135,6 +137,23 @@ impl Download {
         }
     }
 
+    /// Começa o download do núcleo numa thread (o idle drena o canal a cada
+    /// quadro). Sem build automática para este sistema, deixa só o aviso.
+    fn start_core(&mut self) {
+        match core_update::core_download_url() {
+            Some(url) => {
+                let (tx, rx) = mpsc::channel();
+                let dest = crate::dirs::core_dir();
+                std::thread::spawn(move || core_update::download_and_install(&url, &dest, &tx));
+                self.rx = Some(rx);
+                self.done = false;
+                self.failed = false;
+                self.label = "baixando...".to_string();
+            }
+            None => self.label = "sem build automática - use configurações".to_string(),
+        }
+    }
+
     /// Drain the worker's channel, if one is wired up — the same pump
     /// `idle::run` used to inline for the core alone.
     fn pump(&mut self) {
@@ -164,6 +183,219 @@ impl Download {
     }
 }
 
+/// O manual do console (plan revision: "fazer um botao em cima das
+/// configurações na tela inicial para visualizar esse pdf"), um por
+/// idioma — gerados por
+/// `examples/gen_console_manual.rs`.
+const CONSOLE_MANUAL: &[u8] = include_bytes!("../assets/console-manual-pt.pdf");
+const CONSOLE_MANUAL_KEY: &str = "console-manual-pt";
+
+/// O leitor do manual do console aberto no tubo — o mesmo leitor dos
+/// manuais da estante (`shelf::draw_manual_view`): páginas renderizadas sob
+/// demanda por um worker, que vivem como texturas sob `key`.
+struct ConsoleManual {
+    /// A chave das texturas das páginas (o "sha1" do leitor da estante) —
+    /// uma por idioma, para a troca de idioma não reaproveitar páginas.
+    key: &'static str,
+    pages: usize,
+    page: usize,
+    /// O worker não conseguiu abrir o PDF (morreu sem dizer quantas
+    /// páginas tem) — a tela avisa em vez de ficar "abrindo" para sempre.
+    failed: bool,
+    requested: std::collections::HashSet<usize>,
+    rx: Receiver<crate::manual::ManualEv>,
+    tx: mpsc::Sender<usize>,
+    rects: (
+        crate::shelf::ViewBtn,
+        crate::shelf::ViewBtn,
+        crate::shelf::ViewBtn,
+    ),
+}
+
+impl ConsoleManual {
+    /// Grava o PDF do idioma corrente na pasta temporária (o renderizador
+    /// lê de arquivo) e sobe o worker. `None` = não deu para gravar.
+    fn open() -> Option<Self> {
+        let (key, bytes) = (CONSOLE_MANUAL_KEY, CONSOLE_MANUAL);
+        // Na pasta do app, não no temp: no Linux o `/tmp` é compartilhado e
+        // um arquivo de mesmo nome e tamanho deixado por outro usuário seria
+        // aberto pelo renderizador de PDF.
+        let dir = crate::dirs::app_root().join("cache");
+        let _ = std::fs::create_dir_all(&dir);
+        let path = dir.join(format!("{key}.pdf"));
+        // Já gravado numa abertura anterior (mesmo tamanho): não regrava os
+        // alguns MB na thread de UI a cada clique.
+        let fresh = std::fs::metadata(&path).is_ok_and(|m| m.len() == bytes.len() as u64);
+        if !fresh {
+            if let Err(e) = std::fs::write(&path, bytes) {
+                log::warn!("console manual: writing {}: {e}", path.display());
+                return None;
+            }
+        }
+        let (ev_tx, rx) = mpsc::channel();
+        let (tx, req_rx) = mpsc::channel::<usize>();
+        std::thread::spawn(move || {
+            let pages = match crate::manual::page_count(&path) {
+                Ok(n) => n,
+                Err(e) => {
+                    log::warn!("console manual: {e}");
+                    return;
+                }
+            };
+            let _ = ev_tx.send(crate::manual::ManualEv::Ready {
+                sha1: key.to_string(),
+                pages,
+            });
+            for page in req_rx {
+                let (w, h, rgba) = match crate::manual::render_page(&path, page, 2048) {
+                    Ok(Some(img)) => (img.w, img.h, img.rgba),
+                    _ => (0, 0, Vec::new()),
+                };
+                let _ = ev_tx.send(crate::manual::ManualEv::Page {
+                    sha1: key.to_string(),
+                    page,
+                    w,
+                    h,
+                    rgba,
+                });
+            }
+        });
+        Some(Self {
+            key,
+            pages: 0,
+            page: 1,
+            failed: false,
+            requested: std::collections::HashSet::new(),
+            rx,
+            tx,
+            rects: ((0, 0, 1, 1), (0, 0, 1, 1), (0, 0, 1, 1)),
+        })
+    }
+
+    /// Eventos do worker (contagem e páginas viram texturas) e o pedido da
+    /// página corrente e da seguinte assim que faltam.
+    fn poll(&mut self, cab: &mut Cabinet) {
+        loop {
+            let ev = match self.rx.try_recv() {
+                Ok(ev) => ev,
+                Err(mpsc::TryRecvError::Empty) => break,
+                Err(mpsc::TryRecvError::Disconnected) => {
+                    self.failed = self.pages == 0;
+                    break;
+                }
+            };
+            match ev {
+                crate::manual::ManualEv::Ready { pages, .. } => self.pages = pages,
+                crate::manual::ManualEv::Page {
+                    page, w, h, rgba, ..
+                } => {
+                    if w > 0 {
+                        cab.set_image(crate::shelf::manual_page_id(self.key, page), w, h, &rgba);
+                    } else {
+                        log::warn!("console manual: page {page} didn't render");
+                    }
+                }
+            }
+        }
+        for page in [self.page, self.page + 1] {
+            // Página já em textura (de uma abertura anterior): não renderiza
+            // de novo.
+            if self.pages > 0
+                && page <= self.pages
+                && !cab.has_image(crate::shelf::manual_page_id(self.key, page))
+                && self.requested.insert(page)
+            {
+                let _ = self.tx.send(page);
+            }
+        }
+    }
+
+    fn prev(&mut self) {
+        self.page = self.page.saturating_sub(1).max(1);
+    }
+
+    fn next(&mut self) {
+        if self.page < self.pages {
+            self.page += 1;
+        }
+    }
+}
+
+/// Um alvo do foco do controle na tela inicial.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum IdleFocus {
+    Panel(PanelButton),
+    Arrow(UpdateArrow),
+    /// Um botão físico do queixo da TV — sem eles, quem só tem controle não
+    /// liga a TV, não mexe no volume nem abre o menu de imagem.
+    Tv(TvControl),
+}
+
+/// Os botões da TV que o controle percorre, na ordem em que aparecem no
+/// queixo (da esquerda para a direita).
+const TV_FOCUS: [TvControl; 4] = [
+    TvControl::VolDown,
+    TvControl::VolUp,
+    TvControl::Menu,
+    TvControl::Power,
+];
+
+/// Os alvos que o controle percorre, em ordem: botões do painel (em ordem
+/// de leitura), as setas verdes de update e, por último, os botões da TV.
+/// `drawn` é a lista de botões que o painel desenhou no último quadro.
+fn idle_items(drawn: &[PanelButton], app_update: bool, core_stale: bool) -> Vec<IdleFocus> {
+    let mut v: Vec<IdleFocus> = drawn
+        .iter()
+        .filter(|b| {
+            matches!(
+                b,
+                PanelButton::Insert
+                    | PanelButton::Settings
+                    | PanelButton::ConsoleManual
+                    | PanelButton::Dev
+                    | PanelButton::CoreDownload
+            )
+        })
+        .map(|b| IdleFocus::Panel(*b))
+        .collect();
+    if app_update {
+        v.push(IdleFocus::Arrow(UpdateArrow::App));
+    }
+    if core_stale {
+        v.push(IdleFocus::Arrow(UpdateArrow::Core));
+    }
+    v.extend(TV_FOCUS.map(IdleFocus::Tv));
+    v
+}
+
+/// O foco efetivo: o escolhido, se ainda existe; senão o padrão — "Estante
+/// de games", ou o download do núcleo quando falta, ou o primeiro da lista.
+fn resolve_focus(items: &[IdleFocus], chosen: Option<IdleFocus>) -> IdleFocus {
+    if let Some(f) = chosen.filter(|f| items.contains(f)) {
+        return f;
+    }
+    [
+        IdleFocus::Panel(PanelButton::Insert),
+        IdleFocus::Panel(PanelButton::CoreDownload),
+    ]
+    .into_iter()
+    .find(|f| items.contains(f))
+    .or_else(|| items.first().copied())
+    .unwrap_or(IdleFocus::Tv(TvControl::Power))
+}
+
+/// Passo do foco: Cima/Esquerda para trás, Baixo/Direita para frente, com
+/// volta nas pontas.
+fn step_focus(items: &[IdleFocus], cur: IdleFocus, forward: bool) -> IdleFocus {
+    let n = items.len().max(1);
+    let at = items.iter().position(|f| *f == cur).unwrap_or(0);
+    items[if forward {
+        (at + 1) % n
+    } else {
+        (at + n - 1) % n
+    }]
+}
+
 /// Run the idle screen until the player opens the shelf or quits.
 /// `static_level` is the signal-off snow to show — the steady dim hiss at
 /// startup or after Esc on the shelf, or whatever level a just-ejected game
@@ -188,7 +420,7 @@ pub fn run(
     crate::console_art::load_brand_images(cab);
     // The idle screen is where this app spends most of its life — pace it
     // (it used to spin unthrottled, redrawing 60fps+ of static forever).
-    let frame = Duration::from_millis(16);
+    let frame = crate::runner::UI_FRAME;
     let mut next = Instant::now() + frame;
     let mut frames_log = 0u64;
 
@@ -220,6 +452,11 @@ pub fn run(
     // no icone verde de update do nucleo mas nao abriu nada"): a confirmação
     // fica alguns segundos no painel depois que instala.
     let mut core_ok_until: Option<Instant> = None;
+    // O foco do controle na tela inicial e se a legenda já foi mostrada.
+    let mut idle_focus: Option<IdleFocus> = None;
+    // O manual do console aberto no tubo, se estiver.
+    let mut console_manual: Option<ConsoleManual> = None;
+    let mut legend_shown = false;
     // Updates (plan revision: "ao clicar no icone verde de atualizar"):
     // o notice é GUARDADO (o changelog/asset o leitor da tela usa), a
     // aba de update do app abre a tela com changelog + botão, e o core
@@ -332,6 +569,7 @@ pub fn run(
                 // setup buttons in the screen buffer's own space (the screen
                 // is inset by the bezel) — each with its own mapping.
                 let (ox, oy) = cab.window_to_output(x, y);
+                cab.try_tv_click(ox, oy);
                 if cab.hit_close_button(ox, oy) {
                     return Ok(IdleExit::Quit);
                 }
@@ -354,7 +592,7 @@ pub fn run(
                             let (tx, rx) = mpsc::channel();
                             let dest = crate::dirs::core_dir();
                             std::thread::spawn(move || {
-                                core_update::download_and_install(url, &dest, &tx)
+                                core_update::download_and_install(&url, &dest, &tx)
                             });
                             core.rx = Some(rx);
                             core.failed = false;
@@ -445,18 +683,67 @@ pub fn run(
                     )
                 };
                 cab.frame_idle_2d(SETUP_BG, render);
-                crate::runner::pace_frame(&mut next, frame);
+                crate::runner::pace_ui(&mut next, frame, plat, cab);
                 continue;
             }
             // Just dismissed: the same click/Confirm that dismissed the
             // setup screen must not also land on the idle panel below —
             // give it a frame of its own.
             cab.set_idle_core_prompt(core_missing.then_some("Baixar núcleo PCSX Rearmed"));
-            crate::runner::pace_frame(&mut next, frame);
+            crate::runner::pace_ui(&mut next, frame, plat, cab);
             continue;
         }
 
         cab.set_idle_core_prompt(core_missing.then_some("Baixar núcleo PCSX Rearmed"));
+
+        // Manual do console aberto: dono do tubo (‹/› viram página,
+        // voltar/Back fecha) — com a TV ligada ou não, como as
+        // Configurações.
+        if let Some(man) = console_manual.as_mut() {
+            let mut close = false;
+            for nav in &m.nav {
+                match nav {
+                    MenuNav::Left | MenuNav::PageUp => man.prev(),
+                    MenuNav::Right | MenuNav::PageDown => man.next(),
+                    MenuNav::Back => close = true,
+                    _ => {}
+                }
+            }
+            if let Some((x, y)) = m.click {
+                let (ox, oy) = cab.window_to_output(x, y);
+                if cab.hit_close_button(ox, oy) {
+                    return Ok(IdleExit::Quit);
+                }
+                if cab.hit_panel_button(ox, oy) == Some(PanelButton::ConsoleManual) {
+                    close = true;
+                }
+                if let Some((sx, sy)) = cab.hit_screen_point(ox, oy) {
+                    let (prev, next, voltar) = man.rects;
+                    if in_update_rect(sx, sy, prev) {
+                        man.prev();
+                    } else if in_update_rect(sx, sy, next) {
+                        man.next();
+                    } else if in_update_rect(sx, sy, voltar) {
+                        close = true;
+                    }
+                }
+            }
+            if close {
+                console_manual = None;
+            } else {
+                man.poll(cab);
+                let ready = cab.has_image(crate::shelf::manual_page_id(man.key, man.page));
+                let (key, page, pages, failed) = (man.key, man.page, man.pages, man.failed);
+                let mut rects = man.rects;
+                let render = |d: &mut Screen| {
+                    rects = crate::shelf::draw_manual_view(d, key, page, pages, ready, failed);
+                };
+                cab.frame_idle_2d(SETUP_BG, render);
+                man.rects = rects;
+                crate::runner::pace_ui(&mut next, frame, plat, cab);
+                continue;
+            }
+        }
 
         // Tela de update do app aberta: dona do tubo (changelog + botão).
         if update_view.is_some() {
@@ -471,6 +758,7 @@ pub fn run(
             }
             if let Some((x, y)) = m.click {
                 let (ox, oy) = cab.window_to_output(x, y);
+                cab.try_tv_click(ox, oy);
                 if cab.hit_close_button(ox, oy) {
                     return Ok(IdleExit::Quit);
                 }
@@ -488,10 +776,10 @@ pub fn run(
                         // reiniciar").
                         let (tx, rx) = mpsc::channel();
                         let (ptx, prx) = mpsc::channel();
-                        let url = asset_url.unwrap_or_default();
+                        let asset = asset_url.expect("checado acima");
                         let dest = crate::dirs::update_dir();
                         std::thread::spawn(move || {
-                            let result = crate::update_check::download_asset(&url, &dest, &ptx)
+                            let result = crate::update_check::download_asset(&asset, &dest, &ptx)
                                 .map(|p| {
                                     p.file_name()
                                         .unwrap_or_default()
@@ -513,12 +801,13 @@ pub fn run(
                 update_rects = draw_update_view(d, &upt_tag, &upt_body, &status, busy, update_pct);
             };
             cab.frame_idle_2d(SETUP_BG, render);
-            crate::runner::pace_frame(&mut next, frame);
+            crate::runner::pace_ui(&mut next, frame, plat, cab);
             continue;
         }
 
         if let Some((x, y)) = m.click {
             let (ox, oy) = cab.window_to_output(x, y);
+            cab.try_tv_click(ox, oy);
             if cab.hit_close_button(ox, oy) {
                 return Ok(IdleExit::Quit);
             }
@@ -533,22 +822,7 @@ pub fn run(
                     update_view = app_update.clone();
                     update_status.clear();
                 }
-                Some(UpdateArrow::Core) if core_stale && core.rx.is_none() => {
-                    match core_update::core_download_url() {
-                        Some(url) => {
-                            let (tx, rx) = mpsc::channel();
-                            let dest = crate::dirs::core_dir();
-                            std::thread::spawn(move || {
-                                core_update::download_and_install(url, &dest, &tx)
-                            });
-                            core.rx = Some(rx);
-                            core.done = false;
-                            core.failed = false;
-                            core.label = "baixando...".to_string();
-                        }
-                        None => core.label = "sem build automática - use configurações".into(),
-                    }
-                }
+                Some(UpdateArrow::Core) if core_stale && core.rx.is_none() => core.start_core(),
                 _ => {}
             }
             match cab.hit_panel_button(ox, oy) {
@@ -562,38 +836,80 @@ pub fn run(
                 // desenha), mas o gate fica explícito: sem devmode, cliques
                 // fantasmas não abrem nada.
                 Some(PanelButton::Dev) if cab.dev_mode() => return Ok(IdleExit::OpenDev),
-                Some(PanelButton::CoreDownload) if core.rx.is_none() => {
-                    match core_update::core_download_url() {
-                        Some(url) => {
-                            let (tx, rx) = mpsc::channel();
-                            let dest = crate::dirs::core_dir();
-                            std::thread::spawn(move || {
-                                core_update::download_and_install(url, &dest, &tx)
-                            });
-                            core.rx = Some(rx);
-                            core.done = false;
-                            core.failed = false;
-                            core.label = "baixando...".to_string();
-                        }
-                        None => {
-                            core.label = "Sem build automática - use configurações".to_string();
-                        }
-                    }
-                }
+                // O manual do console não depende do núcleo — é só leitura.
+                Some(PanelButton::ConsoleManual) => console_manual = ConsoleManual::open(),
+                Some(PanelButton::CoreDownload) if core.rx.is_none() => core.start_core(),
                 // Already downloading? The click is ignored until the
                 // worker reports Done/Failed.
                 Some(PanelButton::CoreDownload) => {}
                 _ => {}
             }
         }
+        // O controle na tela inicial: d-pad passeia pelos botões do painel,
+        // pelas setas de update e pelos botões da TV (anel lavanda); A ativa
+        // o foco; B sai.
+        let items = idle_items(&cab.panel_button_list(), app_update.is_some(), core_stale);
+        let mut focus = resolve_focus(&items, idle_focus);
         for nav in m.nav {
             match nav {
-                // Same gate as the panel buttons above: without the core
-                // there's nowhere to go but out — Confirm is inert, Back
-                // still quits.
-                MenuNav::Confirm if !core_missing => return Ok(IdleExit::OpenShelf),
+                MenuNav::Up | MenuNav::Left => {
+                    focus = step_focus(&items, focus, false);
+                    idle_focus = Some(focus);
+                }
+                MenuNav::Down | MenuNav::Right => {
+                    focus = step_focus(&items, focus, true);
+                    idle_focus = Some(focus);
+                }
+                // Without the core there's nowhere to go but out — the panel
+                // buttons are inert (same gate as the clicks above); the TV
+                // buttons and Back still work.
+                MenuNav::Confirm => match focus {
+                    IdleFocus::Tv(c) => cab.apply_tv_control(c),
+                    IdleFocus::Panel(PanelButton::Insert) if !core_missing => {
+                        return Ok(IdleExit::OpenShelf)
+                    }
+                    IdleFocus::Panel(PanelButton::Settings) if !core_missing => {
+                        return Ok(IdleExit::OpenSettings)
+                    }
+                    IdleFocus::Panel(PanelButton::Dev) if cab.dev_mode() => {
+                        return Ok(IdleExit::OpenDev)
+                    }
+                    IdleFocus::Panel(PanelButton::ConsoleManual) => {
+                        console_manual = ConsoleManual::open()
+                    }
+                    IdleFocus::Panel(PanelButton::CoreDownload) if core.rx.is_none() => {
+                        core.start_core()
+                    }
+                    IdleFocus::Arrow(UpdateArrow::App) if app_update.is_some() => {
+                        update_view = app_update.clone();
+                        update_status.clear();
+                    }
+                    IdleFocus::Arrow(UpdateArrow::Core) if core_stale && core.rx.is_none() => {
+                        core.start_core()
+                    }
+                    _ => {}
+                },
                 MenuNav::Back => return Ok(IdleExit::Quit),
                 _ => {}
+            }
+        }
+        // O anel só aparece para quem está usando o controle; a primeira vez
+        // acende a legenda dos botões no OSD do queixo.
+        if plat.last_input_was_pad() {
+            if items.contains(&focus) {
+                cab.set_pad_focus(Some(match focus {
+                    IdleFocus::Panel(b) => PadFocus::Panel(b),
+                    IdleFocus::Arrow(a) => PadFocus::Arrow(a),
+                    IdleFocus::Tv(c) => PadFocus::Tv(c),
+                }));
+            }
+            if !legend_shown {
+                legend_shown = true;
+                cab.push_osd(
+                    &["D-pad escolhe   A confirma", "B sai"],
+                    None,
+                    Duration::from_secs(6),
+                );
             }
         }
         // A seta verde do núcleo não abre tela nenhuma: o download roda em
@@ -608,7 +924,7 @@ pub fn run(
         };
         cab.set_core_status(core_status.as_deref());
         cab.present_static(static_level);
-        crate::runner::pace_frame(&mut next, frame);
+        crate::runner::pace_ui(&mut next, frame, plat, cab);
     }
 }
 
@@ -877,5 +1193,41 @@ pub fn capture_preview(
         crate::console_art::load_brand_images(cab);
         cab.capture_static_bmp(static_level, path)
             .map_err(|e| anyhow::anyhow!(e.to_string()))
+    }
+}
+
+#[cfg(test)]
+mod focus_tests {
+    use super::*;
+
+    #[test]
+    fn items_end_with_the_tv_buttons_in_chin_order() {
+        let items = idle_items(&[PanelButton::Insert, PanelButton::Settings], true, true);
+        assert_eq!(items[0], IdleFocus::Panel(PanelButton::Insert));
+        assert_eq!(items[2], IdleFocus::Arrow(UpdateArrow::App));
+        assert_eq!(items[3], IdleFocus::Arrow(UpdateArrow::Core));
+        assert_eq!(
+            &items[4..],
+            &TV_FOCUS.map(IdleFocus::Tv),
+            "VOL-, VOL+, MENU, POWER"
+        );
+    }
+
+    #[test]
+    fn focus_defaults_to_the_shelf_button_and_wraps_around() {
+        let items = idle_items(&[PanelButton::Settings, PanelButton::Insert], false, false);
+        assert_eq!(
+            resolve_focus(&items, None),
+            IdleFocus::Panel(PanelButton::Insert)
+        );
+        let last = *items.last().unwrap();
+        assert_eq!(step_focus(&items, last, true), items[0], "volta no fim");
+        assert_eq!(step_focus(&items, items[0], false), last, "e no começo");
+        // Um foco que sumiu da lista cai no padrão.
+        let gone = IdleFocus::Arrow(UpdateArrow::App);
+        assert_eq!(
+            resolve_focus(&items, Some(gone)),
+            IdleFocus::Panel(PanelButton::Insert)
+        );
     }
 }

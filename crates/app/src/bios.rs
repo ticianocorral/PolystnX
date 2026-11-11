@@ -9,6 +9,10 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
+/// Teto do que se lê como BIOS (a de PS1 tem 512 KB; folga para dumps
+/// com cabeçalho).
+const MAX_BIOS_BYTES: u64 = 1024 * 1024;
+
 /// Uma BIOS encontrada em `bios/`.
 #[derive(Clone)]
 pub struct BiosInfo {
@@ -59,6 +63,11 @@ pub fn list(dir: &Path) -> Vec<BiosInfo> {
             .map(|x| x.to_ascii_lowercase())
             .unwrap_or_default();
         if ext != "bin" {
+            continue;
+        }
+        // BIOS de PS1 = 512 KB. Um .bin de disco (centenas de MB) largado na
+        // pasta não pode ir inteiro para a RAM só para ser descartado.
+        if e.metadata().map_or(true, |m| m.len() > MAX_BIOS_BYTES) {
             continue;
         }
         let Ok(bytes) = fs::read(&path) else {

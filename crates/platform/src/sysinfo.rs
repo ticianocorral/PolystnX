@@ -64,9 +64,15 @@ pub fn cpu_temp_celsius() -> Option<f32> {
                     continue;
                 };
                 let name = name.to_ascii_lowercase();
-                let is_cpu = ["k10temp", "coretemp", "zenpower", "cpu_thermal", "x86_pkg_temp"]
-                    .iter()
-                    .any(|k| name.contains(k));
+                let is_cpu = [
+                    "k10temp",
+                    "coretemp",
+                    "zenpower",
+                    "cpu_thermal",
+                    "x86_pkg_temp",
+                ]
+                .iter()
+                .any(|k| name.contains(k));
                 if !is_cpu {
                     continue;
                 }
@@ -75,7 +81,9 @@ pub fn cpu_temp_celsius() -> Option<f32> {
                         let fname = input.file_name().to_string_lossy().to_string();
                         if fname.starts_with("temp") && fname.ends_with("_input") {
                             if let Some(temp) = parse_thermal_temp(
-                                &std::fs::read_to_string(input.path()).ok().unwrap_or_default(),
+                                &std::fs::read_to_string(input.path())
+                                    .ok()
+                                    .unwrap_or_default(),
                             ) {
                                 cpu_hwmon = Some(cpu_hwmon.map_or(temp, |c| c.max(temp)));
                             }

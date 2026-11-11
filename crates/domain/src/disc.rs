@@ -60,6 +60,11 @@ fn ext(path: &Path) -> String {
 /// As linhas `.chd` de um `.m3u`, em ordem, resolvidas contra a pasta do
 /// m3u — comentários (`#`) e linhas vazias fora.
 pub fn playlist(path: &Path) -> Result<Vec<PathBuf>, String> {
+    // Um .m3u é uma lista de poucos discos; algo maior não é playlist.
+    const MAX_M3U: u64 = 64 * 1024;
+    if std::fs::metadata(path).map_err(|e| e.to_string())?.len() > MAX_M3U {
+        return Err("m3u grande demais".into());
+    }
     let text = std::fs::read_to_string(path).map_err(|e| e.to_string())?;
     let dir = path.parent().unwrap_or(Path::new("."));
     let mut out = Vec::new();

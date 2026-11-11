@@ -54,12 +54,8 @@ fn main() -> anyhow::Result<()> {
     //     clicar faz a estante sair por Pick::Play antes do frame do shot
     //     (e o estante.bmp nunca é gravado). ---
     let dat = NoIntroDat::load(&dirs::nointro_dat_path()).ok();
-    let catalog = Catalog::open_with_dat(
-        &dirs::roms_dir(),
-        &dirs::library_path(),
-        dat.as_ref(),
-    )
-    .map_err(|e| anyhow::anyhow!(e.to_string()))?;
+    let catalog = Catalog::open_with_dat(&dirs::roms_dir(), &dirs::library_path(), dat.as_ref())
+        .map_err(|e| anyhow::anyhow!(e.to_string()))?;
     plat.debug_set_pointer(Some((160, 380)));
     let opts = ShelfOpts {
         order: Order::Shelf,

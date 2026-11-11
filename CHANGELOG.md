@@ -4,6 +4,222 @@ Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/);
 versionamento por [SemVer 2.0.0](https://semver.org/lang/pt-BR/). O workspace
 inteiro compartilha uma versão (`[workspace.package]` em `Cargo.toml`).
 
+## [1.4.0-beta] - 2026-11-10
+
+Auditoria de segurança alinhada com o SixteeN (1.3.2 → 1.8.1).
+
+### TV (do SixteeN, sem canal — o PolystnX entra pela AV)
+- **Botões físicos no queixo**: POWER (com o LED verde) e VOL-/VOL+,
+  prata sobre plástico escuro. POWER liga e desliga o tubo com a animação
+  de aquecer e de colapsar (vidro morto curvado pela malha do tubo); com a
+  TV desligada o jogo segue rodando, sem imagem nem som.
+- **Ligar e desligar como uma TV de tubo do fim dos anos 90** (sem a janela
+  que abria e fechava): ao desligar, a PRÓPRIA imagem é esmagada na
+  vertical — com as cores ainda aparecendo — até virar uma linha clara que
+  estoura o brilho, a linha encolhe num ponto e o ponto some devagar
+  (persistência do fósforo); ao ligar, o tubo fica escuro por um instante e
+  a imagem sobe do preto ganhando brilho. `examples/tv_shot.rs off|on K`
+  fotografa quadro a quadro.
+- **Volume** 0..16 com o OSD de barrinhas verdes sobre a imagem; o áudio do
+  jogo passa pelo volume (cheio por padrão — o mesmo som de antes).
+- **MENU** (à esquerda do POWER): abre o menu de imagem — BRILHO,
+  CONTRASTE, COR e NITIDEZ de 0 a 100 (50 = neutro). MENU passa para o
+  próximo item e fecha depois do último (ou sozinho, parado por 6 s);
+  VOL-/VOL+ ajustam o item enquanto o menu está aberto. Os ajustes
+  filtram o quadro do jogo no upload e só custam algo fora do neutro.
+- Saíram do queixo a versão/renderer da abertura e o "~N FPS / SOM
+  DESCARTADO" a cada 30 s (o aviso de renderer por software, que é
+  degradação de verdade, continua).
+- O upload do quadro não derruba mais o app (perda do dispositivo de
+  vídeo pula o quadro) e perdeu o código de debug.
+- **Marca prateada "PolyStnX" no meio do queixo**, cromado escovado como a
+  do SixteeN (arte gerada por `examples/gen_brand.rs` a partir do nome da
+  logo do console, 330 KB embutidos). Cede ao selo do RA e ao OSD quando
+  eles estão na tela e some se não couber entre a versão e os controles.
+- O volume e o ajuste de imagem da TV são lembrados entre sessões
+  (`tv_volume` e `tv_picture` no `polystnx.cfg`, gravados ao sair).
+- Os avisos do queixo (RA, OSD) param antes dos controles.
+- `crates/app/examples/tv_shot.rs`: fotos do queixo e do vidro pelo caminho
+  vivo do `present`.
+
+### Manual do console
+- **Botão "Manual do console" na tela inicial** (acima de Configurações),
+  que abre no tubo o manual do PolystnX — 12 páginas: primeiros passos,
+  estante, ligar o console, TV, Cheater Fish, controles, configurações,
+  conquistas e cards, e problemas comuns. O mesmo leitor dos manuais da
+  estante (‹ ›, voltar); alcançável pelo controle.
+- O PDF é embutido no binário (`assets/console-manual-pt.pdf`) e gerado por
+  `cargo run -p polystnx-app --release --example gen_console_manual`, a
+  partir de capturas em `packaging/manual-console/shots/`.
+
+### Arte padrão
+- **Jogo sem arte vira um CD-R de prata numa caixa de CD transparente**, com
+  o nome e o ano escritos à caneta no disco (preta, azul ou vermelha, tremida
+  e inclinada — o sorteio vem do próprio jogo, então é sempre igual). Vale
+  para a grade e para a faixa de recentes; sai o modo "lista" que aparecia
+  quando nenhum jogo tinha capa.
+
+### Arte padrão (disco no console)
+- **Jogo sem arte de disco agora também tem o CD no console**: o disco que
+  gira na face do console e entra no slot é um CD prata gerado por código,
+  com o nome do jogo impresso (antes só a estante tinha o CD genérico).
+
+### TV
+- **Brilho do vidro igual ao do SixteeN**: mancha de luz difusa no alto à
+  esquerda, faixa diagonal fina e aro claro rente à borda, sobre a mesma
+  malha curva da imagem (malha em cache, sem custo por quadro).
+
+### Vídeo composto (AV)
+- **Filtro de cabo AV (amarelo/branco/vermelho) na imagem do jogo**: a cor
+  borra e atrasa na horizontal, a luma suaviza um pouco e a saturação cai
+  levemente. Sem neve nem fantasma (isso é RF, e o PlayStation usa AV).
+  Ligado por padrão; Configurações > jogo > "Video composto (cabo AV)" e
+  `av_composto` no cfg.
+
+### Cheater Fish
+- **O menu lateral do console não tem mais "Cheats"**: tudo é escolhido no
+  Cheater Fish, que aparece a cada vez que o console é ligado. A busca e os
+  filtros do modal antigo saíram junto.
+- **Tela de cheats antes do jogo, no estilo GameShark** (o equivalente do
+  Cheat Genius do SixteeN): ao ligar o console com um disco que tem cheats,
+  aparece primeiro um carregamento com o peixe de óculos (logo em
+  pixel-art) e, direto, a lista dos cheats disponíveis para aquele jogo —
+  liga/desliga cada um (A ou clique), "Start Game" ou B começam o jogo com o
+  que ficou ligado. Fundo azul manchado, molduras chanfradas de prata, linha
+  amarela de seleção, caixa de informação ("N Cheat Codes Available / M Are
+  On") e o texto de ajuda rolando embaixo.
+- **Visual de PS1**: as telas são renderizadas num quadro pequeno (metade
+  do tubo) por um rasterizador de software (`psx_gpu.rs`) com cor de 15
+  bits, dither 4x4 da GPU do PlayStation nos degradês, fonte bitmap de
+  limiar duro com sombra seca, mapa de textura afim ondulando no fundo e
+  molduras que tremem um pixel, e depois ampliadas sem filtro
+  (`Cabinet::update_live_image`) — parecem as de uma ROM de 32 bits.
+- Só no primeiro ligar da sessão (desligar e ligar de novo retoma), e nunca
+  com o RetroAchievements em hardcore. Opção `cheater_fish` no cfg e em
+  Configurações > jogo (ligada por padrão; jogo sem cheats não mostra nada).
+- Diferente do SixteeN, não é um programa emulado: o PS1 não tem um disco de
+  trapaça para rodar antes, então a tela é interface do app; as escolhas
+  valem para o jogo que vai começar. `examples/fish_shot.rs` fotografa as
+  telas.
+
+### Configurações (organização do SixteeN)
+- As seções seguem a ordem do SixteeN — **controles, jogo, imagem e som,
+  estante, conquistas, sistema** — mais **bios**, que só existe no PS1.
+  Abre em "controles"; **LB/RB** trocam de seção; B sai das configurações
+  de qualquer seção (antes "controles" voltava para "jogo").
+- **imagem e som** reúne tela cheia, silenciar o jogo e a TV: volume e
+  brilho, contraste, cor e nitidez (setas ajustam, o clique avança e volta
+  ao começo; as linhas acompanham os botões do queixo).
+- **estante** ficou com o "Renomear ROMs"; **sistema** com o núcleo e a
+  checagem de updates; **jogo** com o Cheater Fish.
+- Só entram opções que fazem sentido no PlayStation: nada de mau contato,
+  tema da estante, sugestão da noite, flyback, burn-in ou idioma.
+
+### Corrigido
+- **Cheater Fish: clique no console, teclado e controle.** Durante a tela do
+  acessório o painel lateral (POWER e OPEN/CLOSE) não respondia a cliques, e o
+  teclado não navegava (nos menus só mouse e controle valem). Agora: POWER
+  desliga sem começar o jogo, OPEN/CLOSE ejeta e volta à estante; setas/W/S,
+  PageUp/PageDown, Home/End, Enter/Espaço/Z (liga/desliga), Backspace/X/Esc
+  (começa o jogo) e os botões do controle — d-pad, A e B — fazem tudo.
+- **"O jogo não abriu" depois de "Renomear ROMs"**: a estante seguia
+  apontando para o nome antigo do arquivo (o catálogo só era relido no
+  "Atualizar"). Agora o catálogo é relido sempre que se volta das
+  configurações; e, se o arquivo do disco sumiu, o aviso diz isso e manda
+  usar "Atualizar" em vez de culpar o núcleo.
+
+### Controle
+- **Botões da TV alcançáveis pelo controle na tela inicial** (como no
+  SixteeN): o d-pad passeia pelos botões do painel, pelas setas de update e
+  pelos botões da TV (VOL-, VOL+, MENU, POWER), com o anel lavanda de foco;
+  A ativa e B sai. O anel e a legenda só aparecem para quem usa o controle.
+
+### Código
+- Revisão: o início do download do núcleo (copiado em três pontos da tela
+  inicial) virou `Download::start_core`; saíram campos mortos
+  (`hiss_on_static`, `rng`), o hash de ROM de SNES do RA, o log de debug
+  por quadro do upload e o desvio de debug de bissecção da estante;
+  comentários que ainda falavam de SNES foram corrigidos.
+- `platform/src/cabinet.rs` (7,9 mil linhas) virou o módulo `cabinet/`:
+  `mod.rs` (tipos, construtor, testes) mais `setters`, `scenes`,
+  `shelf_scenes`, `audio`, `chin`, `chrome`, `geometry`, `text`,
+  `panel`, `panel_art` e `pause` — só mover, sem mudar comportamento.
+- `app/src/runner.rs` perdeu `paths`, `cards`, `cheats`, `notes` e
+  `pace` para `runner/`.
+- `cargo clippy --workspace --all-targets -- -D warnings` limpo (inclui os
+  exemplos de dev que já falhavam).
+
+### Segurança
+- **Núcleo PCSX Rearmed verificado**: o download sai do buildbot (nightly
+  sem versão nem checksum) e passa a vir de uma release do próprio
+  PolystnX no GitHub, aceito só se o SHA-256 bater com o hash embutido
+  (`CORE_ASSETS`). Download com teto, descompactação com teto e instalação
+  atômica (sobrescrever o dylib carregado matava o app no macOS).
+  `packaging/prepare-core-asset.sh` gera os zips e os hashes.
+- **Self-update verificado**: só assets de
+  `github.com/ticianocorral/PolystnX/releases`, URL validada contra `..` e
+  escapes, SHA-256 publicado pelo GitHub conferido no download, `.part`
+  com tamanho e fsync antes do rename, pacote reconferido pelo `.sha256`
+  no arranque, `.part` órfão apagado, 3 falhas e o pacote é descartado.
+  Desligado no Flatpak; não oferecido no Windows; DMG montado na pasta do
+  app (não no `/tmp`); AppImage com fsync.
+- **RetroAchievements**: senha e token no corpo do POST (não na URL),
+  erros de rede sem a URL no log, nome do badge sanitizado (path
+  traversal) e com teto de tamanho/dimensão, JSON da API com teto.
+  Desbloqueio gravado como pendente antes do envio e reenviado no login;
+  401/429/5xx são falhas transitórias (só um `Success:false` conta como
+  recusa) e um pendente recusado 3 vezes sai da fila.
+- **Config com 0600** (leva o token do RA), gravado de forma atômica e
+  apertado para 0600 já na leitura; erro de TOML não cita o conteúdo.
+- **Imagens com teto** de dimensão e alocação (`imgutil`) em capas, artes,
+  badges e páginas de manual; PDF com teto de expansão no FlateDecode e
+  dimensão validada.
+- **Dependências**: zip 8 → 9, lopdf 0.36 → 0.42, rustls 0.23.46,
+  rustls-webpki 0.103.16 (as mesmas versões com que o SixteeN zerou o
+  `cargo audit`).
+
+### Energia e estabilidade (do SixteeN)
+- **Telas paradas a 30 Hz** (10 Hz com a janela escondida) depois de 2 s
+  sem input e sem nada animando (`pace_ui`, `Platform::idle_for`,
+  `Cabinet::animating`); quadro de UI em 60 Hz exatos (era 16 ms).
+- **`pace_frame` girava ~0,9 ms por quadro** (o comentário dizia 200 µs):
+  agora dorme até 150 µs (Linux) / 500 µs do prazo.
+- **Descanso de tela liberado** fora do jogo (o SDL bloqueava sempre);
+  bloqueado só com jogo correndo ou input nos últimos 2 min.
+- **Janela minimizada pausa o jogo.** Áudio do jogo pausa o dispositivo
+  com o jogo pausado, menu aberto ou console desligado; o stream de foley
+  fecha após 3 s ocioso; o chiado enche a fila por nível.
+- **Jogo que não abre não derruba o app**: aviso na tela e volta à
+  inicial; sem dispositivo de áudio o jogo roda mudo; panic grava
+  `crash.log`.
+- **Portas de controle estáveis na partida**: um pad que cai e volta (id
+  novo) reocupa a sua porta e um 3º pad não rouba a vaga de quem caiu.
+- **Select+Start** abre/fecha o livro de pausa pelo controle.
+- Falha ao salvar/carregar state aparece no OSD; badge do RA baixado em
+  thread; painel da estante só refeito quando muda; variável do núcleo com
+  `value` nulo é pulada.
+- Buffers de pixel do vídeo reaproveitados (sem alocar ~1,2 MB por
+  quadro); `getenv` de debug fora do caminho por quadro.
+
+### Corrigido
+- **Card de memória não é mais sobrescrito** quando não lê ou não tem
+  128 KB (DexDrive `.gme`, `.mcd` com cabeçalho, erro de I/O): o slot fica
+  vazio E desencaixado, e todo flush passa por `memcard::overwrite_check`.
+- **Renomear card não apaga outro**: "A" → "B" com um `B.mcr` existente
+  agora recusa (antes o `rename` substituía o B em silêncio).
+- **Gravação atômica** (tmp + fsync + rename) de cards, savestates,
+  notas, tempo de jogo, cheats, biblioteca, catálogo, DAT e caches do RA.
+- `polystnx.cfg` quebrado (TOML ou UTF-8 inválido) vai para `.cfg.bad` e
+  o app abre com os padrões; uma tecla/botão inválido perde só ela.
+- `library.json` corrompido vai para `.json.bad` em vez de ser zerado
+  pelo próximo save (favoritos e contagens).
+- Nome de pasta por jogo recusa `.`/`..`, corta pontos/espaços finais e
+  tem teto de 200 bytes.
+- Pasta de BIOS não lê inteiro um `.bin` maior que 1 MB (um disco largado
+  lá ia para a RAM); `.m3u` com teto.
+- DAT: download com teto e conferência do Content-Length; pacote de
+  exemplo do devmenu com teto de download e de expansão.
+
 ## [1.3.9-beta] - 2026-10-13
 
 ### Corrigido

@@ -10,7 +10,7 @@
 //! nothing to lose by backing out.
 
 use std::sync::mpsc::{self, Receiver};
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 use anyhow::Result;
 use polystnx_platform::{
@@ -37,20 +37,33 @@ const LIST_TOP: i32 = MARGIN + 50;
 /// The settings sections, in panel order — the tube shows one section's
 /// rows at a time; the panel's `Section(i)` buttons switch between them
 /// (plan revision: "se for interessante faça secoes na configuração").
-const SECTION_NAMES: [&str; 6] = [
-    "jogo",
-    "vídeo",
-    "sistema",
-    "conquistas",
+const SECTION_NAMES: [&str; 7] = [
     "controles",
+    "jogo",
+    "imagem e som",
+    "estante",
+    "conquistas",
+    "sistema",
     "bios",
 ];
-const SEC_JOGO: usize = 0;
-const SEC_VIDEO: usize = 1;
-const SEC_SISTEMA: usize = 2;
-const SEC_CONQUISTAS: usize = 3;
-const SEC_CONTROLES: usize = 4;
-const SEC_BIOS: usize = 5;
+const SEC_CONTROLES: usize = 0;
+const SEC_JOGO: usize = 1;
+const SEC_IMAGEM: usize = 2;
+const SEC_ESTANTE: usize = 3;
+const SEC_CONQUISTAS: usize = 4;
+const SEC_SISTEMA: usize = 5;
+const SEC_BIOS: usize = 6;
+
+/// LB/RB: a seção vizinha, com volta nas pontas — todas as seções ficam a
+/// um aperto de ombro, sem precisar do mouse no painel.
+fn step_section(sec: usize, forward: bool) -> usize {
+    let n = SECTION_NAMES.len();
+    if forward {
+        (sec + 1) % n
+    } else {
+        (sec + n - 1) % n
+    }
+}
 
 /// How many rows a section shows — shared by the nav clamps and the click
 /// hit-test so they can't drift apart. `controles` is the key-bind list, so
@@ -62,9 +75,14 @@ const RA_ROW_SENHA: usize = 2;
 
 fn row_count(sec: usize, cfg: &Config) -> usize {
     match sec {
-        SEC_JOGO => 1,
-        SEC_VIDEO => 3,
-        SEC_SISTEMA => 3,
+        // Cheater Fish / vídeo composto
+        SEC_JOGO => 2,
+        // tela cheia / som do jogo / volume da TV / brilho / contraste / cor / nitidez
+        SEC_IMAGEM => 7,
+        // renomear ROMs
+        SEC_ESTANTE => 1,
+        // núcleo / checar updates
+        SEC_SISTEMA => 2,
         // usuário / token / senha / testar login / hardcore
         SEC_CONQUISTAS => 5,
         SEC_CONTROLES => cfg.keymap.describe().len(),
@@ -108,7 +126,7 @@ enum LoginStatus {
 /// `true` if the whole app should quit (window closed / Cmd-Q) instead of
 /// returning to the shelf.
 pub fn run(plat: &mut Platform, cab: &mut Cabinet, cfg: &mut Config) -> Result<bool> {
-    let mut sec = SEC_JOGO;
+    let mut sec = SEC_CONTROLES;
     let mut sel: usize = 0;
     let mut controls_top: usize = 0;
     let mut awaiting_key: Option<usize> = None; // index into keymap.describe()
@@ -129,11 +147,16 @@ pub fn run(plat: &mut Platform, cab: &mut Cabinet, cfg: &mut Config) -> Result<b
     // O worker em andamento é o login Connect (senha → token)? Se sim, o
     // `Ok` guarda o token no cfg em vez de só exibir.
     let mut login_connect = false;
-    let frame_time = Duration::from_millis(16);
+    let frame_time = crate::runner::UI_FRAME;
     let mut next = Instant::now();
     cab.set_close_button(true);
 
     loop {
+        // O volume e a imagem também mudam pelos botões do queixo enquanto
+        // as configurações estão abertas: as linhas leem o que a TV mostra.
+        cfg.tv_volume = cab.volume();
+        let pic = cab.picture();
+        cfg.tv_picture = [pic.brilho, pic.contraste, pic.cor, pic.nitidez];
         if let Some(rx) = &login_worker {
             match rx.try_recv() {
                 Ok(Ok(token)) => {
@@ -246,8 +269,9 @@ pub fn run(plat: &mut Platform, cab: &mut Cabinet, cfg: &mut Config) -> Result<b
                 selected: sec,
             });
             let render = |d: &mut Screen| match sec {
-                SEC_VIDEO => draw_video(d, cfg, sel),
-                SEC_SISTEMA => draw_sistema(d, cfg, sel, &core_status, rename_status.as_deref()),
+                SEC_IMAGEM => draw_imagem(d, cfg, sel),
+                SEC_ESTANTE => draw_estante(d, cfg, sel, rename_status.as_deref()),
+                SEC_SISTEMA => draw_sistema(d, cfg, sel, &core_status),
                 SEC_CONQUISTAS => {
                     draw_conquistas(d, cfg, sel, &login_status, ra_editing, &ra_draft)
                 }
@@ -256,7 +280,7 @@ pub fn run(plat: &mut Platform, cab: &mut Cabinet, cfg: &mut Config) -> Result<b
                 _ => draw_jogo(d, cfg, sel),
             };
             cab.frame_settings(BG, render);
-            crate::runner::pace_frame(&mut next, frame_time);
+            crate::runner::pace_ui(&mut next, frame_time, plat, cab);
             continue;
         }
 
@@ -291,6 +315,7 @@ pub fn run(plat: &mut Platform, cab: &mut Cabinet, cfg: &mut Config) -> Result<b
             // click-driven one (plan revision: no keyboard shortcuts).
             if let Some((cx, cy)) = m.click {
                 let (ox, oy) = cab.window_to_output(cx, cy);
+                cab.try_tv_click(ox, oy);
                 if cab.hit_close_button(ox, oy) {
                     return Ok(true);
                 }
@@ -364,16 +389,12 @@ pub fn run(plat: &mut Platform, cab: &mut Cabinet, cfg: &mut Config) -> Result<b
                     MenuNav::Down => {
                         sel = (sel + 1).min(row_count(sec, cfg).saturating_sub(1));
                     }
-                    // "controles" came from "jogo"'s Controles row, so its
-                    // Back goes there; every other section's Back leaves
-                    // settings entirely.
-                    MenuNav::Back => {
-                        if sec == SEC_CONTROLES {
-                            sec = SEC_JOGO;
-                            sel = 0;
-                        } else {
-                            return Ok(false);
-                        }
+                    MenuNav::Back => return Ok(false),
+                    // LB/RB trocam de seção.
+                    MenuNav::PageUp | MenuNav::PageDown => {
+                        sec = step_section(sec, matches!(nav, MenuNav::PageDown));
+                        sel = 0;
+                        controls_top = 0;
                     }
                     MenuNav::Confirm => {
                         let cur = sel;
@@ -425,8 +446,9 @@ pub fn run(plat: &mut Platform, cab: &mut Cabinet, cfg: &mut Config) -> Result<b
         });
 
         let render = |d: &mut Screen| match sec {
-            SEC_VIDEO => draw_video(d, cfg, sel),
-            SEC_SISTEMA => draw_sistema(d, cfg, sel, &core_status, rename_status.as_deref()),
+            SEC_IMAGEM => draw_imagem(d, cfg, sel),
+            SEC_ESTANTE => draw_estante(d, cfg, sel, rename_status.as_deref()),
+            SEC_SISTEMA => draw_sistema(d, cfg, sel, &core_status),
             SEC_CONQUISTAS => draw_conquistas(d, cfg, sel, &login_status, ra_editing, &ra_draft),
             SEC_CONTROLES => draw_controls(d, cfg, sel, controls_top, awaiting_key),
             SEC_BIOS => draw_bios(d, cfg, sel),
@@ -434,7 +456,7 @@ pub fn run(plat: &mut Platform, cab: &mut Cabinet, cfg: &mut Config) -> Result<b
         };
         cab.frame_settings(BG, render);
 
-        crate::runner::pace_frame(&mut next, frame_time);
+        crate::runner::pace_ui(&mut next, frame_time, plat, cab);
     }
 }
 
@@ -459,31 +481,37 @@ fn activate_row(
     login_worker: &mut Option<Receiver<Result<String, String>>>,
 ) {
     match *sec {
-        SEC_JOGO => match i {
-            0 => {
-                *sec = SEC_CONTROLES;
-                *sel = 0;
+        SEC_JOGO => {
+            if i == 0 {
+                cfg.cheater_fish = !cfg.cheater_fish;
+            } else {
+                cfg.av_composto = !cfg.av_composto;
+                cab.set_composite(cfg.av_composto);
             }
-            _ => {}
-        },
-        SEC_VIDEO => match i {
+            let _ = cfg.save();
+        }
+        SEC_IMAGEM => match i {
             0 => {
                 cfg.fullscreen = !cfg.fullscreen;
                 cab.toggle_fullscreen();
                 let _ = cfg.save();
             }
-            _ => {
+            1 => {
                 cfg.mute_game = !cfg.mute_game;
                 let _ = cfg.save();
             }
+            // Volume e imagem da TV: o clique avança um passo e volta ao
+            // começo depois do máximo (o ←/→ do controle anda nos dois
+            // sentidos).
+            _ => step_tv_row(cfg, cab, i, 1, true),
         },
+        SEC_ESTANTE => *rename_status = Some(run_rom_rename()),
         SEC_SISTEMA => match i {
             0 => start_core_download(core_status, core_worker),
-            1 => {
+            _ => {
                 cfg.check_updates_on_start = !cfg.check_updates_on_start;
                 let _ = cfg.save();
             }
-            _ => *rename_status = Some(run_rom_rename()),
         },
         SEC_CONQUISTAS => match i {
             RA_ROW_USER | RA_ROW_TOKEN | RA_ROW_SENHA => *ra_editing = Some(i),
@@ -536,28 +564,63 @@ fn start_login_test(
 
 /// The left/right adjustments — run-ahead steps, fullscreen/check-updates
 /// toggle. Rows without a horizontal feel ignore them.
-fn adjust_row(cfg: &mut Config, sec: usize, sel: usize, cab: &mut Cabinet, _right: bool) {
+fn adjust_row(cfg: &mut Config, sec: usize, sel: usize, cab: &mut Cabinet, right: bool) {
     match (sec, sel) {
-        (SEC_VIDEO, 0) => {
+        (SEC_JOGO, _) => {
+            if sel == 0 {
+                cfg.cheater_fish = !cfg.cheater_fish;
+            } else {
+                cfg.av_composto = !cfg.av_composto;
+                cab.set_composite(cfg.av_composto);
+            }
+            let _ = cfg.save();
+        }
+        (SEC_IMAGEM, 0) => {
             cfg.fullscreen = !cfg.fullscreen;
             cab.toggle_fullscreen();
             let _ = cfg.save();
         }
-        (SEC_VIDEO, 1) => {
+        (SEC_IMAGEM, 1) => {
             cfg.mute_game = !cfg.mute_game;
             let _ = cfg.save();
         }
+        (SEC_IMAGEM, 2..=6) => step_tv_row(cfg, cab, sel, if right { 1 } else { -1 }, false),
         (SEC_SISTEMA, 1) => {
             cfg.check_updates_on_start = !cfg.check_updates_on_start;
             let _ = cfg.save();
         }
-        (SEC_BIOS, _) => {}
         (SEC_CONQUISTAS, 4) => {
             cfg.ra_hardcore = !cfg.ra_hardcore;
             let _ = cfg.save();
         }
         _ => {}
     }
+}
+
+/// As linhas de volume e de imagem da TV (linhas 2..=6 de "imagem e som"):
+/// anda um passo (`dir` = ±1; o volume de 1 em 1, a imagem de 5 em 5) e
+/// aplica na hora no gabinete. Com `wrap`, passar do máximo volta ao zero
+/// (o clique); sem ele, para nos limites (as setas).
+fn step_tv_row(cfg: &mut Config, cab: &mut Cabinet, row: usize, dir: i32, wrap: bool) {
+    if row == 2 {
+        let v = cfg.tv_volume as i32 + dir;
+        let v = if wrap && v > 16 { 0 } else { v.clamp(0, 16) };
+        cfg.tv_volume = v as u8;
+        cab.set_volume(cfg.tv_volume);
+    } else {
+        let k = row - 3;
+        let v = cfg.tv_picture[k] as i32 + dir * 5;
+        let v = if wrap && v > 100 { 0 } else { v.clamp(0, 100) };
+        cfg.tv_picture[k] = v as u8;
+        let p = cfg.tv_picture;
+        cab.set_picture(polystnx_platform::Picture {
+            brilho: p[0],
+            contraste: p[1],
+            cor: p[2],
+            nitidez: p[3],
+        });
+    }
+    let _ = cfg.save();
 }
 
 /// Kick off a background download of the PCSX Rearmed core (plan: "opção pra
@@ -575,7 +638,7 @@ fn start_core_download(status: &mut CoreStatus, worker: &mut Option<Receiver<Cor
     };
     let (tx, rx) = mpsc::channel();
     let dest = crate::dirs::core_dir();
-    std::thread::spawn(move || core_update::download_and_install(url, &dest, &tx));
+    std::thread::spawn(move || core_update::download_and_install(&url, &dest, &tx));
     *worker = Some(rx);
     *status = CoreStatus::Downloading {
         downloaded: 0,
@@ -658,7 +721,7 @@ fn bind_row(cfg: &mut Config, row: usize, key_name: &str) {
 }
 
 /// The gamepad half of a captured row: `btn` (the physical pad button the
-/// player pressed) becomes the driver of that row's SNES action, and the
+/// player pressed) becomes the driver of that row's PS1 action, and the
 /// live platform map is swapped so it takes effect without leaving settings.
 fn bind_pad_row(plat: &mut Platform, cfg: &mut Config, row: usize, btn: GamepadBtn) {
     let Some((action, _)) = cfg.padmap.describe().into_iter().nth(row) else {
@@ -675,57 +738,76 @@ fn bind_pad_row(plat: &mut Platform, cfg: &mut Config, row: usize, btn: GamepadB
     plat.set_pad_map(cfg.padmap.clone());
 }
 
-fn draw_jogo(d: &mut Screen, _cfg: &Config, sel: usize) {
+fn draw_jogo(d: &mut Screen, cfg: &Config, sel: usize) {
     let x = MARGIN;
     d.text(x, MARGIN, 2, TEXT, "jogo");
-    let mut y = LIST_TOP;
-    let rows = ["Controles".to_string()];
-    for (i, row) in rows.iter().enumerate() {
-        draw_row(d, x, y, row, i == sel);
-        y += ROW_H;
-    }
+    let onoff = |b: bool| if b { "ligado" } else { "desligado" };
+    let rows = [
+        format!(
+            "Cheater Fish (cheats antes do jogo): {}",
+            onoff(cfg.cheater_fish)
+        ),
+        format!("Video composto (cabo AV): {}", onoff(cfg.av_composto)),
+    ];
+    draw_rows(d, x, &rows, sel);
     draw_hint(
         d,
         "clique numa opção pra mudar -- setas do gamepad ajustam, A confirma",
     );
 }
 
-fn draw_video(d: &mut Screen, cfg: &Config, sel: usize) {
-    let x = MARGIN;
-    d.text(x, MARGIN, 2, TEXT, "vídeo");
+/// As linhas de uma seção, uma por `ROW_H` a partir de `LIST_TOP`.
+fn draw_rows(d: &mut Screen, x: i32, rows: &[String], sel: usize) {
     let mut y = LIST_TOP;
-    // Sem "chiado da TV fora do ar": o PSX é AV — tela sem sinal é muda.
-    let rows = [
-        format!(
-            "Tela cheia: {}",
-            if cfg.fullscreen {
-                "ligada"
-            } else {
-                "desligada"
-            }
-        ),
-        format!(
-            "Silenciar o jogo (só o leitor): {}",
-            if cfg.mute_game { "ligado" } else { "desligado" }
-        ),
-    ];
     for (i, row) in rows.iter().enumerate() {
         draw_row(d, x, y, row, i == sel);
         y += ROW_H;
     }
-    draw_hint(d, "clique numa opção pra alternar");
 }
 
-fn draw_sistema(
-    d: &mut Screen,
-    cfg: &Config,
-    sel: usize,
-    core_status: &CoreStatus,
-    rename_status: Option<&str>,
-) {
+/// "imagem e som": tela cheia, o som do jogo e a TV (volume e os quatro
+/// ajustes de imagem do menu do queixo).
+fn draw_imagem(d: &mut Screen, cfg: &Config, sel: usize) {
+    let x = MARGIN;
+    d.text(x, MARGIN, 2, TEXT, "imagem e som");
+    let onoff = |on: bool, yes: &'static str, no: &'static str| if on { yes } else { no };
+    let p = cfg.tv_picture;
+    let rows = [
+        format!(
+            "Tela cheia: {}",
+            onoff(cfg.fullscreen, "ligada", "desligada")
+        ),
+        format!(
+            "Silenciar o jogo (só o leitor): {}",
+            onoff(cfg.mute_game, "ligado", "desligado")
+        ),
+        format!("Volume da TV: {} / 16", cfg.tv_volume),
+        format!("Brilho: {}", p[0]),
+        format!("Contraste: {}", p[1]),
+        format!("Cor: {}", p[2]),
+        format!("Nitidez: {}", p[3]),
+    ];
+    draw_rows(d, x, &rows, sel);
+    draw_hint(
+        d,
+        "setas ajustam o volume e a imagem -- 50 é o neutro da imagem",
+    );
+}
+
+/// "estante": o que mexe nos arquivos dos jogos.
+fn draw_estante(d: &mut Screen, _cfg: &Config, sel: usize, rename_status: Option<&str>) {
+    let x = MARGIN;
+    d.text(x, MARGIN, 2, TEXT, "estante");
+    let rows = [rename_status
+        .unwrap_or("Renomear ROMs para o padrão No-Intro")
+        .to_string()];
+    draw_rows(d, x, &rows, sel);
+    draw_hint(d, "clique numa opção pra executar");
+}
+
+fn draw_sistema(d: &mut Screen, cfg: &Config, sel: usize, core_status: &CoreStatus) {
     let x = MARGIN;
     d.text(x, MARGIN, 2, TEXT, "sistema");
-    let mut y = LIST_TOP;
     let rows = [
         core_row_label(core_status),
         format!(
@@ -736,14 +818,8 @@ fn draw_sistema(
                 "não"
             }
         ),
-        rename_status
-            .unwrap_or("Renomear ROMs para o padrão No-Intro")
-            .to_string(),
     ];
-    for (i, row) in rows.iter().enumerate() {
-        draw_row(d, x, y, row, i == sel);
-        y += ROW_H;
-    }
+    draw_rows(d, x, &rows, sel);
     draw_hint(d, "clique numa opção pra executar ou alternar");
 }
 
@@ -875,7 +951,8 @@ pub fn capture_preview(
     path: &std::path::Path,
 ) -> Result<()> {
     let sec = match screen {
-        "video" => SEC_VIDEO,
+        "imagem" | "video" => SEC_IMAGEM,
+        "estante" => SEC_ESTANTE,
         "sistema" => SEC_SISTEMA,
         "conquistas" => SEC_CONQUISTAS,
         "controls" => SEC_CONTROLES,
@@ -887,8 +964,9 @@ pub fn capture_preview(
         selected: sec,
     });
     let render = |d: &mut Screen| match sec {
-        SEC_VIDEO => draw_video(d, cfg, 0),
-        SEC_SISTEMA => draw_sistema(d, cfg, 0, &CoreStatus::Idle, None),
+        SEC_IMAGEM => draw_imagem(d, cfg, 0),
+        SEC_ESTANTE => draw_estante(d, cfg, 0, None),
+        SEC_SISTEMA => draw_sistema(d, cfg, 0, &CoreStatus::Idle),
         SEC_CONQUISTAS => draw_conquistas(d, cfg, 0, &LoginStatus::Idle, None, ""),
         SEC_CONTROLES => draw_controls(d, cfg, 0, 0, None),
         SEC_BIOS => draw_bios(d, cfg, 0),
