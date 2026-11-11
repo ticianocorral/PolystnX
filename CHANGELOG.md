@@ -17,6 +17,8 @@ inteiro compartilha uma versão (`[workspace.package]` em `Cargo.toml`).
 - **Botões "fósforo" em vermelho**: "histórico", "atualizar" e as setas das
   faixas ficam sem caixa, só o rótulo com sublinhado, como no SixteeN (lá é
   violeta; aqui, vermelho).
+  O mesmo vale para "voltar" e "página" do manual/conquistas, o zoom da capa
+  traseira e os botões da tela de primeiro uso.
 
 ## [1.4.1-beta] - 2026-11-11
 

@@ -297,14 +297,7 @@ pub(crate) fn draw_manual_view(
     }
 
     let mut draw_nav = |r: &(i32, i32, u32, u32), label: &str| {
-        d.outline(r.0, r.1, r.2, r.3, 2, (TEXT.0, TEXT.1, TEXT.2, 255));
-        d.text(
-            r.0 + (r.2 as i32 - label.chars().count() as i32 * 9) / 2,
-            r.1 + 7,
-            1,
-            TEXT,
-            label,
-        );
+        draw_fosforo_btn(d, *r, label, true);
     };
     draw_nav(&prev, "< página");
     draw_nav(&next, "página >");
@@ -438,29 +431,8 @@ fn draw_achievements_view(
         }
     }
 
-    // "voltar" — same flat style the back-cover zoom uses.
-    d.outline(
-        voltar.0,
-        voltar.1,
-        voltar.2,
-        voltar.3,
-        1,
-        (150, 150, 158, 255),
-    );
-    d.fill(
-        voltar.0 + 1,
-        voltar.1 + 1,
-        voltar.2 - 2,
-        voltar.3 - 2,
-        (34, 34, 40, 255),
-    );
-    d.text(
-        voltar.0 + (voltar.2 as i32 - 9 * 6) / 2,
-        voltar.1 + (voltar.3 as i32 - 20) / 2,
-        1,
-        TEXT,
-        "voltar",
-    );
+    // "voltar" — a linguagem fósforo dos botões dentro da TV.
+    draw_fosforo_btn(d, voltar, "voltar", true);
     voltar
 }
 
