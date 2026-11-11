@@ -94,6 +94,19 @@ impl Gpu {
         self.px[i + 2] = c.2;
     }
 
+    /// Mistura `c` sobre o pixel com cobertura `a` (0..=255) — só a fonte
+    /// da lista usa, para as bordas ficarem suaves.
+    fn blend(&mut self, x: i32, y: i32, c: Rgb, a: u32) {
+        if x < 0 || y < 0 || x >= self.w || y >= self.h || a == 0 {
+            return;
+        }
+        let i = ((y * self.w + x) * 4) as usize;
+        for (k, v) in [c.0, c.1, c.2].into_iter().enumerate() {
+            let o = self.px[i + k] as u32;
+            self.px[i + k] = ((o * (255 - a) + v as u32 * a) / 255) as u8;
+        }
+    }
+
     /// Um retângulo de cor chapada (cortada para 15 bits).
     pub fn rect(&mut self, x: i32, y: i32, w: i32, h: i32, c: Rgb) {
         let c = quant(c);
@@ -150,7 +163,11 @@ impl Gpu {
             if let Some(g) = get_raster(ch, font.weight(), font.height()) {
                 for (gy, row) in g.raster().iter().enumerate() {
                     for (gx, &v) in row.iter().enumerate() {
-                        if v >= if font == Font::List { 90 } else { 110 } {
+                        if font == Font::List {
+                            let (px, py) = (pen + gx as i32, y + gy as i32);
+                            self.blend(px + 1, py + 1, (6, 8, 30), v as u32 * 3 / 4);
+                            self.blend(px, py, quant(c), v as u32);
+                        } else if v >= 110 {
                             let (px, py) = (pen + gx as i32, y + gy as i32);
                             self.put(px + 1, py + 1, (6, 8, 30));
                             self.put(px, py, quant(c));
