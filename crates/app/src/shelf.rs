@@ -68,10 +68,6 @@ const FAV_TITLE: &str = "favoritos";
 /// Hard caps well past what fits on screen at once — the strips scroll, but
 /// a run of thousands of played games shouldn't grow them without bound.
 const STRIP_CAP: usize = 60;
-/// The recent strip shows at most this many games (plan revision: "jogados
-/// recentemente mostrar apenas no maximo 8 jogos") — favorites keep the
-/// wider `STRIP_CAP`.
-const RECENT_CAP: usize = 8;
 
 /// The title filter box (plan revision: "colocar filtro para facilitar o
 /// encontro dos games na lista") — the shelf's own one deliberate keyboard
@@ -1378,25 +1374,10 @@ pub fn run(
                 .cloned()
                 .collect();
             view.sort_by_key(|e| e.title().to_lowercase());
-            // The recent strip only makes sense browsing the unfiltered
-            // shelf — once a search narrows things, the whole point is
-            // finding a specific game, not re-surfacing what was just
-            // played.
-            // Most recently played first, descending (plan revision:
-            // "organizar jogados recentemente pelo ordem de ultimo jogado
-            // decrescente") — already was, kept explicit.
-            recent = if filter_query.is_empty() {
-                let mut r: Vec<CatalogEntry> = all
-                    .iter()
-                    .filter(|e| e.rom.last_played_at.is_some())
-                    .cloned()
-                    .collect();
-                r.sort_by_key(|e| std::cmp::Reverse(e.rom.last_played_at.unwrap_or(0)));
-                r.truncate(RECENT_CAP);
-                r
-            } else {
-                Vec::new()
-            };
+            // A faixa "jogados recentemente" saiu da estante (plan revision:
+            // "remover o campo ultimos jogados"): `recent` fica sempre vazio e
+            // todo o resto do código da faixa fica inerte.
+            recent = Vec::new();
             // Favorites sit above the recent strip (plan revision) — same
             // "only while browsing the unfiltered shelf" rule, alphabetical
             // (plan revision: "organizar favoritos em ordem alfabetica"),
