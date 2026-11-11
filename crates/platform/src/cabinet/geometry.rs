@@ -142,20 +142,6 @@ pub(super) fn panel_rect(out_w: u32, out_h: u32) -> Rect {
     Rect::new((out_w - w) as i32, 0, w, out_h)
 }
 
-/// O deslocamento do tubo para um ponto da grade (`cx`, `cy` em -1..1): o
-/// barril puxa os cantos para dentro, e o ganho `1 / (1 - WARP)` os traz de
-/// volta EXATAMENTE aos cantos do retângulo da tela (a imagem preenche os
-/// cantos da TV, sem o recesso arredondado do emulador). O que passaria da
-/// borda no meio dos lados é preso nela — o contorno fica reto, e a
-/// curvatura só aparece dentro da imagem.
-pub(super) fn crt_displace(cx: f32, cy: f32, warp: f32) -> (f32, f32) {
-    let gain = 1.0 / (1.0 - warp);
-    (
-        (cx * (1.0 - warp * cy * cy) * gain).clamp(-1.0, 1.0),
-        (cy * (1.0 - warp * cx * cx) * gain).clamp(-1.0, 1.0),
-    )
-}
-
 /// Build a textured grid over `dst` whose vertex positions are barrel-distorted
 /// (edges bow out, corners pull in) with an edge vignette baked into the vertex
 /// colours. Texture coordinates stay a plain grid, so the picture — not just the
@@ -174,7 +160,8 @@ pub(super) fn build_crt_mesh(dst: Rect, alpha: f32) -> CrtMesh {
             let cy = v * 2.0 - 1.0;
 
             // Barrel: corners move toward the centre, mid-edges stay put.
-            let (dx, dy) = crt_displace(cx, cy, CRT_WARP);
+            let dx = cx * (1.0 - CRT_WARP * cy * cy);
+            let dy = cy * (1.0 - CRT_WARP * cx * cx);
 
             let px = ox + (dx * 0.5 + 0.5) * dw;
             let py = oy + (dy * 0.5 + 0.5) * dh;
