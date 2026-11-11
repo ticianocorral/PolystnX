@@ -311,7 +311,7 @@ pub fn render_list(
 ) -> Layout {
     g.water(frame);
     let (w, h) = (g.w, g.h);
-    let cell = Font::Small.cell();
+    let cell = Font::List.cell();
     let mut layout = Layout::default();
 
     // A barra de título, com o peixinho à esquerda.
@@ -341,7 +341,7 @@ pub fn render_list(
         "Select Cheat Codes",
     );
 
-    let (row_h, gap) = (18, 3);
+    let (row_h, gap) = (22, 3);
     let list_top = py + 8 + 16 + 8;
     let list_h = (py + ph - 10) - list_top;
     layout.visible = (list_h / (row_h + gap)).max(1) as usize;
@@ -364,18 +364,18 @@ pub fn render_list(
         g.rect(ix, y, iw, 1, (255, 255, 255));
         let fg = if selected { SELECT_TEXT } else { ROW_TEXT };
         if idx == 0 {
-            g.text(ix + 8, y + 1, Font::Small, fg, "Start Game");
+            g.text(ix + 8, y + 1, Font::List, fg, "Start Game");
         } else {
             let on = state.get(idx - 1).copied().unwrap_or(false);
             // A caixinha: verde com degradê quando ligado.
-            g.rect(ix + 7, y + 3, 12, 12, (8, 10, 36));
+            g.rect(ix + 7, y + 5, 12, 12, (8, 10, 36));
             if on {
-                g.grad(ix + 8, y + 4, 10, 10, ON_TOP, ON_BOT);
+                g.grad(ix + 8, y + 6, 10, 10, ON_TOP, ON_BOT);
             } else {
-                g.rect(ix + 8, y + 4, 10, 10, (52, 58, 112));
+                g.rect(ix + 8, y + 6, 10, 10, (52, 58, 112));
             }
             let name = fit(defs[idx - 1].desc, max_cols);
-            g.text(ix + 26, y + 1, Font::Small, fg, &name);
+            g.text(ix + 26, y + 1, Font::List, fg, &name);
         }
         layout.rows.push((idx, ix, y, iw, row_h));
     }

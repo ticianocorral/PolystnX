@@ -36,7 +36,9 @@ serde_json.workspace = true
 ureq.workspace = true
 noto-sans-mono-bitmap = { version = "0.3", default-features = false, features = [
     "bold",
+    "regular",
     "size_16",
+    "size_20",
     "size_32",
     "unicode-basic-latin",
 ] }

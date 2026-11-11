@@ -34,6 +34,8 @@ fn quant(c: Rgb) -> Rgb {
 pub enum Font {
     /// 8x16 — o texto das linhas.
     Small,
+    /// 10x20, traço fino — o texto da lista de cheats (mais legível).
+    List,
     /// 32 px — os títulos.
     Big,
 }
@@ -42,13 +44,21 @@ impl Font {
     fn height(self) -> RasterHeight {
         match self {
             Font::Small => RasterHeight::Size16,
+            Font::List => RasterHeight::Size20,
             Font::Big => RasterHeight::Size32,
+        }
+    }
+
+    fn weight(self) -> FontWeight {
+        match self {
+            Font::List => FontWeight::Regular,
+            _ => FontWeight::Bold,
         }
     }
 
     /// Largura de uma célula (a fonte é monoespaçada).
     pub fn cell(self) -> i32 {
-        get_raster_width(FontWeight::Bold, self.height()) as i32
+        get_raster_width(self.weight(), self.height()) as i32
     }
 
     /// Altura de uma linha de texto.
@@ -137,10 +147,10 @@ impl Gpu {
         let cell = font.cell();
         let mut pen = x;
         for ch in s.chars() {
-            if let Some(g) = get_raster(ch, FontWeight::Bold, font.height()) {
+            if let Some(g) = get_raster(ch, font.weight(), font.height()) {
                 for (gy, row) in g.raster().iter().enumerate() {
                     for (gx, &v) in row.iter().enumerate() {
-                        if v >= 110 {
+                        if v >= if font == Font::List { 90 } else { 110 } {
                             let (px, py) = (pen + gx as i32, y + gy as i32);
                             self.put(px + 1, py + 1, (6, 8, 30));
                             self.put(px, py, quant(c));
