@@ -163,15 +163,9 @@ impl Gpu {
             if let Some(g) = get_raster(ch, font.weight(), font.height()) {
                 for (gy, row) in g.raster().iter().enumerate() {
                     for (gx, &v) in row.iter().enumerate() {
-                        if font == Font::List {
-                            let (px, py) = (pen + gx as i32, y + gy as i32);
-                            self.blend(px + 1, py + 1, (6, 8, 30), v as u32 * 3 / 4);
-                            self.blend(px, py, quant(c), v as u32);
-                        } else if v >= 110 {
-                            let (px, py) = (pen + gx as i32, y + gy as i32);
-                            self.put(px + 1, py + 1, (6, 8, 30));
-                            self.put(px, py, quant(c));
-                        }
+                        let (px, py) = (pen + gx as i32, y + gy as i32);
+                        self.blend(px + 1, py + 1, (6, 8, 30), v as u32 * 3 / 4);
+                        self.blend(px, py, quant(c), v as u32);
                     }
                 }
             }
@@ -248,16 +242,14 @@ mod tests {
     }
 
     #[test]
-    fn text_is_hard_edged_and_has_a_drop_shadow() {
+    fn text_is_smooth_and_has_a_drop_shadow() {
         let mut g = Gpu::new(40, 24);
         g.rect(0, 0, 40, 24, (200, 200, 200));
         let w = g.text(2, 2, Font::Small, (255, 255, 255), "A");
         assert_eq!(w, Font::Small.cell());
-        // Só há o fundo, o branco do texto e a sombra escura: nada de meio-tom.
-        let mut kinds = std::collections::BTreeSet::new();
-        for p in g.px.as_chunks::<4>().0 {
-            kinds.insert((p[0], p[1], p[2]));
-        }
-        assert!(kinds.len() <= 3, "{kinds:?}");
+        // O texto vira branco e tem sombra escura nas bordas.
+        let px = g.px.as_chunks::<4>().0;
+        assert!(px.iter().any(|p| p[0] >= 248 && p[1] >= 248));
+        assert!(px.iter().any(|p| p[0] < 100));
     }
 }
