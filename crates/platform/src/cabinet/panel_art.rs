@@ -252,7 +252,10 @@ pub(super) fn draw_slot_furniture(
     // botões redondos de cima precisam da face.
     let box_h = if tight { 76 } else { 56 };
     let box_w = (block.width() as f32 * 0.46).round() as i32;
-    let grid_top = block.bottom() - (box_h + 4);
+    // As caixas descem 5 px (mais respiro do disco); o vão do disco e dos
+    // botões continua medido pela posição antiga.
+    let box_drop = 5;
+    let grid_top = block.bottom() - (box_h + 4) + box_drop;
     let analog_rect;
     // As duas caixas centradas no bloco (margens iguais dos dois lados).
     let pair_x = block.x() + (block.width() as i32 - (box_w * 2 + gap)) / 2;
@@ -468,7 +471,7 @@ pub(super) fn draw_slot_furniture(
     // Nas telas apertadas eles recolhem pras bordas — é o vão central que
     // dá o tamanho do disco.
     let face_top = block.y() + 6;
-    let face_bottom = mc1.y() - 2;
+    let face_bottom = mc1.y() - box_drop - 2;
     let face_h = (face_bottom - face_top).max(1);
     let btn_r =
         ((face_h as f32 * 0.30).round() as i32).min(if block.width() < 640 { 34 } else { 46 });
@@ -539,7 +542,7 @@ pub(super) fn draw_slot_furniture(
     // O vão central do disco — os limites seguem o grid das caixas.
     let cx = block.x() + block.width() as i32 / 2;
     let disc_top_lim = block.y() - 7;
-    let disc_bot_lim = mc1.y() - 5;
+    let disc_bot_lim = mc1.y() - box_drop - 5;
     let cy = (disc_top_lim + disc_bot_lim) / 2;
     let clearance = |bx: i32, by: i32, br: i32| -> f32 {
         let dx = (cx - bx) as f32;
