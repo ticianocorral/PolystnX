@@ -59,6 +59,11 @@ Auditoria de segurança alinhada com o SixteeN (1.3.2 → 1.8.1).
   para a grade e para a faixa de recentes; sai o modo "lista" que aparecia
   quando nenhum jogo tinha capa.
 
+### Arte padrão (disco no console)
+- **Jogo sem arte de disco agora também tem o CD no console**: o disco que
+  gira na face do console e entra no slot é um CD prata gerado por código,
+  com o nome do jogo impresso (antes só a estante tinha o CD genérico).
+
 ### Vídeo composto (AV)
 - **Filtro de cabo AV (amarelo/branco/vermelho) na imagem do jogo**: a cor
   borra e atrasa na horizontal, a luma suaviza um pouco e a saturação cai

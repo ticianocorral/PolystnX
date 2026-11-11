@@ -1032,7 +1032,9 @@ pub fn run_game(
     crate::console_art::load_cd_reader(cab);
     crate::console_art::load_cd_seat(cab);
     crate::console_art::load_mc_logo(cab);
-    let cartridge_img = decode_panel_art(&spec.cartridge, "disco");
+    // Sem arte de disco, o console gira o CD genérico (prata, com o nome).
+    let cartridge_img = decode_panel_art(&spec.cartridge, "disco")
+        .or_else(|| Some(crate::generic_disc::generic_disc(&title)));
     let has_cartridge_art = cartridge_img.is_some();
     cab.set_panel(
         logo_img.as_ref().map(|(w, h, d)| (*w, *h, d.as_slice())),

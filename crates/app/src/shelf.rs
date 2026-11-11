@@ -533,7 +533,7 @@ fn pick_play(
 
 /// O nome como alguém escreveria à caneta: sem o "(USA)"/"(Europe)" do
 /// No-Intro e com o ", The" de volta para a frente.
-fn handwritten_title(title: &str) -> String {
+pub(crate) fn handwritten_title(title: &str) -> String {
     let base = title.split(" (").next().unwrap_or(title).trim();
     let (head, tail) = base.split_once(" - ").unwrap_or((base, ""));
     let head = match head.strip_suffix(", The") {
@@ -549,7 +549,7 @@ fn handwritten_title(title: &str) -> String {
 
 /// Quebra `s` em até `max_lines` linhas de `cols` letras; a última leva
 /// "..." quando não coube tudo.
-fn wrap_lines(s: &str, cols: usize, max_lines: usize) -> Vec<String> {
+pub(crate) fn wrap_lines(s: &str, cols: usize, max_lines: usize) -> Vec<String> {
     let mut lines: Vec<String> = Vec::new();
     let mut line = String::new();
     for word in s.split_whitespace() {
