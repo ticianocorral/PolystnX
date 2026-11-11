@@ -84,11 +84,18 @@ pub(super) fn draw_panel(
                 draw_button(canvas, font, settings, "Configurações", true),
             ),
         ];
+        // O manual do console: logo acima do "Configurações"; o Dev e o
+        // aviso de core sobem junto.
+        let manual = Rect::new(x, settings.y() - 8 - btn_h, inner_w, btn_h as u32);
+        buttons.push((
+            PanelButton::ConsoleManual,
+            draw_button(canvas, font, manual, "Manual do console", true),
+        ));
         // O botão do modo dev (plan revision: "habilitar botão em cima da
         // configuração") — só existe com o devmode ligado, e o devmode só
         // entra pelo código Konami nesta tela. Entra na pilha entre o
-        // "Configurações" e o aviso de core, que sobe junto.
-        let mut btn_top = settings.y();
+        // manual do console e o aviso de core, que sobe junto.
+        let mut btn_top = manual.y();
         if dev_mode {
             let dev = Rect::new(x, btn_top - 8 - btn_h, inner_w, btn_h as u32);
             btn_top = dev.y();

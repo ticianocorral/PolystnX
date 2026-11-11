@@ -470,6 +470,9 @@ pub enum PanelButton {
     /// which only the Konami code on the idle screen can turn on. The dev
     /// menu itself lives app-side.
     Dev,
+    /// The idle screen's "Manual do console" button — opens the console's
+    /// own PDF manual on the tube; the reader itself lives app-side.
+    ConsoleManual,
     /// The idle screen's "Baixar núcleo" button (plan revision: "ao iniciar
     /// o app pela primeira vez e/ou nao tiver o core na pasta, mostrar
     /// botão para baixar") — only drawn while the core is missing; the

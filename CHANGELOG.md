@@ -42,6 +42,16 @@ Auditoria de segurança alinhada com o SixteeN (1.3.2 → 1.8.1).
 - `crates/app/examples/tv_shot.rs`: fotos do queixo e do vidro pelo caminho
   vivo do `present`.
 
+### Manual do console
+- **Botão "Manual do console" na tela inicial** (acima de Configurações),
+  que abre no tubo o manual do PolystnX — 12 páginas: primeiros passos,
+  estante, ligar o console, TV, Cheater Fish, controles, configurações,
+  conquistas e cards, e problemas comuns. O mesmo leitor dos manuais da
+  estante (‹ ›, voltar); alcançável pelo controle.
+- O PDF é embutido no binário (`assets/console-manual-pt.pdf`) e gerado por
+  `cargo run -p polystnx-app --release --example gen_console_manual`, a
+  partir de capturas em `packaging/manual-console/shots/`.
+
 ### Arte padrão
 - **Jogo sem arte vira um CD-R de prata numa caixa de CD transparente**, com
   o nome e o ano escritos à caneta no disco (preta, azul ou vermelha, tremida

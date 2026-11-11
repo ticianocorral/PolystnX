@@ -1681,6 +1681,7 @@ pub fn run_game(
                             PanelButton::Insert
                             | PanelButton::Settings
                             | PanelButton::Dev
+                            | PanelButton::ConsoleManual
                             | PanelButton::CoreDownload
                             | PanelButton::PauseContinue
                             | PanelButton::PauseNotePrev

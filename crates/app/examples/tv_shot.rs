@@ -9,7 +9,10 @@ fn main() -> anyhow::Result<()> {
     let mut cab = plat
         .create_cabinet("PolystnX", 1280, 800, false)
         .map_err(|e| anyhow::anyhow!(e.to_string()))?;
-    cab.set_nameplate("PolystnX v1.3.12-beta\nPCSX Rearmed r26");
+    cab.set_nameplate(&format!(
+        "PolystnX v{}\nPCSX Rearmed r26",
+        env!("CARGO_PKG_VERSION")
+    ));
     // `off K` fotografa o desligar K quadros depois do clique (n=240);
     // `on K`, o ligar K quadros depois do clique (n=600). Sem argumentos, o
     // roteiro padrão (n=60/240/600/1200).
@@ -47,26 +50,18 @@ fn main() -> anyhow::Result<()> {
             )));
         }
         cab.frame_idle_2d((18, 18, 20), |d| {
-            d.text(40, 40, 2, (232, 232, 232), "tv de teste");
-            // Barras de cor para ver a imagem esmagar e subir.
+            // Um quadro neutro: o degradê de um céu de menu, sem texto.
             let (w, h) = d.size();
-            let bars = [
-                (220, 60, 60),
-                (230, 200, 60),
-                (70, 200, 90),
-                (60, 140, 230),
-                (180, 90, 220),
-            ];
-            for (i, c) in bars.iter().enumerate() {
-                d.fill(
-                    40 + i as i32 * 130,
-                    140,
-                    120,
-                    h.saturating_sub(300),
-                    (c.0, c.1, c.2, 255),
+            for row in 0..h as i32 {
+                let t = row as f32 / h as f32;
+                let c = (
+                    (36.0 + 40.0 * t) as u8,
+                    (52.0 + 50.0 * t) as u8,
+                    (110.0 + 60.0 * t) as u8,
+                    255,
                 );
+                d.fill(0, row, w, 1, c);
             }
-            let _ = w;
         });
     }
     Ok(())

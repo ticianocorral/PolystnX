@@ -207,7 +207,7 @@ fn cartridge_id(key: &str) -> u64 {
 /// Texture key de uma página do manual em PDF (plan revision: "colocar
 /// suporte para abrir manual pdf") — hash do sha1 + página com o bit alto
 /// da família badge (nunca colide com as chaves de arte do jogo).
-fn manual_page_id(sha1: &str, page: usize) -> u64 {
+pub(crate) fn manual_page_id(sha1: &str, page: usize) -> u64 {
     format!("{sha1}:{page}")
         .bytes()
         .fold(0x9E37_79B9_7F4A_7C15u64, |mut acc, b| {
@@ -244,17 +244,18 @@ fn find_local_manual(dir: &Path, rom_path: &str) -> Option<PathBuf> {
 }
 
 /// `(x, y, w, h)` em coordenadas de tela — o rect de um botão do leitor.
-type ViewBtn = (i32, i32, u32, u32);
+pub(crate) type ViewBtn = (i32, i32, u32, u32);
 
 /// O leitor de manual na TV (plan revision: "abrir na tv como o back cover
 /// com opção de ver as paginas") — página ampliada + `‹`/`›` + `voltar`.
 /// Devolve os rects dos três botões para o hit-test do frame seguinte.
-fn draw_manual_view(
+pub(crate) fn draw_manual_view(
     d: &mut Screen,
     sha1: &str,
     page: usize,
     pages: usize,
     page_ready: bool,
+    failed: bool,
 ) -> (ViewBtn, ViewBtn, ViewBtn) {
     let (w, h) = d.size();
     let (w, h) = (w as i32, h as i32);
@@ -288,6 +289,8 @@ fn draw_manual_view(
         d.image_fit(id, area.0, area.1, area.2, area.3);
     } else if pages > 0 {
         d.text(MARGIN, area.1 + 20, 1, DIM, "renderizando a página...");
+    } else if failed {
+        d.text(MARGIN, area.1 + 20, 1, DIM, "não deu para abrir o manual");
     } else {
         d.text(MARGIN, area.1 + 20, 1, DIM, "abrindo o manual...");
     }
@@ -2607,7 +2610,7 @@ pub fn run(
         };
         let render = |d: &mut Screen| {
             if let Some(m) = &manual {
-                manual_rects = draw_manual_view(d, &m.sha1, m.page, m.pages, page_ready);
+                manual_rects = draw_manual_view(d, &m.sha1, m.page, m.pages, page_ready, false);
                 return;
             }
             if ach_view {
