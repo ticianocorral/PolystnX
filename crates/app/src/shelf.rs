@@ -905,6 +905,23 @@ fn draw_expositor(d: &mut Screen, x: i32, y: i32, w: u32, h: u32) {
     );
 }
 
+/// O cursor de seleção (controle e mouse): contorno vermelho "fósforo" com um
+/// halo suave por fora — a capa selecionada fica inconfundível mesmo nas
+/// capas vazadas, sem mexer na geometria de clique.
+fn draw_cursor(d: &mut Screen, x: i32, y: i32, w: u32, h: u32) {
+    for (g, a) in [(6, 28u8), (4, 56), (2, 96)] {
+        d.outline(
+            x - g,
+            y - g,
+            w + 2 * g as u32,
+            h + 2 * g as u32,
+            2,
+            (FOSFORO.0, FOSFORO.1, FOSFORO.2, a),
+        );
+    }
+    d.outline(x, y, w, h, 2, (FOSFORO.0, FOSFORO.1, FOSFORO.2, 255));
+}
+
 /// O botão de play sob o mouse: um CD (disco prateado, furo central) com
 /// a seta de play, no canto inferior direito da capa sob o cursor — o
 /// convite para o clique que lança o jogo.
@@ -2653,6 +2670,9 @@ pub fn run(
                             (x + 4, y + 4, RECENT_TILE_W - 8, RECENT_TILE_H - 8),
                         );
                     }
+                    if in_fav && i == fav_idx {
+                        draw_cursor(d, x, y, RECENT_TILE_W, RECENT_TILE_H);
+                    }
                     if hover_fav == Some(i) {
                         draw_play_icon(
                             d,
@@ -2705,6 +2725,9 @@ pub fn run(
                             DIM,
                             &entry.title().to_uppercase(),
                         );
+                    }
+                    if in_recent && i == recent_idx {
+                        draw_cursor(d, x, y, RECENT_TILE_W, RECENT_TILE_H);
                     }
                     if hover_recent == Some(i) {
                         draw_play_icon(
@@ -2787,6 +2810,9 @@ pub fn run(
                     draw_box_dressing(d, x, y, grid.item_w as u32, grid.item_h as u32);
                 } else {
                     draw_expositor(d, x, y, grid.item_w as u32, grid.item_h as u32);
+                }
+                if !in_fav && !in_recent && i == sel {
+                    draw_cursor(d, x, y, grid.item_w as u32, grid.item_h as u32);
                 }
                 if hover_grid == Some(i) {
                     draw_play_icon(d, x + grid.item_w - 26, y + grid.item_h - 26);

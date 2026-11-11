@@ -7,6 +7,9 @@ inteiro compartilha uma versão (`[workspace.package]` em `Cargo.toml`).
 ## [Não lançado]
 
 ### Controle
+- **Cursor de seleção na estante**: a capa selecionada (grade, favoritos e
+  recentes) ganha contorno vermelho com halo; antes o controle navegava sem
+  mostrar onde estava.
 - **Navegação com controle como no SixteeN**: o analógico esquerdo anda como o
   D-pad nos menus; na estante, X/quadrado favorita o jogo sob o cursor,
   Select abre o histórico, Start abre as configurações e LT/RT trocam a aba
