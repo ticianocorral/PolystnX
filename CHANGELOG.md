@@ -7,6 +7,7 @@ inteiro compartilha uma versão (`[workspace.package]` em `Cargo.toml`).
 ## [Não lançado]
 
 ### Estante
+- Removido o rótulo "todos os jogos" acima da grade da estante.
 - **Temas de móvel da estante, portados do SixteeN**: além do visual padrão
   do PlayStation, a estante pode ser uma estante de madeira, o expositor de
   metal da locadora, um rack de som preto, o quarto anos 90 (Memphis) ou um

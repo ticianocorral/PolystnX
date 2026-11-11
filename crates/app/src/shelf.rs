@@ -54,7 +54,6 @@ const RECENT_LABEL_H: i32 = 24;
 /// titulo (Todos os jogos)") — mirrors the "jogados recentemente" label
 /// above the recent strip, so both sections read the same way.
 const ALL_GAMES_LABEL_H: i32 = 24;
-const ALL_GAMES_TITLE: &str = "todos os jogos";
 
 /// A "favoritos" strip above the recent one (plan revision: "adicionar
 /// marcador de favorito nos jogos; mostrar em uma categoria acima dos
@@ -2682,8 +2681,6 @@ pub fn run(
                     strip_vis,
                 );
             }
-
-            d.text(MARGIN, all_games_label_y, 1, DIM, ALL_GAMES_TITLE);
 
             // A madeira sob cada fileira visível — as caixas pousam
             // nela (a prateleira mora no vão de GAP, sem mexer nos
