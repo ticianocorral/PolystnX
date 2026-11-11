@@ -10,6 +10,8 @@ inteiro compartilha uma versão (`[workspace.package]` em `Cargo.toml`).
 - O Cheater Fish agora acha os cheats de jogos cujo nome no disco não tem o
   número da sequência que o banco usa (ex.: "Crash Bandicoot - Warped" no
   banco é "Crash Bandicoot 3 - Warped").
+- Banco de cheats atualizado com o libretro-database inteiro do PlayStation
+  (de 1844 para 2642 jogos, incluindo "Crash Bandicoot - Warped (USA)").
 
 ### Console
 - **Tampa de acrílico de verdade**: o vidro sobre o disco ganhou reflexos em
