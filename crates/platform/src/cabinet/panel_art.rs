@@ -156,6 +156,9 @@ pub(super) fn fill_rect_rgba(canvas: &mut WindowCanvas, color: (u8, u8, u8, u8),
     canvas.set_blend_mode(prev);
 }
 
+/// O tamanho das letras gravadas nos botões (traço único, sem negrito).
+const LABEL_SCALE: f32 = 1.2;
+
 /// Um botão redondo de plástico, como os do PS1: aro escuro, corpo convexo
 /// com a borda de baixo em sombra (o corpo "sai" da carcaça) e o brilho da
 /// luz no alto. `pressed` afunda o botão: corpo escurecido e o brilho
@@ -510,13 +513,13 @@ pub(super) fn draw_slot_furniture(
         (reset_r * 2) as u32,
     );
     let label = "RESET";
-    let lw = label.chars().count() as i32 * GLYPH_W as i32;
-    draw_text_bold(
+    let lw = (label.chars().count() as f32 * GLYPH_W as f32 * (LABEL_SCALE * 0.85)) as i32;
+    draw_text_absolute(
         canvas,
         font,
         col_l - lw / 2,
-        reset_cy - GLYPH_H as i32 / 2,
-        TextStyle::new(1.0, (36, 38, 38)),
+        reset_cy - (GLYPH_H as f32 * (LABEL_SCALE * 0.85) / 2.0) as i32,
+        TextStyle::new(LABEL_SCALE * 0.85, (18, 20, 20)),
         label,
         usize::MAX,
     );
@@ -535,22 +538,13 @@ pub(super) fn draw_slot_furniture(
         ),
     );
     let label = "POWER";
-    let lw = label.chars().count() as i32 * GLYPH_W as i32;
-    draw_text_bold(
-        canvas,
-        font,
-        col_l - lw / 2 + 1,
-        power_cy - GLYPH_H as i32 / 2 - 2 + 1 + led_on as i32,
-        TextStyle::new(1.0, (24, 28, 28)),
-        label,
-        usize::MAX,
-    );
-    draw_text_bold(
+    let lw = (label.chars().count() as f32 * GLYPH_W as f32 * LABEL_SCALE) as i32;
+    draw_text_absolute(
         canvas,
         font,
         col_l - lw / 2,
-        power_cy - GLYPH_H as i32 / 2 - 2 + led_on as i32,
-        TextStyle::new(1.0, PSX_BTN_TEXT),
+        power_cy - (GLYPH_H as f32 * LABEL_SCALE / 2.0) as i32 - 2 + led_on as i32,
+        TextStyle::new(LABEL_SCALE, PSX_BTN_TEXT),
         label,
         usize::MAX,
     );
@@ -563,22 +557,13 @@ pub(super) fn draw_slot_furniture(
 
     draw_round_plastic(canvas, col_r, power_cy, btn_r, false);
     let label = if lid_open { "CLOSE" } else { "OPEN" };
-    let lw = label.chars().count() as i32 * GLYPH_W as i32;
-    draw_text_bold(
-        canvas,
-        font,
-        col_r - lw / 2 + 1,
-        power_cy - GLYPH_H as i32 / 2 - 2 + 1,
-        TextStyle::new(1.0, (24, 28, 28)),
-        label,
-        usize::MAX,
-    );
-    draw_text_bold(
+    let lw = (label.chars().count() as f32 * GLYPH_W as f32 * LABEL_SCALE) as i32;
+    draw_text_absolute(
         canvas,
         font,
         col_r - lw / 2,
-        power_cy - GLYPH_H as i32 / 2 - 2,
-        TextStyle::new(1.0, PSX_BTN_OPEN),
+        power_cy - (GLYPH_H as f32 * LABEL_SCALE / 2.0) as i32 - 2,
+        TextStyle::new(LABEL_SCALE, PSX_BTN_OPEN),
         label,
         usize::MAX,
     );
