@@ -379,6 +379,19 @@ pub fn render_list(
         }
         layout.rows.push((idx, ix, y, iw, row_h));
     }
+    // Estado vazio: o jogo não tem cheats no banco — a tela abre mesmo assim
+    // e avisa, em vez de pular direto para o jogo sem explicação.
+    if defs.is_empty() {
+        let ey = list_top + 2 * (row_h + gap) + 12;
+        g.text_center(w / 2, ey, Font::List, SILVER_HI, "Nenhum cheat disponível");
+        g.text_center(
+            w / 2,
+            ey + 24,
+            Font::Small,
+            INFO_TEXT,
+            "para este jogo no banco de dados.",
+        );
+    }
     // A barra de rolagem.
     let sbx = px + pw - 18;
     g.rect(sbx, list_top, 6, list_h, (8, 10, 34));

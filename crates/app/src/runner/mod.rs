@@ -1764,7 +1764,7 @@ pub fn run_game(
                         // GameShark) vem ANTES de o jogo começar — é o único
                         // lugar onde se escolhe cheats.
                         {
-                            if cfg.cheater_fish && !cheat_defs.is_empty() && !ra_hardcore_active {
+                            if cfg.cheater_fish && !ra_hardcore_active {
                                 match crate::cheater_fish::run(
                                     plat,
                                     cab,
