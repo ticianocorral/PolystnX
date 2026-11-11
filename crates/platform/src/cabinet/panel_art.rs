@@ -254,7 +254,7 @@ pub(super) fn draw_slot_furniture(
     let box_w = (block.width() as f32 * 0.46).round() as i32;
     // As caixas descem 5 px (mais respiro do disco); o vão do disco e dos
     // botões continua medido pela posição antiga.
-    let box_drop = 5;
+    let box_drop = 10;
     let grid_top = block.bottom() - (box_h + 4) + box_drop;
     let analog_rect;
     // As duas caixas centradas no bloco (margens iguais dos dois lados).
