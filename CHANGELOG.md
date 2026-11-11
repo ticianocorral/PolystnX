@@ -8,7 +8,7 @@ inteiro compartilha uma versão (`[workspace.package]` em `Cargo.toml`).
 
 ### Console
 - **Tampa de acrílico de verdade**: o vidro sobre o disco ganhou reflexos em
-  faixas, aro e brilho de domo (antes só se via a logo do app); ao abrir a
+  faixas, aro e brilho de domo (a logo do app continua nele); ao abrir a
   tampa (OPEN), o acrílico aparece levantado na dobradiça, com o disco livre.
 
 ### Estante
