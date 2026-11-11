@@ -521,7 +521,8 @@ pub(super) fn draw_slot_furniture(
         usize::MAX,
     );
 
-    draw_round_plastic(canvas, col_l, power_cy, btn_r, false);
+    // Ligado, o POWER fica afundado; desligado, ele desafunda.
+    draw_round_plastic(canvas, col_l, power_cy, btn_r, led_on);
     let led_w = 4;
     fill(
         canvas,
@@ -539,7 +540,7 @@ pub(super) fn draw_slot_furniture(
         canvas,
         font,
         col_l - lw / 2 + 1,
-        power_cy - GLYPH_H as i32 / 2 - 2 + 1,
+        power_cy - GLYPH_H as i32 / 2 - 2 + 1 + led_on as i32,
         TextStyle::new(1.0, (24, 28, 28)),
         label,
         usize::MAX,
@@ -548,7 +549,7 @@ pub(super) fn draw_slot_furniture(
         canvas,
         font,
         col_l - lw / 2,
-        power_cy - GLYPH_H as i32 / 2 - 2,
+        power_cy - GLYPH_H as i32 / 2 - 2 + led_on as i32,
         TextStyle::new(1.0, PSX_BTN_TEXT),
         label,
         usize::MAX,
