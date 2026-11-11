@@ -14,6 +14,9 @@ inteiro compartilha uma versão (`[workspace.package]` em `Cargo.toml`).
   setas) e `shelf_theme` no `polystnx.cfg` (`ps1`, `wood`, `metal`, `hifi`,
   `memphis`, `arcade`; valor desconhecido mantém o tema atual). O padrão
   segue idêntico ao de antes.
+- **Botões "fósforo" em vermelho**: "histórico", "atualizar" e as setas das
+  faixas ficam sem caixa, só o rótulo com sublinhado, como no SixteeN (lá é
+  violeta; aqui, vermelho).
 
 ## [1.4.1-beta] - 2026-11-11
 

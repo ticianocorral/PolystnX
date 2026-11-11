@@ -93,6 +93,8 @@ const TEXT: (u8, u8, u8) = (232, 232, 232);
 const DIM: (u8, u8, u8) = (150, 150, 158);
 /// Text color on top of the `HILITE` selection bar (o histórico) — dark, for
 /// contrast against the bright fill.
+/// A cor dos botões "fósforo" da estante (o SixteeN usa violeta; aqui, vermelho).
+const FOSFORO: (u8, u8, u8) = (240, 70, 64);
 const HILITE_TEXT: (u8, u8, u8) = (24, 20, 12);
 /// How opaque the shelf sits over the resting TV static (plan §3.3) — era
 /// 0.92 (a neve sangrava de leve pelo fundo), mas com as capas 3D vazadas
@@ -348,16 +350,7 @@ pub fn strip_arrow_rects(scr_w: u32, y0: i32) -> StripArrows {
 fn draw_strip_arrows(d: &mut Screen, scr_w: u32, y0: i32, scroll: usize, len: usize, vis: usize) {
     let (left, right) = strip_arrow_rects(scr_w, y0);
     for (rect, glyph, more) in [(left, "<", scroll > 0), (right, ">", scroll + vis < len)] {
-        let (bx, by, bw, bh) = rect;
-        d.outline(bx, by, bw, bh, 1, (150, 150, 158, 255));
-        d.fill(bx + 1, by + 1, bw - 2, bh - 2, (34, 34, 40, 255));
-        d.text(
-            bx + (bw as i32 - 9) / 2,
-            by + (bh as i32 - 20) / 2,
-            1,
-            if more { TEXT } else { DIM },
-            glyph,
-        );
+        draw_fosforo_btn(d, rect, glyph, more);
     }
 }
 
@@ -3058,18 +3051,39 @@ fn draw_filter_box(
     d.text(fx + 8, fy + (fh as i32 - 16) / 2, 1, color, &shown);
 }
 
-/// The "Histórico" button — same plain box look as the filter box, just a
-/// static label (plan revision: "colocar um botão para histórico").
-fn draw_history_button(d: &mut Screen, (bx, by, bw, bh): (i32, i32, u32, u32)) {
-    d.outline(bx, by, bw, bh, 1, (150, 150, 158, 255));
-    d.fill(bx + 1, by + 1, bw - 2, bh - 2, (34, 34, 40, 255));
-    d.text(bx + 8, by + (bh as i32 - 16) / 2, 1, TEXT, "histórico");
+/// O botão "histórico" — linguagem fósforo (sem caixa, rótulo vermelho com
+/// sublinhado), como os botões dentro da TV do SixteeN.
+fn draw_history_button(d: &mut Screen, r: (i32, i32, u32, u32)) {
+    draw_fosforo_btn(d, r, "histórico", true);
 }
 
-fn draw_refresh_button(d: &mut Screen, (bx, by, bw, bh): (i32, i32, u32, u32)) {
-    d.outline(bx, by, bw, bh, 1, (150, 150, 158, 255));
-    d.fill(bx + 1, by + 1, bw - 2, bh - 2, (34, 34, 40, 255));
-    d.text(bx + 8, by + (bh as i32 - 16) / 2, 1, TEXT, "atualizar");
+fn draw_refresh_button(d: &mut Screen, r: (i32, i32, u32, u32)) {
+    draw_fosforo_btn(d, r, "atualizar", true);
+}
+
+/// Um botão da linguagem fósforo: texto centrado no rect em `FOSFORO`
+/// (vermelho) com sublinhado quando ativo, `DIM` sem sublinhado quando
+/// inativo — sem caixa. O rect de clique é o do caller; só o desenho muda.
+fn draw_fosforo_btn(
+    d: &mut Screen,
+    (bx, by, bw, bh): (i32, i32, u32, u32),
+    label: &str,
+    ativo: bool,
+) {
+    let cor = if ativo { FOSFORO } else { DIM };
+    let tw = label.chars().count() as i32 * 9;
+    let tx = bx + (bw as i32 - tw).max(0) / 2;
+    let ty = by + (bh as i32 - 20) / 2;
+    d.text(tx, ty, 1, cor, label);
+    if ativo {
+        d.fill(
+            tx,
+            ty + 21,
+            tw.max(9) as u32,
+            2,
+            (FOSFORO.0, FOSFORO.1, FOSFORO.2, 255),
+        );
+    }
 }
 
 /// A thin vertical scroll indicator at the grid's right edge (plan revision:
