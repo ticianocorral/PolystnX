@@ -1157,8 +1157,7 @@ fn build_glass_sheen(screen: Rect, warp: f32, key: (i32, i32, u32, u32, u32)) ->
         for i in 0..=N {
             let (u, v) = (i as f32 / N as f32, j as f32 / N as f32);
             let (cx, cy) = (u * 2.0 - 1.0, v * 2.0 - 1.0);
-            let dx = cx * (1.0 - warp * cy * cy);
-            let dy = cy * (1.0 - warp * cx * cx);
+            let (dx, dy) = crt_displace(cx, cy, warp);
             // Mancha: gaussiana larga centrada em (0,22; 0,20).
             let (mx, my) = ((u - 0.22) / 0.30, (v - 0.20) / 0.26);
             let blob = (-(mx * mx + my * my)).exp() * 0.10;

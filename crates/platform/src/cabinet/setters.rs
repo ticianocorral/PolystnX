@@ -268,6 +268,9 @@ impl Cabinet {
         // Recover the undisplaced ones: forward is cx' = cx*(1-W*cy^2),
         // cy' = cy*(1-W*cx^2) — divide out the partner axis' factor until it
         // stops moving (sub-pixel after three rounds; eight for free).
+        // (o ganho de `crt_displace` sai primeiro; as bordas presas ficam nelas.)
+        let gain = 1.0 / (1.0 - CRT_WARP);
+        let (dx, dy) = (dx / gain, dy / gain);
         let (mut cx, mut cy) = (dx, dy);
         for _ in 0..8 {
             cy = dy / (1.0 - CRT_WARP * cx * cx);
