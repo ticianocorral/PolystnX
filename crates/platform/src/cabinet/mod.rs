@@ -24,6 +24,7 @@ use crate::{audio::AudioOut, PlatformError};
 mod audio;
 mod chin;
 mod chrome;
+mod composite;
 mod geometry;
 mod panel;
 mod panel_art;
@@ -318,6 +319,7 @@ pub struct Cabinet {
     pad_focus: Option<(PadFocus, u8)>,
     /// Ajustes de imagem (neutro = quadro sem processamento).
     picture: Picture,
+    composite: bool,
     /// Rascunhos do filtro de imagem, reaproveitados entre quadros.
     picture_buf: Vec<u8>,
     picture_tmp: Vec<u8>,
@@ -1051,6 +1053,7 @@ impl Cabinet {
             tv_menu: None,
             pad_focus: None,
             picture: Picture::default(),
+            composite: false,
             picture_buf: Vec::new(),
             picture_tmp: Vec::new(),
             volume: 16,

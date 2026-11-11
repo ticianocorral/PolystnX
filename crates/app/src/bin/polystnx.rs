@@ -274,6 +274,7 @@ fn main() -> Result<()> {
         .map_err(|e| anyhow!(e.to_string()))?;
     // A TV lembra o volume e o ajuste de imagem da última sessão.
     cab.set_volume(cfg.tv_volume);
+    cab.set_composite(cfg.av_composto);
     cab.set_picture(polystnx_platform::Picture {
         brilho: cfg.tv_picture[0],
         contraste: cfg.tv_picture[1],

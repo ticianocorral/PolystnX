@@ -59,6 +59,13 @@ Auditoria de segurança alinhada com o SixteeN (1.3.2 → 1.8.1).
   para a grade e para a faixa de recentes; sai o modo "lista" que aparecia
   quando nenhum jogo tinha capa.
 
+### Vídeo composto (AV)
+- **Filtro de cabo AV (amarelo/branco/vermelho) na imagem do jogo**: a cor
+  borra e atrasa na horizontal, a luma suaviza um pouco e a saturação cai
+  levemente. Sem neve nem fantasma (isso é RF, e o PlayStation usa AV).
+  Ligado por padrão; Configurações > jogo > "Video composto (cabo AV)" e
+  `av_composto` no cfg.
+
 ### Cheater Fish
 - **O menu lateral do console não tem mais "Cheats"**: tudo é escolhido no
   Cheater Fish, que aparece a cada vez que o console é ligado. A busca e os

@@ -483,16 +483,14 @@ impl Cabinet {
         };
         // Ajustes de imagem do menu da TV: só com algo fora do neutro e no
         // formato que o filtro entende; no padrão o quadro vai direto.
-        let r = if !picture.is_neutral() && frame.format == PixelFormat::Xrgb8888 {
-            picture::apply(
-                frame.pixels,
-                frame.width as usize,
-                frame.height as usize,
-                pitch,
-                picture,
-                &mut buf,
-                &mut tmp,
-            );
+        let filtered =
+            frame.format == PixelFormat::Xrgb8888 && (!picture.is_neutral() || self.composite);
+        let r = if filtered {
+            let (w, h) = (frame.width as usize, frame.height as usize);
+            picture::apply(frame.pixels, w, h, pitch, picture, &mut buf, &mut tmp);
+            if self.composite {
+                composite::apply(&mut buf, w, h);
+            }
             src.tex.update(None, &buf, frame.width as usize * 4)
         } else {
             src.tex.update(None, frame.pixels, pitch)

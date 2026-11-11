@@ -75,8 +75,8 @@ const RA_ROW_SENHA: usize = 2;
 
 fn row_count(sec: usize, cfg: &Config) -> usize {
     match sec {
-        // Cheater Fish
-        SEC_JOGO => 1,
+        // Cheater Fish / vídeo composto
+        SEC_JOGO => 2,
         // tela cheia / som do jogo / volume da TV / brilho / contraste / cor / nitidez
         SEC_IMAGEM => 7,
         // renomear ROMs
@@ -482,7 +482,12 @@ fn activate_row(
 ) {
     match *sec {
         SEC_JOGO => {
-            cfg.cheater_fish = !cfg.cheater_fish;
+            if i == 0 {
+                cfg.cheater_fish = !cfg.cheater_fish;
+            } else {
+                cfg.av_composto = !cfg.av_composto;
+                cab.set_composite(cfg.av_composto);
+            }
             let _ = cfg.save();
         }
         SEC_IMAGEM => match i {
@@ -561,8 +566,13 @@ fn start_login_test(
 /// toggle. Rows without a horizontal feel ignore them.
 fn adjust_row(cfg: &mut Config, sec: usize, sel: usize, cab: &mut Cabinet, right: bool) {
     match (sec, sel) {
-        (SEC_JOGO, 0) => {
-            cfg.cheater_fish = !cfg.cheater_fish;
+        (SEC_JOGO, _) => {
+            if sel == 0 {
+                cfg.cheater_fish = !cfg.cheater_fish;
+            } else {
+                cfg.av_composto = !cfg.av_composto;
+                cab.set_composite(cfg.av_composto);
+            }
             let _ = cfg.save();
         }
         (SEC_IMAGEM, 0) => {
@@ -731,14 +741,14 @@ fn bind_pad_row(plat: &mut Platform, cfg: &mut Config, row: usize, btn: GamepadB
 fn draw_jogo(d: &mut Screen, cfg: &Config, sel: usize) {
     let x = MARGIN;
     d.text(x, MARGIN, 2, TEXT, "jogo");
-    let rows = [format!(
-        "Cheater Fish (cheats antes do jogo): {}",
-        if cfg.cheater_fish {
-            "ligado"
-        } else {
-            "desligado"
-        }
-    )];
+    let onoff = |b: bool| if b { "ligado" } else { "desligado" };
+    let rows = [
+        format!(
+            "Cheater Fish (cheats antes do jogo): {}",
+            onoff(cfg.cheater_fish)
+        ),
+        format!("Video composto (cabo AV): {}", onoff(cfg.av_composto)),
+    ];
     draw_rows(d, x, &rows, sel);
     draw_hint(
         d,

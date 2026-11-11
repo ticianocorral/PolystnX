@@ -642,6 +642,11 @@ impl Cabinet {
     }
 
     /// Restaura os ajustes de imagem do menu — o app chama ao abrir.
+    /// Liga/desliga o filtro de vídeo composto (cabo AV) no quadro do jogo.
+    pub fn set_composite(&mut self, on: bool) {
+        self.composite = on;
+    }
+
     pub fn set_picture(&mut self, p: Picture) {
         self.picture = p;
     }

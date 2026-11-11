@@ -29,6 +29,9 @@ pub struct Config {
     /// Cheater Fish: ao ligar o console com um disco que tem cheats, mostra
     /// primeiro a tela de cheats (estilo GameShark) antes do jogo.
     pub cheater_fish: bool,
+    /// Vídeo composto (cabo AV amarelo/branco/vermelho): o quadro passa por
+    /// um filtro de TV de tubo — cor borrada na horizontal e luma suave.
+    pub av_composto: bool,
     /// Volume da TV, 0..=16 (os botões VOL- / VOL+ do queixo).
     pub tv_volume: u8,
     /// Menu de imagem da TV: brilho, contraste, cor e nitidez (0..=100).
@@ -82,6 +85,8 @@ struct Raw {
     #[serde(default)]
     cheater_fish: Option<bool>,
     #[serde(default)]
+    av_composto: Option<bool>,
+    #[serde(default)]
     tv_volume: Option<u8>,
     #[serde(default)]
     tv_picture: Option<[u8; 4]>,
@@ -129,6 +134,7 @@ impl Config {
             check_updates_on_start: true,
             mute_game: false,
             cheater_fish: true,
+            av_composto: true,
             tv_volume: 16,
             tv_picture: [50; 4],
             card_slot1: None,
@@ -212,6 +218,9 @@ impl Config {
         }
         if let Some(c) = raw.cheater_fish {
             self.cheater_fish = c;
+        }
+        if let Some(c) = raw.av_composto {
+            self.av_composto = c;
         }
         if let Some(m) = raw.mute_game {
             self.mute_game = m;
@@ -309,6 +318,10 @@ impl Config {
         s.push_str(&format!(
             "# cheater_fish: ao ligar o console, a tela de cheats (estilo GameShark) antes do jogo.\ncheater_fish = {}\n\n",
             self.cheater_fish
+        ));
+        s.push_str(&format!(
+            "# av_composto: filtro de vídeo composto (cabo amarelo/branco/vermelho) na imagem do jogo.\nav_composto = {}\n\n",
+            self.av_composto
         ));
         s.push_str(&format!(
             "# TV: volume 0..16 e imagem [brilho, contraste, cor, nitidez] 0..100 (50 = neutro).\ntv_volume = {}\ntv_picture = {:?}\n\n",
@@ -416,6 +429,7 @@ mod tests {
             check_updates_on_start: true,
             mute_game: false,
             cheater_fish: true,
+            av_composto: true,
             tv_volume: 16,
             tv_picture: [50; 4],
             card_slot1: None,
