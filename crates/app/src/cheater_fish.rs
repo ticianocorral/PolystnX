@@ -383,13 +383,13 @@ pub fn render_list(
     // e avisa, em vez de pular direto para o jogo sem explicação.
     if defs.is_empty() {
         let ey = list_top + 2 * (row_h + gap) + 12;
-        g.text_center(w / 2, ey, Font::List, SILVER_HI, "Nenhum cheat disponível");
+        g.text_center(w / 2, ey, Font::List, SILVER_HI, "No Cheat Codes Available");
         g.text_center(
             w / 2,
             ey + 24,
             Font::Small,
             INFO_TEXT,
-            "para este jogo no banco de dados.",
+            "for this game in the database.",
         );
     }
     // A barra de rolagem.

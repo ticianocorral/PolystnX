@@ -7,8 +7,7 @@ inteiro compartilha uma versão (`[workspace.package]` em `Cargo.toml`).
 ## [Não lançado]
 
 ### Cheats
-- Jogo sem cheats no banco: o Cheater Fish abre mesmo assim, com o aviso
-  "Nenhum cheat disponível" (antes pulava direto para o jogo).
+- Jogo sem cheats no banco: o Cheater Fish abre mesmo assim,   "No Cheat Codes Available" (antes pulava direto para o jogo).
 - O Cheater Fish agora acha os cheats de jogos cujo nome no disco não tem o
   número da sequência que o banco usa (ex.: "Crash Bandicoot - Warped" no
   banco é "Crash Bandicoot 3 - Warped").
