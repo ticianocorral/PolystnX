@@ -86,7 +86,7 @@ pub fn load_cd_reader(cab: &mut Cabinet) {
 }
 
 /// A mesa do spindle: sempre a imagem embutida (é "hardware", como o leitor).
-pub(crate) fn load_cd_seat(cab: &mut Cabinet) {
+pub fn load_cd_seat(cab: &mut Cabinet) {
     match image::load_from_memory(DEFAULT_CD_SEAT) {
         Ok(img) => {
             let img = img.thumbnail(256, 256).to_rgba8();

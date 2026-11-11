@@ -6,6 +6,11 @@ inteiro compartilha uma versão (`[workspace.package]` em `Cargo.toml`).
 
 ## [Não lançado]
 
+### Console
+- **Tampa de acrílico de verdade**: o vidro sobre o disco ganhou reflexos em
+  faixas, aro e brilho de domo (antes só se via a logo do app); ao abrir a
+  tampa (OPEN), o acrílico aparece levantado na dobradiça, com o disco livre.
+
 ### Estante
 - Removido o rótulo "todos os jogos" acima da grade da estante.
 - **Temas de móvel da estante, portados do SixteeN**: além do visual padrão

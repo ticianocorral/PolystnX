@@ -987,6 +987,26 @@ pub(super) fn draw_panel_slot(
                 let _ = canvas.copy(&glass.tex, None, disc);
             }
         }
+        // Tampa ABERTA: o acrílico gira para cima na dobradiça (a borda de
+        // cima do vão) e aparece de perfil, achatado e espelhado, com o
+        // disco liberado embaixo — a mesma textura do vidro, sem o disco
+        // coberto.
+        if p >= 1.0 && !ejecting && lid_open {
+            if let Some(glass) = images.get(&LID_GLASS_IMG) {
+                let fw = (disc.width() as f32 * 0.9) as u32;
+                let fh = (disc.height() as f32 * 0.34) as u32;
+                let fx = disc.x() + (disc.width() as i32 - fw as i32) / 2;
+                let fy = disc.y() + 2 - fh as i32;
+                let flap = Rect::new(fx, fy, fw, fh);
+                let _ = canvas.copy_ex(&glass.tex, None, flap, 0.0, None, false, true);
+                // A dobradiça: um traço escuro na base da tampa levantada.
+                fill_rect_rgba(
+                    canvas,
+                    (40, 42, 48, 220),
+                    Rect::new(fx + fw as i32 / 6, disc.y() + 1, fw * 2 / 3, 3),
+                );
+            }
+        }
     }
     hits
 }
