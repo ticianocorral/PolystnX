@@ -1,5 +1,5 @@
 //! Foto do painel do console em jogo (botões POWER/RESET/OPEN):
-//! `cargo run -p polystnx-app --example console_buttons_shot -- /tmp/btn.bmp`.
+//! `cargo run -p polystnx-app --example console_buttons_shot -- /tmp/btn.bmp [card]`.
 use polystnx_platform::{FrameRef, PanelButton, PixelFormat, Platform};
 
 fn main() -> anyhow::Result<()> {
@@ -20,6 +20,9 @@ fn main() -> anyhow::Result<()> {
         ],
     );
     cab.set_powered(true);
+    if std::env::args().nth(2).as_deref() == Some("card") {
+        cab.set_card_labels(Some("Meu Save"));
+    }
     let pixels = vec![40u8; 320 * 240 * 4];
     let frame = FrameRef {
         width: 320,

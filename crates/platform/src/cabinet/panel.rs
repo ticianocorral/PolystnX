@@ -188,7 +188,6 @@ pub(super) fn draw_panel(
         let (t, ejecting) = panel.cartridge_motion.unwrap_or((1.0, false));
         let face_hits = draw_panel_slot(
             canvas,
-            font,
             images,
             Rect::new(x, cy, inner_w, cartridge_h),
             t,

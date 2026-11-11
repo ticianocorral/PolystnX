@@ -49,6 +49,13 @@ fn text_width(font: &FontRef, label: &str, px: f32) -> f32 {
     (w - track).max(0.0)
 }
 
+/// Onde o texto ancora em `x`.
+#[derive(Clone, Copy)]
+pub(super) enum Anchor {
+    Center,
+    Left,
+}
+
 /// Desenha `label` centrado em `(cx, cy)`, com `px` de altura de fonte.
 pub(super) fn draw_label(
     canvas: &mut WindowCanvas,
@@ -57,6 +64,29 @@ pub(super) fn draw_label(
     cy: i32,
     px: f32,
     color: (u8, u8, u8),
+) {
+    draw_text_vec(
+        canvas,
+        label,
+        (cx, cy),
+        Anchor::Center,
+        px,
+        color,
+        (i32::MIN, i32::MAX),
+    );
+}
+
+/// O texto vetorial geral das peças do console: `anchor` diz se `x` é o
+/// centro ou a esquerda; `band` é o intervalo de y visível (o card que
+/// desliza no slot corta o que está fora dele — sem clip do renderizador).
+pub(super) fn draw_text_vec(
+    canvas: &mut WindowCanvas,
+    label: &str,
+    (x, cy): (i32, i32),
+    anchor: Anchor,
+    px: f32,
+    color: (u8, u8, u8),
+    (ymin, ymax): (i32, i32),
 ) {
     let key: Key = (
         label.to_string(),
@@ -68,14 +98,25 @@ pub(super) fn draw_label(
             let Some(built) = build(canvas, label, px, color) else {
                 return;
             };
-            if cache.len() > 32 {
+            if cache.len() > 64 {
                 cache.clear();
             }
             cache.insert(key.clone(), built);
         }
         if let Some((tex, w, h)) = cache.get(&key) {
-            let dst = Rect::new(cx - *w as i32 / 2, cy - *h as i32 / 2, *w, *h);
-            let _ = canvas.copy(tex, None, dst);
+            let left = match anchor {
+                Anchor::Center => x - *w as i32 / 2,
+                Anchor::Left => x,
+            };
+            let top = cy - *h as i32 / 2;
+            // Só as linhas dentro da banda visível.
+            let y0 = top.max(ymin);
+            let y1 = (top + *h as i32).min(ymax);
+            if y1 > y0 {
+                let src = Rect::new(0, y0 - top, *w, (y1 - y0) as u32);
+                let dst = Rect::new(left, y0, *w, (y1 - y0) as u32);
+                let _ = canvas.copy(tex, src, dst);
+            }
         }
     });
 }

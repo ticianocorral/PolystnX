@@ -221,7 +221,6 @@ pub(super) struct FaceHits {
 #[allow(clippy::too_many_arguments)]
 pub(super) fn draw_slot_furniture(
     canvas: &mut WindowCanvas,
-    font: &mut Texture,
     images: &HashMap<u64, ImgTex>,
     block: Rect,
     led_on: bool,
@@ -290,18 +289,14 @@ pub(super) fn draw_slot_furniture(
     // "melhore a copy que ficou cortada ali no topo do slot").
     {
         let copy = "MEMORY CARD";
-        let full_w = copy.chars().count() as i32 * GLYPH_W as i32;
-        let scale = ((mc1.width() as i32 - 8) as f32 / full_w as f32).clamp(0.55, 1.0);
-        let dw = (GLYPH_W as f32 * scale).round() as i32;
-        let tw = copy.chars().count() as i32 * dw;
-        draw_text_bold(
+        let px = label::fit_px(copy, 13.0, mc1.width() as f32 - 14.0);
+        label::draw_label(
             canvas,
-            font,
-            mc1.x() + (mc1.width() as i32 - tw) / 2,
-            mc1.y() + 3,
-            TextStyle::new(scale, (26, 26, 24)),
             copy,
-            usize::MAX,
+            mc1.x() + mc1.width() as i32 / 2,
+            mc1.y() + 11,
+            px,
+            (26, 26, 24),
         );
     }
     // O slot: a BOCA por onde o card entra — baixa (18 px), funda (a sombra
@@ -362,19 +357,14 @@ pub(super) fn draw_slot_furniture(
             Rect::new(btn.x(), btn.bottom(), btn.width(), 1),
         );
         let copy = "Inserir card";
-        let full_w = copy.chars().count() as i32 * GLYPH_W as i32;
-        let scale = ((btn.width() as i32 - 12) as f32 / full_w as f32).clamp(0.6, 1.0);
-        let dw = (GLYPH_W as f32 * scale).round() as i32;
-        let dh = (GLYPH_H as f32 * scale).round() as i32;
-        let tw = copy.chars().count() as i32 * dw;
-        draw_text_bold(
+        let px = label::fit_px(copy, 15.0, btn.width() as f32 - 12.0);
+        label::draw_label(
             canvas,
-            font,
-            btn.x() + (btn.width() as i32 - tw) / 2,
-            btn.y() + (btn.height() as i32 - dh) / 2,
-            TextStyle::new(scale, PANEL_TEXT),
             copy,
-            usize::MAX,
+            btn.x() + btn.width() as i32 / 2,
+            btn.y() + btn.height() as i32 / 2,
+            px,
+            PANEL_TEXT,
         );
     }
     // ---------- BOX: a entrada de controle 1 (à ESQUERDA) ----------
@@ -423,35 +413,29 @@ pub(super) fn draw_slot_furniture(
         } else {
             ("CONTROLE 1 CONECTADO", None)
         };
-        let l1w = l1.chars().count() as i32 * GLYPH_W as i32;
-        let scale = ((hole.width() as i32 - 12) as f32 / l1w as f32).clamp(0.75, 1.0);
-        let sh = (GLYPH_H as f32 * scale).round() as i32;
+        let sh = (GLYPH_H as f32 * 0.9).round() as i32;
+        let px = label::fit_px(l1, sh as f32 * 0.82, hole.width() as f32 - 14.0);
         let l1y = hole.y() + 3;
-        draw_text_bold(
+        let green = (120, 220, 140);
+        let at = label::Anchor::Left;
+        let band = (i32::MIN, i32::MAX);
+        label::draw_text_vec(
             canvas,
-            font,
-            hole.x() + 6,
-            l1y,
-            TextStyle::new(scale, (120, 220, 140)),
             l1,
-            usize::MAX,
+            (hole.x() + 6, l1y + sh / 2),
+            at,
+            px,
+            green,
+            band,
         );
         let status_bottom = if let Some(l2) = l2 {
-            draw_text_bold(
-                canvas,
-                font,
-                hole.x() + 6,
-                l1y + sh,
-                TextStyle::new(scale, (120, 220, 140)),
-                l2,
-                usize::MAX,
-            );
+            let at2 = (hole.x() + 6, l1y + sh + sh / 2);
+            label::draw_text_vec(canvas, l2, at2, at, px, green, band);
             l1y + sh * 2
         } else {
             l1y + sh
         };
         let analog_on = analog;
-        let copy_h = (GLYPH_H as f32 * 0.85).round() as i32;
         let mut tag = |x: i32, y: i32, w: i32, h: i32, copy: &str, on: bool| {
             fill(canvas, PSX_SHELL_EDGE, Rect::new(x, y, w as u32, h as u32));
             fill(
@@ -459,16 +443,8 @@ pub(super) fn draw_slot_furniture(
                 PSX_SHELL,
                 Rect::new(x + 1, y + 1, w as u32 - 2, h as u32 - 2),
             );
-            let copy_w = copy.chars().count() as i32 * (GLYPH_W as f32 * 0.85).round() as i32;
-            draw_text_bold(
-                canvas,
-                font,
-                x + (w - copy_w - 12) / 2,
-                y + (h - copy_h) / 2,
-                TextStyle::new(0.85, (40, 38, 35)),
-                copy,
-                usize::MAX,
-            );
+            let px = label::fit_px(copy, h as f32 * 0.72, (w - 28) as f32);
+            label::draw_label(canvas, copy, x + (w - 12) / 2, y + h / 2, px, (40, 38, 35));
             fill_circle(
                 canvas,
                 if on { (110, 220, 130) } else { (235, 50, 50) },
@@ -665,7 +641,7 @@ pub(super) fn draw_slot_furniture(
             label_h as u32,
         ));
 
-        let mut draw_card = |canvas: &mut WindowCanvas| {
+        let draw_card = |canvas: &mut WindowCanvas| {
             for row in 0..total_h {
                 let ry = card_y + row;
                 if ry < lip_y || ry >= bottom_lim {
@@ -731,17 +707,15 @@ pub(super) fn draw_slot_furniture(
             // carcaça com o card encaixado (a boca corta na linha 76 do
             // corpo; a copy termina na 75) — só aparece na animação.
             let mc_text = "MEMORY CARD";
-            let mc_w = mc_text.chars().count() as i32 * (GLYPH_W as f32 * 0.9).round() as i32;
-            draw_text_bold_band(
+            let mc_px = label::fit_px(mc_text, 13.0, card_w as f32 - 12.0);
+            label::draw_text_vec(
                 canvas,
-                font,
-                card_x + (card_w - mc_w) / 2,
-                card_y + 62,
-                TextStyle::new(0.9, (40, 38, 35)),
                 mc_text,
-                usize::MAX,
-                lip_y,
-                bottom_lim,
+                (card_x + card_w / 2, card_y + 62 + 9),
+                label::Anchor::Center,
+                mc_px,
+                (40, 38, 35),
+                (lip_y, bottom_lim),
             );
             // a faixa que separa o corpo da label
             let band_y = card_y + body_h - 2;
@@ -754,10 +728,6 @@ pub(super) fn draw_slot_furniture(
             }
             // O ADESIVO caseiro com o nome (papel creme tortinho)
             let shown: Cow<str> = Cow::Owned(name.chars().take(16).collect());
-            let text_w = shown.chars().count() as i32 * GLYPH_W as i32;
-            let name_scale = ((card_w - 30) as f32 / text_w as f32).clamp(0.8, 1.0);
-            let tw = shown.chars().count() as i32 * (GLYPH_W as f32 * name_scale).round() as i32;
-            let th = (GLYPH_H as f32 * name_scale).round() as i32;
             let stick_w = (card_w - 16).max(1);
             let stick_h = (label_h - 26).max(1);
             let stick_x = card_x + 9;
@@ -805,44 +775,34 @@ pub(super) fn draw_slot_furniture(
                 (120, 112, 90, 120),
                 Rect::new(stick_x, stick_y + stick_h - 1, stick_w as u32, 1),
             );
-            draw_text_bold_band(
+            let name_px = label::fit_px(&shown, 15.0, stick_w as f32 - 12.0);
+            label::draw_text_vec(
                 canvas,
-                font,
-                stick_x + (stick_w - tw).max(0) / 2,
-                stick_y + (stick_h - th) / 2,
-                TextStyle::new(name_scale, (52, 46, 34)),
                 &shown,
-                usize::MAX,
-                lip_y,
-                bottom_lim,
+                (card_x + card_w / 2, stick_y + stick_h / 2),
+                label::Anchor::Center,
+                name_px,
+                (52, 46, 34),
+                (lip_y, bottom_lim),
             );
             // "Trocar/Ejetar" IMPRESSO no plástico do card (na faixa entre
             // o adesivo e a base) — em relevo escuro, sem caixa preta.
             let act = "Trocar/Ejetar";
-            let aw = act.chars().count() as i32 * (GLYPH_W as f32 * 0.75).round() as i32;
-            let act_y = card_y + total_h - 20;
-            draw_text_absolute_band(
+            let act_px = label::fit_px(act, 11.0, card_w as f32 - 14.0);
+            let act_cy = card_y + total_h - 20 + 7;
+            let band = (lip_y, bottom_lim);
+            let ctr = label::Anchor::Center;
+            let cx = card_x + card_w / 2;
+            label::draw_text_vec(
                 canvas,
-                font,
-                card_x + (card_w - aw) / 2,
-                act_y + 1,
-                TextStyle::new(0.75, (222, 218, 208)),
                 act,
-                usize::MAX,
-                lip_y,
-                bottom_lim,
+                (cx, act_cy + 1),
+                ctr,
+                act_px,
+                (222, 218, 208),
+                band,
             );
-            draw_text_absolute_band(
-                canvas,
-                font,
-                card_x + (card_w - aw) / 2,
-                act_y,
-                TextStyle::new(0.75, (96, 92, 84)),
-                act,
-                usize::MAX,
-                lip_y,
-                bottom_lim,
-            );
+            label::draw_text_vec(canvas, act, (cx, act_cy), ctr, act_px, (96, 92, 84), band);
         };
 
         // O card desenha POR CIMA de tudo que já está na cena (o bloco é o
@@ -894,7 +854,6 @@ pub(super) fn draw_slot_furniture(
 #[allow(clippy::too_many_arguments)]
 pub(super) fn draw_panel_slot(
     canvas: &mut WindowCanvas,
-    font: &mut Texture,
     images: &HashMap<u64, ImgTex>,
     block: Rect,
     t: f32,
@@ -909,7 +868,6 @@ pub(super) fn draw_panel_slot(
 ) -> FaceHits {
     let (disc, hits) = draw_slot_furniture(
         canvas,
-        font,
         images,
         block,
         led_on,
