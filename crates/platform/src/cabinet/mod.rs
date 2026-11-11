@@ -124,9 +124,9 @@ const PSX_LED_ON: (u8, u8, u8) = (110, 224, 130);
 const PSX_LED_OFF: (u8, u8, u8) = (56, 58, 54);
 /// O rótulo "POWER" gravado dentro do botão — verde escuro, como na foto
 /// de referência.
-const PSX_BTN_TEXT: (u8, u8, u8) = (52, 128, 74);
+const PSX_BTN_TEXT: (u8, u8, u8) = (40, 170, 150);
 /// O rótulo "OPEN" do botão de eject — azul escuro, mesmo tratamento.
-const PSX_BTN_OPEN: (u8, u8, u8) = (52, 82, 148);
+const PSX_BTN_OPEN: (u8, u8, u8) = (72, 146, 214);
 
 /// The set's own nameplate: a small wordmark printed into the chin, left of
 /// the cartridge — a touch lighter than the cabinet plastic, like an embossed

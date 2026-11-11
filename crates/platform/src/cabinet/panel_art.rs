@@ -167,47 +167,29 @@ pub(super) fn draw_round_plastic(
     r: i32,
     pressed: bool,
 ) {
-    // A sombra que o botão joga na carcaça (mais curta apertado).
-    fill_circle_rgba(
-        canvas,
-        (0, 0, 0, if pressed { 40 } else { 70 }),
-        cx + 1,
-        cy + if pressed { 2 } else { 3 },
-        r,
-    );
-    // O aro: contorno escuro e o bisel — claro em cima, sombra embaixo.
-    fill_circle(canvas, PSX_SHELL_EDGE, cx, cy, r);
-    let lift = if pressed { 0 } else { 1 };
-    fill_circle(canvas, (112, 108, 100), cx, cy + 1, r - 1);
-    fill_circle(canvas, (214, 210, 200), cx, cy - lift, r - 1);
-    // O corpo do botão, um degradê vertical de plástico (mais claro no alto).
-    let body = r - 3;
+    // Tampa de plástico fosco cinza-esverdeado, quase plana (como as peças
+    // do PS1): sombra curta na carcaça, corpo com um degradê suave e um fio
+    // de luz na borda de cima-esquerda.
+    let drop = if pressed { 1 } else { 3 };
+    fill_circle_rgba(canvas, (0, 0, 0, 80), cx + 1, cy + drop, r);
+    fill_circle(canvas, (84, 86, 80), cx, cy, r);
+    if !pressed {
+        // O fio de luz na borda do alto-esquerda: o corpo, menor, deixa só
+        // um crescente dele de fora.
+        fill_circle(canvas, (168, 170, 158), cx - 1, cy - 1, r - 1);
+    }
+    let body = r - 2;
+    let k = if pressed { 0.9 } else { 1.0 };
     for dy in -body..=body {
         let t = (dy + body) as f32 / (2 * body).max(1) as f32;
-        let k = if pressed { 0.88 } else { 1.0 };
         let lerp = |a: f32, b: f32| ((a + (b - a) * t) * k) as u8;
         canvas.set_draw_color(sdl3::pixels::Color::RGB(
-            lerp(192.0, 160.0),
-            lerp(188.0, 156.0),
-            lerp(178.0, 146.0),
+            lerp(118.0, 100.0),
+            lerp(120.0, 102.0),
+            lerp(112.0, 94.0),
         ));
         let half = ((body * body - dy * dy) as f32).sqrt().round() as i32;
         let _ = canvas.fill_rect(Rect::new(cx - half, cy + dy, (half * 2).max(1) as u32, 1));
-    }
-    // A concavidade onde o dedo apoia: sombra no alto da cuba, luz embaixo.
-    let dish = (r as f32 * 0.72) as i32;
-    let sink = if pressed { 1 } else { 0 };
-    fill_circle_rgba(canvas, (60, 56, 48, 60), cx, cy + sink, dish);
-    fill_circle_rgba(canvas, (255, 255, 250, 46), cx, cy + sink + 2, dish - 2);
-    // O brilho da luz no alto-esquerda da borda do corpo.
-    if !pressed {
-        fill_circle_rgba(
-            canvas,
-            (255, 255, 255, 34),
-            cx - r / 4,
-            cy - r * 3 / 5,
-            (r as f32 * 0.38) as i32,
-        );
     }
 }
 
@@ -533,17 +515,8 @@ pub(super) fn draw_slot_furniture(
         canvas,
         font,
         col_l - lw / 2,
-        reset_cy - GLYPH_H as i32 / 2 + 1,
-        TextStyle::new(1.0, (222, 219, 210)),
-        label,
-        usize::MAX,
-    );
-    draw_text_bold(
-        canvas,
-        font,
-        col_l - lw / 2,
         reset_cy - GLYPH_H as i32 / 2,
-        TextStyle::new(1.0, (38, 38, 36)),
+        TextStyle::new(1.0, (36, 38, 38)),
         label,
         usize::MAX,
     );
@@ -566,15 +539,6 @@ pub(super) fn draw_slot_furniture(
         canvas,
         font,
         col_l - lw / 2,
-        power_cy - GLYPH_H as i32 / 2 - 1,
-        TextStyle::new(1.0, (222, 219, 210)),
-        label,
-        usize::MAX,
-    );
-    draw_text_bold(
-        canvas,
-        font,
-        col_l - lw / 2,
         power_cy - GLYPH_H as i32 / 2 - 2,
         TextStyle::new(1.0, PSX_BTN_TEXT),
         label,
@@ -590,15 +554,6 @@ pub(super) fn draw_slot_furniture(
     draw_round_plastic(canvas, col_r, power_cy, btn_r, false);
     let label = if lid_open { "CLOSE" } else { "OPEN" };
     let lw = label.chars().count() as i32 * GLYPH_W as i32;
-    draw_text_bold(
-        canvas,
-        font,
-        col_r - lw / 2,
-        power_cy - GLYPH_H as i32 / 2 - 1,
-        TextStyle::new(1.0, (222, 219, 210)),
-        label,
-        usize::MAX,
-    );
     draw_text_bold(
         canvas,
         font,
