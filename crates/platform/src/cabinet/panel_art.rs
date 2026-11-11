@@ -538,6 +538,15 @@ pub(super) fn draw_slot_furniture(
     draw_text_bold(
         canvas,
         font,
+        col_l - lw / 2 + 1,
+        power_cy - GLYPH_H as i32 / 2 - 2 + 1,
+        TextStyle::new(1.0, (24, 28, 28)),
+        label,
+        usize::MAX,
+    );
+    draw_text_bold(
+        canvas,
+        font,
         col_l - lw / 2,
         power_cy - GLYPH_H as i32 / 2 - 2,
         TextStyle::new(1.0, PSX_BTN_TEXT),
@@ -554,6 +563,15 @@ pub(super) fn draw_slot_furniture(
     draw_round_plastic(canvas, col_r, power_cy, btn_r, false);
     let label = if lid_open { "CLOSE" } else { "OPEN" };
     let lw = label.chars().count() as i32 * GLYPH_W as i32;
+    draw_text_bold(
+        canvas,
+        font,
+        col_r - lw / 2 + 1,
+        power_cy - GLYPH_H as i32 / 2 - 2 + 1,
+        TextStyle::new(1.0, (24, 28, 28)),
+        label,
+        usize::MAX,
+    );
     draw_text_bold(
         canvas,
         font,
