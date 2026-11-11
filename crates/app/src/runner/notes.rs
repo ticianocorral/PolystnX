@@ -34,13 +34,6 @@ pub(super) enum NoteEdit {
     /// Renomear um memory card (o alvo vive em `card_rename`) — commit
     /// renomeia o `.mcr` na biblioteca.
     CardRename,
-    /// Typing the Cheats modal's search filter (plan revision — the
-    /// libretro-database expansion made some games' lists long enough that
-    /// finding one by eye/scroll alone stopped being practical). Unlike
-    /// every other `NoteEdit`, committing this one writes nothing to
-    /// disk — it just updates `Cabinet`'s in-memory filter and returns to
-    /// the Cheats modal's row grid rather than closing it.
-    CheatSearch,
 }
 
 impl NoteEdit {
@@ -48,10 +41,7 @@ impl NoteEdit {
         match self {
             NoteEdit::None => 0,
             NoteEdit::Text => NOTE_CHAR_LIMIT,
-            NoteEdit::SlotName
-            | NoteEdit::PrintName(_)
-            | NoteEdit::CheatSearch
-            | NoteEdit::CardRename => SLOT_NAME_LIMIT,
+            NoteEdit::SlotName | NoteEdit::PrintName(_) | NoteEdit::CardRename => SLOT_NAME_LIMIT,
         }
     }
 
@@ -61,15 +51,13 @@ impl NoteEdit {
             NoteEdit::Text => "editando anotação (vazio apaga, clique fora cancela)",
             NoteEdit::SlotName => "renomeando o print (clique fora cancela)",
             NoteEdit::PrintName(_) => "nome do print (opcional)",
-            NoteEdit::CheatSearch => "buscar cheat (vazio mostra todos)",
             NoteEdit::CardRename => "renomear memory card (clique fora cancela)",
         }
     }
 }
 
-/// A save/load-state or print slot picker, or the cheats checklist (plan
-/// revision) — mutually exclusive with `paused` (the notebook has no
-/// slot-picking or cheats of its own any more) and gates gameplay stepping
+/// A save/load-state or print slot picker — mutually exclusive with `paused` (the notebook has no
+/// slot-picking of its own any more) and gates gameplay stepping
 /// the same way `paused` does, so the frozen frame behind the dialog doesn't
 /// keep moving while a choice is pending.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -80,11 +68,6 @@ pub(super) enum Modal {
     /// Picking which of the 15 note slots to save the just-grabbed print
     /// into — see `runner::print_capture`.
     PrintSlot,
-    /// The curated cheats checklist (plan revision — split out of the
-    /// notebook into its own menu). Unlike the other three, a pick
-    /// (`ModalPick`) toggles a row in place and leaves the modal open
-    /// instead of closing it.
-    Cheats,
     /// The achievements list (plan: `docs/plano-retroachievements.md`,
     /// fase 4) — read-only rows with the earned state; a pick just closes.
     Achievements,

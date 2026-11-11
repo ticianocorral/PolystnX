@@ -449,25 +449,9 @@ pub(super) fn draw_modal(
         return buttons;
     }
 
-    // Row-picking step. A search filter (plan revision — only Cheats sets
-    // `searchable`) narrows which of `modal.rows` take part below; each
-    // survivor keeps its *original* index (`ModalSlot(i)` has to, since
-    // that index is what the click handler uses to look the row back up
-    // in `cheat_defs`/`cheat_state`) — same "iterate everything, skip what
-    // doesn't apply this frame" shape the scroll clipping below already
-    // uses, just one more skip condition.
-    let query = modal.search_query.trim();
-    let visible: Vec<usize> = modal
-        .rows
-        .iter()
-        .enumerate()
-        .filter(|(_, row)| query.is_empty() || contains_ignore_ascii_case(&row.label, query))
-        .filter(|(_, row)| match modal.cheat_filter {
-            None => true,
-            Some(want_on) => row_checked(&row.label) == Some(want_on),
-        })
-        .map(|(i, _)| i)
-        .collect();
+    // Row-picking step: every row takes part, keeping its own index
+    // (`ModalSlot(i)`).
+    let visible: Vec<usize> = (0..modal.rows.len()).collect();
 
     let cols = if visible.len() > 8 { 2usize } else { 1usize };
     let rows_per_col = visible.len().div_ceil(cols).max(1);
@@ -500,15 +484,8 @@ pub(super) fn draw_modal(
     // (save/load's 10, print's 15). Only once a list (the Cheats modal, for
     // a database-heavy game) overflows even a generous card does scrolling
     // — and the two extra rows it costs — enter the picture at all.
-    // Two extra rows on a searchable modal: the search box, and the
-    // on/off state filter (plan revision) right below it.
-    let search_h = if modal.searchable {
-        ((btn_h + 8) * 2) as u32
-    } else {
-        0
-    };
     let max_card_h = out_h.saturating_sub(40);
-    let fixed_overhead = pad as u32 * 2 + GLYPH_H + 16 + search_h + 12 + btn_h as u32;
+    let fixed_overhead = pad as u32 * 2 + GLYPH_H + 16 + 12 + btn_h as u32;
     let budget_no_scroll = max_card_h.saturating_sub(fixed_overhead) as i32;
     let rows_that_fit = (budget_no_scroll / row_h).max(1) as usize;
     let scrollable = !visible.is_empty() && rows_per_col > rows_that_fit;
@@ -547,8 +524,7 @@ pub(super) fn draw_modal(
         &modal.title,
         usize::MAX,
     );
-    let filtering_active = modal.searchable && (!query.is_empty() || modal.cheat_filter.is_some());
-    if scrollable || filtering_active {
+    if scrollable {
         // Same "counter next to a scale-2 heading" placement the naming
         // step's char counter already uses, just against the title instead
         // of a draft's text — no extra row spent on it. Reflects the
@@ -577,57 +553,6 @@ pub(super) fn draw_modal(
         );
     }
     cy += GLYPH_H as i32 + 16;
-
-    if modal.searchable {
-        let label = if modal.search_query.is_empty() {
-            "Buscar...".to_string()
-        } else {
-            format!("Buscar: \"{}\"", modal.search_query)
-        };
-        let search_box = Rect::new(x, cy, inner_w, btn_h as u32);
-        buttons.push((
-            PanelButton::ModalSearchStart,
-            draw_button(canvas, font, search_box, &label, true),
-        ));
-        cy += btn_h + 8;
-
-        // On/off state filter (plan revision): a three-way segmented
-        // control, whichever matches `modal.cheat_filter` drawn `lit`
-        // (highlighted) — clicking either of the other two switches to it,
-        // clicking the active one is a harmless no-op (same "not guarded,
-        // the click just re-applies the same state" shape `Fixar`/`Fixado`
-        // already has for a print slot).
-        let seg_gap = 8i32;
-        let seg_w = ((inner_w as i32 - seg_gap * 2) / 3).max(1) as u32;
-        let all_btn = Rect::new(x, cy, seg_w, btn_h as u32);
-        let on_btn = Rect::new(x + (seg_w as i32 + seg_gap), cy, seg_w, btn_h as u32);
-        let off_btn = Rect::new(x + (seg_w as i32 + seg_gap) * 2, cy, seg_w, btn_h as u32);
-        buttons.push((
-            PanelButton::ModalFilterAll,
-            draw_button(canvas, font, all_btn, "Todos", modal.cheat_filter.is_none()),
-        ));
-        buttons.push((
-            PanelButton::ModalFilterOn,
-            draw_button(
-                canvas,
-                font,
-                on_btn,
-                "Ligados",
-                modal.cheat_filter == Some(true),
-            ),
-        ));
-        buttons.push((
-            PanelButton::ModalFilterOff,
-            draw_button(
-                canvas,
-                font,
-                off_btn,
-                "Desligados",
-                modal.cheat_filter == Some(false),
-            ),
-        ));
-        cy += btn_h + 8;
-    }
 
     if visible.is_empty() {
         // Reachable with a search and/or the on/off filter active and
@@ -702,31 +627,4 @@ pub(super) fn draw_modal(
     ));
 
     buttons
-}
-
-/// Case-insensitive ASCII substring search — used to filter the Cheats
-/// modal's rows by the player's typed query. Byte-level, no allocation
-/// (contrast `str::to_lowercase`, which would allocate a fresh copy of
-/// every row's label on every frame the modal is open): fine for this
-/// database's plain-ASCII descriptions, same as `RomId`'s own comparisons
-/// elsewhere in the app.
-pub(super) fn contains_ignore_ascii_case(haystack: &str, needle: &str) -> bool {
-    let (h, n) = (haystack.as_bytes(), needle.as_bytes());
-    n.is_empty() || h.len() >= n.len() && h.windows(n.len()).any(|w| w.eq_ignore_ascii_case(n))
-}
-
-/// Whether a Cheats modal row's label reads as checked on/off, from the
-/// `[x] `/`[ ] ` prefix `cheat_modal_rows` (the one and only place that
-/// builds these labels) always puts in front of the description —
-/// `None` for a row with neither prefix (every other modal's rows: "Slot
-/// N", never checkbox-shaped). Reused for the on/off state filter instead
-/// of threading a second parallel array through `set_modal` just for it.
-pub(super) fn row_checked(label: &str) -> Option<bool> {
-    if label.starts_with("[x] ") {
-        Some(true)
-    } else if label.starts_with("[ ] ") {
-        Some(false)
-    } else {
-        None
-    }
 }

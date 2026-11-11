@@ -150,25 +150,6 @@ pub enum UiEvent {
     MouseUp(i32, i32),
     /// Mouse movendo.
     MouseMove(i32, i32),
-    /// Click the Cheats modal's search box — only drawn (and only
-    /// clickable) on a modal that's marked searchable, which today is only
-    /// Cheats (plan revision: the libretro-database expansion made
-    /// scrolling through everything by hand impractical for some games'
-    /// 1000+-cheat lists). Polled via `Platform::poll_text_entry`, same
-    /// keyboard-typing exception as the notebook's own editors.
-    ModalSearchStart,
-    /// On a searchable modal (today only Cheats): switch its on/off state
-    /// filter to show every row, only the ones checked on, or only the
-    /// ones off (plan revision).
-    ModalFilterAll,
-    ModalFilterOn,
-    ModalFilterOff,
-    /// Open the Cheats modal — a checklist of curated codes for this
-    /// cartridge (plan revision: its own menu, split out of the notebook,
-    /// which was getting crowded and had no room for a "pausar pra editar"
-    /// hint to make sense of it). Toggling a row (`ModalPick`) flips it and
-    /// keeps the modal open, unlike the other three modals' one-shot pick.
-    OpenCheatsModal,
     OpenAchievementsModal,
     /// Pause book: step the right page (the photo album) to an earlier/
     /// later print slot.

@@ -556,7 +556,7 @@ fn main() -> anyhow::Result<()> {
     p.itens(&[
         "Cima/baixo rolam a lista; A (ou o clique) liga e desliga o cheat marcado - a caixinha fica verde.",
         "\"Start Game\" (ou B) começa o jogo com os cheats que ficaram ligados.",
-        "As escolhas ficam guardadas por jogo, e o menu de pausa continua permitindo mudar cheats durante a partida.",
+        "As escolhas ficam guardadas por jogo. Para mudar os cheats, desligue o console e ligue de novo: o Cheater Fish aparece outra vez.",
     ]);
     p.figura(&shot("peixe-lista.png"), "A lista de cheats do jogo.", 380);
     p.paragrafo(

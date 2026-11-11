@@ -35,15 +35,3 @@ pub(super) fn cheat_rows(
         .map(|(d, &on)| (d.desc.to_string(), on))
         .collect()
 }
-
-/// `cheat_rows`' pairs, formatted for the Cheats modal's row grid (plan
-/// revision — its own menu, not a page in the notebook): every row stays
-/// `enabled: true` (toggling is always available, unlike a save/load/print
-/// slot that can be dimmed), with an `[x]`/`[ ]` mark standing in for the
-/// on/off state a modal row otherwise has no way to show.
-pub(super) fn cheat_modal_rows(cheats: &[(String, bool)]) -> Vec<(String, bool)> {
-    cheats
-        .iter()
-        .map(|(desc, on)| (format!("{}{desc}", if *on { "[x] " } else { "[ ] " }), true))
-        .collect()
-}

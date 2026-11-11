@@ -446,10 +446,8 @@ fn reset_pressed(flash: &HashMap<PanelButton, Instant>) -> bool {
 /// `draw_rocker`). Salvar/Carregar/Printscreen no longer carry a slot
 /// number in their label (plan revision — confusing next to the old
 /// cyclers): clicking any of the three now opens a modal to pick one, so
-/// the label just names the action. Cheats (plan revision — split out of
-/// the notebook) is absent entirely when `has_cheats` is false — this
-/// cartridge has no curated codes, so a button that always opened an empty
-/// checklist would just be clutter. Conquistas (plan revision: "mostre o
+/// the label just names the action. Cheats are no longer here: they are
+/// chosen in the Cheater Fish, before the game. Conquistas (plan revision: "mostre o
 /// botão mas mostre desativado") is the opposite policy: present whenever
 /// the RA account is configured, `enabled: false` when the game has no set
 /// (the click still lands — the runner answers with an OSD). Games are
@@ -458,7 +456,6 @@ fn reset_pressed(flash: &HashMap<PanelButton, Instant>) -> bool {
 /// left to list here.
 fn command_rows(
     flash: &HashMap<PanelButton, Instant>,
-    has_cheats: bool,
     ra_on: bool,
     has_achievements: bool,
     all_slots_pinned: bool,
@@ -477,9 +474,6 @@ fn command_rows(
             "Conquistas".to_string(),
             has_achievements,
         ));
-    }
-    if has_cheats {
-        rows.push((PanelButton::Cheats, "Cheats".to_string(), true));
     }
     rows.push((
         PanelButton::PrintScreen,
@@ -993,7 +987,6 @@ pub fn run_game(
     let mut pending_reseed: Option<std::sync::mpsc::Receiver<bool>> = None;
     let commands = command_rows(
         &flash,
-        !cheat_defs.is_empty(),
         ra_on,
         ra_session.is_some(),
         all_slots_pinned(&notes_meta),
@@ -1124,42 +1117,9 @@ pub fn run_game(
                         NoteEdit::PrintName(1).heading(),
                     );
                 }
-                "cheats" => {
-                    cab.set_modal(
-                        "Cheats",
-                        &cheat_modal_rows(&cheat_rows(&cheat_defs, &cheat_state)),
-                    );
-                    cab.set_modal_searchable(true);
-                }
-                // Previews the search box already filtered, without a live
-                // GUI to type into it — the filter word is fixed (dev/
-                // testing only, not configurable from the CLI).
-                "cheats-search" => {
-                    cab.set_modal(
-                        "Cheats",
-                        &cheat_modal_rows(&cheat_rows(&cheat_defs, &cheat_state)),
-                    );
-                    cab.set_modal_searchable(true);
-                    cab.set_modal_search("infinit");
-                }
-                // Previews the on/off state filter, forcing the first
-                // cheat on first so "Ligados" has something to show
-                // (dev/testing only — no CLI way to pick which).
-                "cheats-filtered" => {
-                    let mut state = cheat_state.clone();
-                    if let Some(first) = state.first_mut() {
-                        *first = true;
-                    }
-                    cab.set_modal(
-                        "Cheats",
-                        &cheat_modal_rows(&cheat_rows(&cheat_defs, &state)),
-                    );
-                    cab.set_modal_searchable(true);
-                    cab.set_modal_filter(Some(true));
-                }
                 other => {
                     log::warn!(
-                        "--debug-shot-modal {other}: unknown, expected save/load/print/print-name/cheats/cheats-search/cheats-filtered"
+                        "--debug-shot-modal {other}: unknown, expected save/load/print/print-name"
                     )
                 }
             }
@@ -1266,7 +1226,6 @@ pub fn run_game(
     // while off). Also the running total this session contributes to the
     // game's all-time playtime (`total_playtime_secs`) once it ends.
     // O Cheater Fish já passou nesta sessão (só roda no primeiro ligar).
-    let mut fish_done = false;
     let session_start = Instant::now();
     let mut auto_power_done = false;
     let mut powered_elapsed = Duration::ZERO;
@@ -1430,10 +1389,7 @@ pub fn run_game(
         if note_edit != NoteEdit::None {
             // Naming a fresh print (plan revision) renders in the modal, not
             // the notebook — everything else about polling/typing is shared.
-            let in_modal = matches!(
-                note_edit,
-                NoteEdit::PrintName(_) | NoteEdit::CheatSearch | NoteEdit::CardRename
-            );
+            let in_modal = matches!(note_edit, NoteEdit::PrintName(_) | NoteEdit::CardRename);
             let te = plat.poll_text_entry();
             if te.quit {
                 break 'run GameExit::Quit;
@@ -1531,7 +1487,6 @@ pub fn run_game(
                             }
                         }
                     }
-                    NoteEdit::CheatSearch => cab.set_modal_search(note_draft.trim()),
                     NoteEdit::CardRename => {
                         if let Some(path) = card_rename.take() {
                             match crate::memcard::rename(&path, note_draft.trim()) {
@@ -1565,17 +1520,9 @@ pub fn run_game(
             if save || cancel {
                 if in_modal {
                     cab.set_modal_draft(None, 0, "");
-                    if matches!(note_edit, NoteEdit::CheatSearch) {
-                        // Searching narrows the same Cheats modal rather
-                        // than acting on a pick — stay in it, just back on
-                        // the (maybe newly filtered) row grid, unlike
-                        // every other in-modal edit here, which is always
-                        // a one-shot action that closes the dialog.
-                    } else {
-                        modal = Modal::None;
-                        print_capture = None;
-                        cab.clear_modal();
-                    }
+                    modal = Modal::None;
+                    print_capture = None;
+                    cab.clear_modal();
                 } else {
                     cab.set_pause_draft(None, 0, "");
                 }
@@ -1628,8 +1575,8 @@ pub fn run_game(
                         cab.minimize();
                         None
                     } else if modal != Modal::None {
-                        // Not reachable during the naming/searching step —
-                        // that's `NoteEdit::PrintName`/`CheatSearch`, polled
+                        // Not reachable during the naming step —
+                        // that's `NoteEdit::PrintName`, polled
                         // via `poll_text_entry` instead (above), so `Click`
                         // never comes through `plat.poll()` while it's open.
                         match cab.hit_modal_button(ox, oy) {
@@ -1637,10 +1584,6 @@ pub fn run_game(
                             Some(PanelButton::ModalCancel) => Some(UiEvent::ModalCancel),
                             Some(PanelButton::ModalScrollUp) => Some(UiEvent::ModalScrollUp),
                             Some(PanelButton::ModalScrollDown) => Some(UiEvent::ModalScrollDown),
-                            Some(PanelButton::ModalSearchStart) => Some(UiEvent::ModalSearchStart),
-                            Some(PanelButton::ModalFilterAll) => Some(UiEvent::ModalFilterAll),
-                            Some(PanelButton::ModalFilterOn) => Some(UiEvent::ModalFilterOn),
-                            Some(PanelButton::ModalFilterOff) => Some(UiEvent::ModalFilterOff),
                             _ => None,
                         }
                     } else if paused {
@@ -1667,7 +1610,6 @@ pub fn run_game(
                             PanelButton::Eject => Some(UiEvent::Eject),
                             PanelButton::Reset => Some(UiEvent::Reset),
                             PanelButton::Notebook => Some(UiEvent::TogglePause),
-                            PanelButton::Cheats => Some(UiEvent::OpenCheatsModal),
                             PanelButton::Achievements => Some(UiEvent::OpenAchievementsModal),
                             PanelButton::Cards1 => Some(UiEvent::OpenCards),
                             PanelButton::Analog1 => Some(UiEvent::AnalogToggle(0)),
@@ -1701,11 +1643,7 @@ pub fn run_game(
                             | PanelButton::ModalConfirm
                             | PanelButton::ModalCancel
                             | PanelButton::ModalScrollUp
-                            | PanelButton::ModalScrollDown
-                            | PanelButton::ModalSearchStart
-                            | PanelButton::ModalFilterAll
-                            | PanelButton::ModalFilterOn
-                            | PanelButton::ModalFilterOff => None,
+                            | PanelButton::ModalScrollDown => None,
                         })
                     }
                 }
@@ -1802,12 +1740,10 @@ pub fn run_game(
                         // vez de um "nada acontece" depois do clique.
                         // A luz do Power acende NO CLIQUE — antes do ritual.
                         cab.set_powered(true);
-                        // Cheater Fish: no primeiro ligar do jogo, a tela de
-                        // cheats (estilo GameShark) vem ANTES de o jogo
-                        // começar. O resto da sessão (desligar e ligar de
-                        // novo) só retoma — os cheats já estão escolhidos.
-                        if !fish_done {
-                            fish_done = true;
+                        // Cheater Fish: a cada ligar, a tela de cheats (estilo
+                        // GameShark) vem ANTES de o jogo começar — é o único
+                        // lugar onde se escolhe cheats.
+                        {
                             if cfg.cheater_fish && !cheat_defs.is_empty() && !ra_hardcore_active {
                                 match crate::cheater_fish::run(
                                     plat,
@@ -1823,7 +1759,6 @@ pub fn run_game(
                                     // começar o jogo (e o acessório volta no
                                     // próximo ligar).
                                     crate::cheater_fish::FishOutcome::PowerOff => {
-                                        fish_done = false;
                                         cab.set_powered(false);
                                         continue;
                                     }
@@ -2080,22 +2015,6 @@ pub fn run_game(
                     modal = Modal::Achievements;
                     cab.set_modal(&format!("Conquistas {}/{}", earned.len(), total), &rows);
                 }
-                UiEvent::OpenCheatsModal if powered && !cheat_defs.is_empty() => {
-                    if ra_hardcore_active {
-                        cab.push_osd(
-                            &["MODO HARDCORE", "cheats bloqueados"],
-                            None,
-                            Duration::from_secs(3),
-                        );
-                        continue;
-                    }
-                    modal = Modal::Cheats;
-                    cab.set_modal(
-                        "Cheats",
-                        &cheat_modal_rows(&cheat_rows(&cheat_defs, &cheat_state)),
-                    );
-                    cab.set_modal_searchable(true);
-                }
                 UiEvent::OpenCards => {
                     // Troca quente (plan revision): funciona ligado — o SRAM
                     // do card atual é descarregado no arquivo dele antes do
@@ -2118,8 +2037,7 @@ pub fn run_game(
                 }
                 UiEvent::ModalPick(i) => match modal {
                     // Save/load/print never have more than 15 rows — safe
-                    // to narrow back to `u8` (`ModalPick` is `u16` only
-                    // because the Cheats modal, below, can run past 255).
+                    // to narrow back to `u8`.
                     Modal::SaveSlot => {
                         let path = state_file(&spec.save_dir, &title, i as u8);
                         drain_core!();
@@ -2227,37 +2145,6 @@ pub fn run_game(
                     Modal::Achievements => {
                         modal = Modal::None;
                         cab.clear_modal();
-                    }
-                    Modal::Cheats => {
-                        let idx = i as usize;
-                        if idx < cheat_defs.len() {
-                            cheat_state[idx] = !cheat_state[idx];
-                            // A single `cheat_set(idx, false, ...)` isn't
-                            // enough to actually undo a sustained memory
-                            // patch on every core (a real report: the row
-                            // showed off, the effect stayed on) — reset and
-                            // reapply every cheat's current state, the same
-                            // belt-and-suspenders sequence the boot-time
-                            // load above already uses.
-                            drain_core!();
-                            let _ = core_tx.send(CoreCmd::CheatReset);
-                            for (j, (def, &on)) in cheat_defs.iter().zip(&cheat_state).enumerate() {
-                                let _ = core_tx.send(CoreCmd::CheatSet {
-                                    i: j as u32,
-                                    on,
-                                    code: def.code.to_string(),
-                                });
-                            }
-                            save_cheat_state(&cheat_path, &cheat_state);
-                            let rows = cheat_rows(&cheat_defs, &cheat_state);
-                            cab.set_cheats(&rows);
-                            cab.set_modal("Cheats", &cheat_modal_rows(&rows));
-                            log::info!(
-                                "cheat {:?}: {}",
-                                cheat_defs[idx].desc,
-                                if cheat_state[idx] { "on" } else { "off" }
-                            );
-                        }
                     }
                     Modal::Cards => {
                         let dir = crate::dirs::memcards_dir();
@@ -2570,23 +2457,6 @@ pub fn run_game(
                 }
                 UiEvent::ModalScrollUp if modal != Modal::None => cab.scroll_modal(-1),
                 UiEvent::ModalScrollDown if modal != Modal::None => cab.scroll_modal(1),
-                UiEvent::ModalSearchStart if modal == Modal::Cheats => {
-                    note_edit = NoteEdit::CheatSearch;
-                    note_draft = cab.modal_search_query().to_string();
-                    cab.set_modal_draft(
-                        Some(&note_draft),
-                        NoteEdit::CheatSearch.limit(),
-                        NoteEdit::CheatSearch.heading(),
-                    );
-                    plat.start_text_input(cab);
-                }
-                UiEvent::ModalFilterAll if modal == Modal::Cheats => cab.set_modal_filter(None),
-                UiEvent::ModalFilterOn if modal == Modal::Cheats => {
-                    cab.set_modal_filter(Some(true))
-                }
-                UiEvent::ModalFilterOff if modal == Modal::Cheats => {
-                    cab.set_modal_filter(Some(false))
-                }
                 // The rest only make sense with the console on (or, for the
                 // pause-book trio, only while actually paused); ignored
                 // otherwise. `Click` never reaches this match — it's already
@@ -2596,14 +2466,9 @@ pub fn run_game(
                 | UiEvent::OpenSaveModal
                 | UiEvent::OpenLoadModal
                 | UiEvent::OpenAchievementsModal
-                | UiEvent::OpenCheatsModal
                 | UiEvent::OpenPrintModal
                 | UiEvent::ModalScrollUp
                 | UiEvent::ModalScrollDown
-                | UiEvent::ModalSearchStart
-                | UiEvent::ModalFilterAll
-                | UiEvent::ModalFilterOn
-                | UiEvent::ModalFilterOff
                 | UiEvent::NotePrev
                 | UiEvent::NoteNext
                 | UiEvent::NoteWriteStart
@@ -2627,7 +2492,6 @@ pub fn run_game(
         if Some(sig) != prev_sig {
             cab.set_commands(&command_rows(
                 &flash,
-                !cheat_defs.is_empty(),
                 ra_on,
                 ra_session.is_some(),
                 all_pinned,

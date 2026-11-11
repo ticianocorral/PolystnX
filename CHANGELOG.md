@@ -60,6 +60,9 @@ Auditoria de segurança alinhada com o SixteeN (1.3.2 → 1.8.1).
   quando nenhum jogo tinha capa.
 
 ### Cheater Fish
+- **O menu lateral do console não tem mais "Cheats"**: tudo é escolhido no
+  Cheater Fish, que aparece a cada vez que o console é ligado. A busca e os
+  filtros do modal antigo saíram junto.
 - **Tela de cheats antes do jogo, no estilo GameShark** (o equivalente do
   Cheat Genius do SixteeN): ao ligar o console com um disco que tem cheats,
   aparece primeiro um carregamento com o peixe de óculos (logo em

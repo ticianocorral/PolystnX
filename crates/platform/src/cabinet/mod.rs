@@ -510,12 +510,6 @@ pub enum PanelButton {
     /// Opens a modal to pick which save-state slot to load, mirroring
     /// `SaveState`.
     LoadState,
-    /// Opens the Cheats modal (plan revision — split out of the notebook,
-    /// which had no natural home for a checklist next to the photo album).
-    /// Absent from the panel entirely for a cartridge with no curated
-    /// cheats, same "hide rather than show an empty screen" rule as the
-    /// other modal-opening buttons.
-    Cheats,
     /// One slot row inside whichever modal (`SaveState`/`LoadState`/
     /// `PrintScreen`) is open right now, or one cheat row inside the Cheats
     /// modal (plan revision — same click addresses both a pick and a
@@ -531,15 +525,6 @@ pub enum PanelButton {
     /// so only clickable) once the row count overflows the card.
     ModalScrollUp,
     ModalScrollDown,
-    /// Click the search box on a searchable modal (plan revision — today
-    /// only Cheats) to start typing a filter.
-    ModalSearchStart,
-    /// On a searchable modal (today only Cheats): show every row, only the
-    /// ones checked on, or only the ones off (plan revision) — a segmented
-    /// three-way control, one of the three always "active" (`lit`).
-    ModalFilterAll,
-    ModalFilterOn,
-    ModalFilterOff,
     /// Drawn only on the pause book screen (not the side panel): resume play.
     PauseContinue,
     /// Pause book: step the right page (the photo album) to an earlier/
@@ -746,23 +731,6 @@ struct ModalInfo {
     /// a fresh open (see `Cabinet::set_modal`) or a new search filter (see
     /// `Cabinet::set_modal_search`).
     scroll: usize,
-    /// Whether this modal offers a search box at all (plan revision — only
-    /// Cheats does; Save/Load/Print's lists are always small enough that
-    /// hunting for one by eye is fine). Set once by whoever opens the
-    /// modal, alongside `set_modal`.
-    searchable: bool,
-    /// Current filter text (plan revision) — empty means "show every row".
-    /// A row matches when its label contains this, case-insensitively.
-    /// Preserved across `set_modal` the same way `scroll` is.
-    search_query: String,
-    /// On/off state filter (plan revision, Cheats-only like `search_query`
-    /// — drawn only when `searchable`): `None` shows every row, `Some(true)`
-    /// only the ones checked on, `Some(false)` only the ones off. Derived
-    /// per-row from the `[x] `/`[ ] ` prefix `cheat_modal_rows` already
-    /// encodes into the label for display — see `row_checked` — rather
-    /// than threading a second parallel array through `set_modal` just for
-    /// this. Preserved across `set_modal` the same way `search_query` is.
-    cheat_filter: Option<bool>,
     draft: Option<String>,
     draft_limit: usize,
     draft_heading: String,

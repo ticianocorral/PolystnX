@@ -586,7 +586,7 @@ impl Cabinet {
         }
     }
 
-    /// Open (or replace) a save/load-state, print slot, or Cheats picker
+    /// Open (or replace) a save/load-state, print slot or card picker
     /// (plan revision): `title` names the dialog, `rows` is one `(label,
     /// enabled)` pair per slot in order — a disabled row (e.g. "Carregar"
     /// on an empty slot, or a pinned print slot) still shows, just dimmed
@@ -600,12 +600,6 @@ impl Cabinet {
     /// should be.
     pub fn set_modal(&mut self, title: &str, rows: &[(String, bool)]) {
         let scroll = self.modal.as_ref().map_or(0, |m| m.scroll);
-        let searchable = self.modal.as_ref().is_some_and(|m| m.searchable);
-        let search_query = self
-            .modal
-            .as_ref()
-            .map_or_else(String::new, |m| m.search_query.clone());
-        let cheat_filter = self.modal.as_ref().and_then(|m| m.cheat_filter);
         self.modal = Some(ModalInfo {
             title: title.to_string(),
             rows: rows
@@ -617,9 +611,6 @@ impl Cabinet {
                 })
                 .collect(),
             scroll,
-            searchable,
-            search_query,
-            cheat_filter,
             draft: None,
             draft_limit: 0,
             draft_heading: String::new(),
@@ -657,53 +648,10 @@ impl Cabinet {
             title: title.to_string(),
             rows: built,
             scroll,
-            searchable: false,
-            search_query: String::new(),
-            cheat_filter: None,
             draft: None,
             draft_limit: 0,
             draft_heading: String::new(),
         });
-    }
-
-    /// Set the Cheats modal's on/off state filter (plan revision): `None`
-    /// shows every row, `Some(true)`/`Some(false)` only the ones checked
-    /// on/off. Resets `scroll` to 0, same reasoning as `set_modal_search`.
-    /// A no-op before `set_modal`.
-    pub fn set_modal_filter(&mut self, filter: Option<bool>) {
-        if let Some(m) = &mut self.modal {
-            m.cheat_filter = filter;
-            m.scroll = 0;
-        }
-    }
-
-    /// Mark whether the open modal offers a search box (plan revision —
-    /// today only the Cheats modal does). Call once, right after opening
-    /// it — `set_modal`'s own refreshes (Cheats redrawing its checkmarks
-    /// after each toggle) carry this forward on their own.
-    pub fn set_modal_searchable(&mut self, searchable: bool) {
-        if let Some(m) = &mut self.modal {
-            m.searchable = searchable;
-        }
-    }
-
-    /// Set the modal's search filter (plan revision): empty clears it. A
-    /// new filter resets `scroll` to 0 — whatever page was showing under
-    /// the old filter is unlikely to mean anything under the new one. A
-    /// no-op before `set_modal`.
-    pub fn set_modal_search(&mut self, query: &str) {
-        if let Some(m) = &mut self.modal {
-            m.search_query = query.to_string();
-            m.scroll = 0;
-        }
-    }
-
-    /// The modal's current search filter, e.g. to pre-fill the search
-    /// box's text field when the player reopens it to refine a query.
-    /// Empty (not `None`) before `set_modal` — same "nothing to filter" as
-    /// an explicitly cleared search.
-    pub fn modal_search_query(&self) -> &str {
-        self.modal.as_ref().map_or("", |m| m.search_query.as_str())
     }
 
     /// Scroll the modal's row grid by `delta` visual rows (negative = up) —
