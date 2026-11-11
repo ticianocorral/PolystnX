@@ -62,9 +62,10 @@ pub(super) fn draw_ch3_osd(canvas: &mut WindowCanvas, font: &mut Texture, screen
     const LABEL: &str = "AV 1";
     const SCALE: u32 = 3;
     let w = GLYPH_W as i32 * SCALE as i32 * LABEL.chars().count() as i32;
-    let margin = 24;
-    let x = screen.right() - margin - w;
-    let y = screen.top() + margin;
+    // Longe do canto: o tubo curvo come a ponta do retângulo da tela.
+    let (margin_x, margin_y) = (56, 44);
+    let x = screen.right() - margin_x - w;
+    let y = screen.top() + margin_y;
     // A 2px dark offset keeps the green readable over bright snow without a
     // full outline pass.
     draw_text_absolute(

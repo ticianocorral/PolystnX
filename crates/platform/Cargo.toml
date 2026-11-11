@@ -21,5 +21,6 @@ noto-sans-mono-bitmap = { version = "0.3", default-features = false, features = 
     "unicode-basic-latin",
     "unicode-latin-1-supplement",
 ] }
+ab_glyph = "0.2"
 log.workspace = true
 thiserror.workspace = true

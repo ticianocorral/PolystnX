@@ -537,6 +537,18 @@ impl Core {
         self.enter(|api| unsafe { (api.retro_reset)() });
     }
 
+    /// O modo do controle da `port`: `true` = DualShock (analógico + motores
+    /// de vibração — o jogo passa a ler os sticks e a pedir rumble), `false`
+    /// = controle digital padrão. É o que o botão ANALOG do console faz.
+    pub fn set_analog_mode(&mut self, port: u32, analog: bool) {
+        let dev = if analog {
+            RETRO_DEVICE_ANALOG
+        } else {
+            RETRO_DEVICE_JOYPAD
+        };
+        self.enter(|api| unsafe { (api.retro_set_controller_port_device)(port, dev) });
+    }
+
     /// Abre (`true`) ou fecha (`false`) a BANDEJA do drive pela interface de
     /// disk control que o core registrou — o jogo EMULADO enxerga a tampa
     /// abrir e reage com o próprio código (telas de erro reais). `None`

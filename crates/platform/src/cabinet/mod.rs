@@ -26,6 +26,7 @@ mod chin;
 mod chrome;
 mod composite;
 mod geometry;
+mod label;
 mod panel;
 mod panel_art;
 mod pause;
@@ -120,7 +121,6 @@ const PANEL_BTN_BG: (u8, u8, u8) = (34, 32, 29);
 /// controle e o LED de power.
 const PSX_SHELL: (u8, u8, u8) = (176, 172, 162);
 const PSX_SHELL_EDGE: (u8, u8, u8) = (126, 122, 112);
-const PSX_HUB_RING: (u8, u8, u8) = (120, 116, 107);
 const PSX_LED_ON: (u8, u8, u8) = (110, 224, 130);
 const PSX_LED_OFF: (u8, u8, u8) = (56, 58, 54);
 /// O rótulo "POWER" gravado dentro do botão — verde escuro, como na foto

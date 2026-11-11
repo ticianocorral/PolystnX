@@ -4,6 +4,52 @@ Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/);
 versionamento por [SemVer 2.0.0](https://semver.org/lang/pt-BR/). O workspace
 inteiro compartilha uma versão (`[workspace.package]` em `Cargo.toml`).
 
+## [1.4.1-beta] - 2026-11-11
+
+Retoques do console e do Cheater Fish, filtro AV e o ANALOG de verdade.
+
+### Controle
+- **O botão ANALOG do console agora é o do DualShock de verdade**: ao clicar,
+  o core troca a porta 1 para DualShock (os jogos compatíveis passam a ler os
+  sticks e a pedir vibração) e o controle vibra ao entrar no modo analógico;
+  desligar volta ao controle digital. A troca de memory card com o console
+  ligado mantém o modo.
+
+### Vídeo composto (AV)
+- **Filtro de cabo AV (amarelo/branco/vermelho) na imagem do jogo**: a cor
+  borra e atrasa na horizontal, a luma suaviza um pouco e a saturação cai
+  levemente. Sem neve nem fantasma (isso é RF, e o PlayStation usa AV).
+  Ligado por padrão; Configurações > jogo > "Video composto (cabo AV)" e
+  `av_composto` no cfg.
+
+### Arte padrão (disco no console)
+- **Jogo sem arte de disco agora também tem o CD no console**: o disco que
+  gira na face do console e entra no slot é um CD prata gerado por código,
+  com o nome do jogo impresso (antes só a estante tinha o CD genérico).
+
+### Console
+- **Botões POWER, RESET e OPEN** como as peças do PS1: plástico fosco com
+  degradê, sem aro claro, e as palavras em **Inter Bold** (fonte vetorial
+  com antialias, embutida; atribuição em `THIRD-PARTY-NOTICES.md`). O RESET
+  se ajusta para caber no botão e o POWER afunda quando o console liga.
+- Toda a escrita da parte do console (ANALOG, controle, memory card, nome no
+  adesivo) usa a mesma fonte vetorial.
+- Logo do memory card: só o símbolo "P", na proporção da arte, em silhueta.
+- As caixas de controle e memory card ficaram centralizadas no painel e 10
+  px mais baixas (mais respiro do CD).
+
+### TV
+- **Brilho do vidro igual ao do SixteeN**: mancha de luz difusa no alto à
+  esquerda, faixa diagonal fina e aro claro rente à borda, sobre a mesma
+  malha curva da imagem (malha em cache, sem custo por quadro).
+- O "AV 1" ficou mais afastado do canto superior direito.
+
+### Cheater Fish
+- **O menu lateral do console não tem mais "Cheats"**: tudo é escolhido no
+  Cheater Fish, que aparece a cada vez que o console é ligado. A busca e os
+  filtros do modal antigo saíram junto.
+- Texto da lista (e das demais telas) com fonte suave, sem o serrilhado.
+
 ## [1.4.0-beta] - 2026-11-10
 
 Auditoria de segurança alinhada com o SixteeN (1.3.2 → 1.8.1).
@@ -59,27 +105,7 @@ Auditoria de segurança alinhada com o SixteeN (1.3.2 → 1.8.1).
   para a grade e para a faixa de recentes; sai o modo "lista" que aparecia
   quando nenhum jogo tinha capa.
 
-### Arte padrão (disco no console)
-- **Jogo sem arte de disco agora também tem o CD no console**: o disco que
-  gira na face do console e entra no slot é um CD prata gerado por código,
-  com o nome do jogo impresso (antes só a estante tinha o CD genérico).
-
-### TV
-- **Brilho do vidro igual ao do SixteeN**: mancha de luz difusa no alto à
-  esquerda, faixa diagonal fina e aro claro rente à borda, sobre a mesma
-  malha curva da imagem (malha em cache, sem custo por quadro).
-
-### Vídeo composto (AV)
-- **Filtro de cabo AV (amarelo/branco/vermelho) na imagem do jogo**: a cor
-  borra e atrasa na horizontal, a luma suaviza um pouco e a saturação cai
-  levemente. Sem neve nem fantasma (isso é RF, e o PlayStation usa AV).
-  Ligado por padrão; Configurações > jogo > "Video composto (cabo AV)" e
-  `av_composto` no cfg.
-
 ### Cheater Fish
-- **O menu lateral do console não tem mais "Cheats"**: tudo é escolhido no
-  Cheater Fish, que aparece a cada vez que o console é ligado. A busca e os
-  filtros do modal antigo saíram junto.
 - **Tela de cheats antes do jogo, no estilo GameShark** (o equivalente do
   Cheat Genius do SixteeN): ao ligar o console com um disco que tem cheats,
   aparece primeiro um carregamento com o peixe de óculos (logo em

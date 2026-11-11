@@ -38,10 +38,19 @@ pub(crate) fn load_brand_images(cab: &mut Cabinet) {
 /// A logo do memory card desenhado no slot: a MESMA arte da console logo,
 /// mas o cabinet aplica modulação preta na textura (a marca em silhueta,
 /// como a Sony em relevo no card real).
-pub(crate) fn load_mc_logo(cab: &mut Cabinet) {
+pub fn load_mc_logo(cab: &mut Cabinet) {
     match image::load_from_memory(DEFAULT_CONSOLE_LOGO) {
         Ok(img) => {
-            let img = img.thumbnail(256, 256).to_rgba8();
+            // Só o símbolo (o "P" facetado): o nome embaixo viraria um borrão
+            // ilegível no tamanho do card. Recorte justo, sem distorcer.
+            let (iw, ih) = (img.width() as f32, img.height() as f32);
+            let sym = img.crop_imm(
+                (iw * 0.24) as u32,
+                (ih * 0.02) as u32,
+                (iw * 0.54) as u32,
+                (ih * 0.68) as u32,
+            );
+            let img = sym.thumbnail(256, 256).to_rgba8();
             let (w, h) = img.dimensions();
             cab.set_mc_logo(w, h, img.as_raw().as_slice());
         }
