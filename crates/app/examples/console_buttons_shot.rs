@@ -10,6 +10,7 @@ fn main() -> anyhow::Result<()> {
     let mut cab = plat
         .create_cabinet("PolystnX", 1280, 800, false)
         .map_err(|e| anyhow::anyhow!(e.to_string()))?;
+    polystnx_app::console_art::load_mc_logo(&mut cab);
     cab.set_panel(
         None,
         None,
@@ -22,6 +23,9 @@ fn main() -> anyhow::Result<()> {
     cab.set_powered(true);
     if std::env::args().nth(2).as_deref() == Some("card") {
         cab.set_card_labels(Some("Meu Save"));
+        if let Some(t) = std::env::args().nth(3).and_then(|v| v.parse::<f32>().ok()) {
+            cab.set_card_motion(Some((t, true)));
+        }
     }
     let pixels = vec![40u8; 320 * 240 * 4];
     let frame = FrameRef {

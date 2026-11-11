@@ -254,7 +254,9 @@ pub(super) fn draw_slot_furniture(
     let box_w = (block.width() as f32 * 0.46).round() as i32;
     let grid_top = block.bottom() - (box_h + 4);
     let analog_rect;
-    let p1 = Rect::new(block.x() + 4, grid_top, box_w as u32, box_h as u32);
+    // As duas caixas centradas no bloco (margens iguais dos dois lados).
+    let pair_x = block.x() + (block.width() as i32 - (box_w * 2 + gap)) / 2;
+    let p1 = Rect::new(pair_x, grid_top, box_w as u32, box_h as u32);
     let mc1 = Rect::new(p1.right() + gap, grid_top, box_w as u32, box_h as u32);
     // O bay: painel do adesivo rebaixado (onde a arte do card escolhido
     // vai colar — é também a área clicável da biblioteca de cards) e o
@@ -690,18 +692,23 @@ pub(super) fn draw_slot_furniture(
                     );
                 }
             }
-            // a logo PolyStn em PRETO no corpo (cortada nas duas linhas)
-            draw_image_absolute_band(
-                canvas,
-                images,
-                MC_LOGO_IMG,
-                card_x + (card_w - 56) / 2,
-                card_y + 12,
-                56,
-                32,
-                lip_y,
-                bottom_lim,
-            );
+            // a logo PolyStn em PRETO no corpo (cortada nas duas linhas),
+            // na proporção da arte: 40 px de altura, centrada.
+            if let Some(logo) = images.get(&MC_LOGO_IMG) {
+                let lh = 40;
+                let lw = (lh as f32 * logo.w as f32 / logo.h.max(1) as f32).round() as i32;
+                draw_image_absolute_band(
+                    canvas,
+                    images,
+                    MC_LOGO_IMG,
+                    card_x + (card_w - lw) / 2,
+                    card_y + 12,
+                    lw as u32,
+                    lh as u32,
+                    lip_y,
+                    bottom_lim,
+                );
+            }
             // "MEMORY CARD" — a identificação do corpo: 18 px abaixo da logo
             // (colava nela) e ALTO o bastante para sumir inteira sob a
             // carcaça com o card encaixado (a boca corta na linha 76 do
