@@ -1,5 +1,5 @@
 //! As letras gravadas nos botões redondos do console (POWER, RESET, OPEN):
-//! uma fonte vetorial sem serifa (Inter Medium, OFL) desenhada com
+//! uma fonte vetorial sem serifa (Inter Bold, OFL) desenhada com
 //! antialias numa textura pequena, guardada em cache por (texto, tamanho,
 //! cor) — o PS1 tem as palavras impressas em sans fino, e a fonte de pixels
 //! do resto da interface não chega perto.
@@ -9,7 +9,7 @@ use ab_glyph::{point, Font, FontRef, PxScale, ScaleFont};
 use std::cell::RefCell;
 use std::collections::HashMap;
 
-static INTER: &[u8] = include_bytes!("../../assets/Inter-Medium.otf");
+static INTER: &[u8] = include_bytes!("../../assets/Inter-Bold.otf");
 
 type Key = (String, u32, [u8; 3]);
 

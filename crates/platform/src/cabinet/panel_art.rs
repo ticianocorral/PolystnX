@@ -170,13 +170,10 @@ pub(super) fn draw_round_plastic(
     // A sombra curta que o botão joga na carcaça.
     let drop = if pressed { 1 } else { 3 };
     fill_circle_rgba(canvas, (0, 0, 0, 70), cx + 1, cy + drop, r);
-    // O aro e o bisel: claro em cima, sombra embaixo.
+    // Só um fio escuro de contorno — sem aro claro.
     fill_circle(canvas, PSX_SHELL_EDGE, cx, cy, r);
-    let lift = if pressed { 0 } else { 1 };
-    fill_circle(canvas, (112, 108, 100), cx, cy + 1, r - 1);
-    fill_circle(canvas, (214, 210, 200), cx, cy - lift, r - 1);
     // O corpo, um degradê vertical suave de plástico fosco.
-    let body = r - 3;
+    let body = r - 1;
     let k = if pressed { 0.88 } else { 1.0 };
     for dy in -body..=body {
         let t = (dy + body) as f32 / (2 * body).max(1) as f32;
