@@ -64,6 +64,11 @@ Auditoria de segurança alinhada com o SixteeN (1.3.2 → 1.8.1).
   gira na face do console e entra no slot é um CD prata gerado por código,
   com o nome do jogo impresso (antes só a estante tinha o CD genérico).
 
+### TV
+- **Brilho do vidro igual ao do SixteeN**: mancha de luz difusa no alto à
+  esquerda, faixa diagonal fina e aro claro rente à borda, sobre a mesma
+  malha curva da imagem (malha em cache, sem custo por quadro).
+
 ### Vídeo composto (AV)
 - **Filtro de cabo AV (amarelo/branco/vermelho) na imagem do jogo**: a cor
   borra e atrasa na horizontal, a luma suaviza um pouco e a saturação cai

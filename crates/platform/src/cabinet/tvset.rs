@@ -939,6 +939,7 @@ impl Cabinet {
     pub(super) fn draw_tv_glass_before_bezel(&mut self, mesh: &CrtMesh) {
         let phase = self.tv_phase();
         self.draw_tv_phase_glass(&phase, mesh);
+        draw_glass_sheen(&mut self.canvas, self.screen);
     }
 
     /// O retângulo (coordenadas de canvas) do botão focado, se foi
@@ -1095,4 +1096,96 @@ impl Cabinet {
             let _ = canvas.fill_rect(Rect::new(bx, by + 40, w.max(4) as u32, 1));
         }
     }
+}
+
+/// A malha do brilho do vidro, pronta: depende só do retângulo do tubo e
+/// da curvatura (`crt_warp()`) — as cores são constantes, nada por quadro.
+struct SheenMesh {
+    /// (x, y, w, h do tubo, bits do warp): mudou qualquer um, refaz.
+    key: (i32, i32, u32, u32, u32),
+    verts: Vec<Vertex>,
+    idx: Vec<i32>,
+}
+
+thread_local! {
+    /// O cache da malha do brilho. `draw_glass` é função livre (as capturas
+    /// não têm `&mut self`), então o cache mora aqui; tudo roda na thread
+    /// de UI (o canvas do SDL não sai dela).
+    static SHEEN: std::cell::RefCell<Option<SheenMesh>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+/// A chave do cache do brilho: a posição entra porque os vértices são
+/// absolutos no canvas; o warp entra em bits (o ajuste da curvatura muda
+/// a geometria sem mexer no tamanho).
+fn sheen_key(screen: Rect, warp: f32) -> (i32, i32, u32, u32, u32) {
+    (
+        screen.x(),
+        screen.y(),
+        screen.width(),
+        screen.height(),
+        warp.to_bits(),
+    )
+}
+
+/// O brilho do vidro, sempre presente (a TV ligada ou não): uma mancha
+/// de luz difusa no alto à esquerda, uma faixa diagonal mais fina e um
+/// aro claro rente à borda — tudo sobre a mesma grade curva da imagem,
+/// para o vidro parecer abaulado e não um adesivo plano. A malha (625
+/// vértices com exp/powi) fica em cache e só é refeita quando o tubo ou o
+/// warp mudam — antes eram ~35 KB alocados e recalculados todo quadro.
+fn draw_glass_sheen(canvas: &mut WindowCanvas, screen: Rect) {
+    let warp = CRT_WARP;
+    let key = sheen_key(screen, warp);
+    SHEEN.with_borrow_mut(|cache| {
+        if !cache.as_ref().is_some_and(|m| m.key == key) {
+            *cache = Some(build_glass_sheen(screen, warp, key));
+        }
+        let m = cache.as_ref().unwrap();
+        canvas.set_blend_mode(BlendMode::Blend);
+        let _ = canvas.render_geometry(&m.verts, None::<&Texture>, &m.idx[..]);
+    });
+}
+
+fn build_glass_sheen(screen: Rect, warp: f32, key: (i32, i32, u32, u32, u32)) -> SheenMesh {
+    const N: usize = 24;
+    let (sx, sy) = (screen.x() as f32, screen.y() as f32);
+    let (sw, sh) = (screen.width() as f32, screen.height() as f32);
+    let z = sdl3::render::FPoint::new(0.0, 0.0);
+    let mut verts = Vec::with_capacity((N + 1) * (N + 1));
+    for j in 0..=N {
+        for i in 0..=N {
+            let (u, v) = (i as f32 / N as f32, j as f32 / N as f32);
+            let (cx, cy) = (u * 2.0 - 1.0, v * 2.0 - 1.0);
+            let dx = cx * (1.0 - warp * cy * cy);
+            let dy = cy * (1.0 - warp * cx * cx);
+            // Mancha: gaussiana larga centrada em (0,22; 0,20).
+            let (mx, my) = ((u - 0.22) / 0.30, (v - 0.20) / 0.26);
+            let blob = (-(mx * mx + my * my)).exp() * 0.10;
+            // Faixa diagonal: some ao se afastar da reta u + v = 0,62.
+            let d = (u + v - 0.62) / 0.07;
+            let streak = (-(d * d)).exp() * 0.02 * (1.0 - v).clamp(0.0, 1.0);
+            // Aro: luz que pega na borda do vidro curvo.
+            let edge = cx.abs().max(cy.abs());
+            let rim = ((edge - 0.90) / 0.10).clamp(0.0, 1.0).powi(2) * 0.05;
+            let a = (blob + streak + rim).min(0.20);
+            verts.push(Vertex {
+                position: sdl3::render::FPoint::new(
+                    sx + (dx * 0.5 + 0.5) * sw,
+                    sy + (dy * 0.5 + 0.5) * sh,
+                ),
+                color: FColor::RGBA(0.96, 0.98, 1.0, a),
+                tex_coord: z,
+            });
+        }
+    }
+    let stride = (N + 1) as i32;
+    let mut idx = Vec::with_capacity(N * N * 6);
+    for j in 0..N as i32 {
+        for i in 0..N as i32 {
+            let a = j * stride + i;
+            idx.extend_from_slice(&[a, a + stride, a + 1, a + 1, a + stride, a + stride + 1]);
+        }
+    }
+    SheenMesh { key, verts, idx }
 }
