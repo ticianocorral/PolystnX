@@ -64,6 +64,13 @@ Auditoria de segurança alinhada com o SixteeN (1.3.2 → 1.8.1).
   gira na face do console e entra no slot é um CD prata gerado por código,
   com o nome do jogo impresso (antes só a estante tinha o CD genérico).
 
+### Controle
+- **O botão ANALOG do console agora é o do DualShock de verdade**: ao clicar,
+  o core troca a porta 1 para DualShock (os jogos compatíveis passam a ler os
+  sticks e a pedir vibração) e o controle vibra ao entrar no modo analógico;
+  desligar volta ao controle digital. A troca de memory card com o console
+  ligado mantém o modo.
+
 ### TV
 - **Brilho do vidro igual ao do SixteeN**: mancha de luz difusa no alto à
   esquerda, faixa diagonal fina e aro claro rente à borda, sobre a mesma

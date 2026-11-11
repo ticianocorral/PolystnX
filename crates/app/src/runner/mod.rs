@@ -158,6 +158,11 @@ enum CoreCmd {
         tx: std::sync::mpsc::Sender<Option<Vec<u8>>>,
     },
     Reset,
+    /// O botão ANALOG: liga/desliga o DualShock (analógico + vibração) na
+    /// porta 1 do core.
+    AnalogMode {
+        on: bool,
+    },
     CheatReset,
     CheatSet {
         i: u32,
@@ -193,6 +198,9 @@ enum CoreCmd {
         /// core novo precisa reabri-la, senão o disco carrega por cima da
         /// BIOS na retomada.
         eject_tray: bool,
+        /// O botão ANALOG estava ligado: o core novo nasce digital e precisa
+        /// do DualShock de volta.
+        analog: bool,
         tx: std::sync::mpsc::Sender<bool>,
     },
     /// Sem disco + Reset: reseta e boota a BIOS (o console fica ligado).
@@ -276,6 +284,7 @@ fn spawn_core_worker(
                         let _ = tx.send(core.sram());
                     }
                     CoreCmd::Reset => core.reset(),
+                    CoreCmd::AnalogMode { on } => core.set_analog_mode(0, on),
                     CoreCmd::TrayEject { ejected } => {
                         if core.set_eject_state(ejected).is_none() {
                             log::warn!("worker: core sem disk control interface");
@@ -301,6 +310,7 @@ fn spawn_core_worker(
                         save_dir,
                         card1,
                         eject_tray,
+                        analog,
                         tx,
                     } => {
                         // A troca ao vivo: state → core novo (o card entra no
@@ -317,6 +327,7 @@ fn spawn_core_worker(
                                 fresh.set_variable("pcsx_rearmed_nocdaudio", "disabled");
                                 fresh.init();
                                 if fresh.load_game(&reseed_disc, &[]).is_ok() {
+                                    fresh.set_analog_mode(0, analog);
                                     if let Some(bytes) = &card1 {
                                         fresh.write_memory(MEMORY_SAVE_RAM, bytes);
                                     }
@@ -1705,6 +1716,13 @@ pub fn run_game(
                     analog_on[0] = !analog_on[0];
                     let on = analog_on[0];
                     cab.set_analog_led(on);
+                    // Troca de verdade o controle do core (DualShock x
+                    // digital) e, ao ligar, vibra o pad — como o botão real
+                    // faz ao entrar no modo analógico.
+                    let _ = core_tx.send(CoreCmd::AnalogMode { on });
+                    if on {
+                        plat.rumble_pad(0, 40000, 40000);
+                    }
                     cab.push_osd(
                         &[&format!(
                             "ANALOG {} — analógico e vibração",
@@ -2285,6 +2303,7 @@ pub fn run_game(
                                         save_dir: spec.save_dir.clone(),
                                         card1: Some(bytes),
                                         eject_tray: lid_open,
+                                        analog: analog_on[0],
                                         tx: d_tx,
                                     });
                                     pending_reseed = Some(d_rx);
@@ -2410,6 +2429,7 @@ pub fn run_game(
                                         save_dir: spec.save_dir.clone(),
                                         card1: Some(vec![0u8; crate::memcard::CARD_SIZE]),
                                         eject_tray: lid_open,
+                                        analog: analog_on[0],
                                         tx: d_tx,
                                     });
                                     pending_reseed = Some(d_rx);
