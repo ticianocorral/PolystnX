@@ -4,6 +4,59 @@ Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/);
 versionamento por [SemVer 2.0.0](https://semver.org/lang/pt-BR/). O workspace
 inteiro compartilha uma versão (`[workspace.package]` em `Cargo.toml`).
 
+## [1.5.0-beta] - 2026-11-12
+
+PolystnX alinhado ao SixteeN: temas de móvel da estante, navegação completa
+pelo controle (inclusive o Menu do jogo), tampa de acrílico de verdade e
+cheats completos.
+
+### Controle
+- **Menu do jogo no controle**: segurar Select+Start (~0,8 s) dentro do jogo abre
+  o Menu do jogo — continuar, salvar/carregar estado, print, anotações,
+  conquistas, reset, ligar/desligar, abrir a tampa, ejetar e sair — com
+  destaque no controle (D-pad/analógico, A confirma, B volta, LB/RB pulam). Os
+  slots, cards e conquistas também navegam pelo controle. Antes só o mouse
+  ligava o console. Uma dica no OSD avisa do atalho.
+- **Cursor de seleção na estante, como no SixteeN**: a capa selecionada (grade,
+  favoritos e recentes) sobe 6 px, com contorno de luz quente, fio de luz no
+  topo e um filete aceso no tampo; antes o controle navegava sem
+  mostrar onde estava.
+- **Navegação com controle como no SixteeN**: o analógico esquerdo anda como o
+  D-pad nos menus; na estante, X/quadrado favorita o jogo sob o cursor,
+  Select abre o histórico, Start abre as configurações e LT/RT trocam a aba
+  do painel; na tela inicial Start abre as configurações; nas configurações
+  LT/RT trocam de seção (além de LB/RB); no Cheater Fish Start começa o jogo.
+- Removido o aviso verde "ANALOG LIGADO/DESLIGADO" ao apertar o botão ANALOG.
+
+### Cheats
+- Jogo sem cheats no banco: o Cheater Fish abre mesmo assim, com o aviso
+  "No Cheat Codes Available" (antes pulava direto para o jogo).
+- O Cheater Fish agora acha os cheats de jogos cujo nome no disco não tem o
+  número da sequência que o banco usa (ex.: "Crash Bandicoot - Warped" no
+  banco é "Crash Bandicoot 3 - Warped").
+- Banco de cheats atualizado com o libretro-database inteiro do PlayStation
+  (de 1844 para 2642 jogos, incluindo "Crash Bandicoot - Warped (USA)").
+
+### Console
+- **Tampa de acrílico de verdade**: o vidro sobre o disco ganhou reflexos em
+  faixas, aro e brilho de domo (a logo do app continua nele); ao abrir a
+  tampa (OPEN), o acrílico aparece levantado na dobradiça, com o disco livre.
+
+### Estante
+- Removido o rótulo "todos os jogos" acima da grade da estante.
+- **Temas de móvel da estante, portados do SixteeN**: além do visual padrão
+  do PlayStation, a estante pode ser uma estante de madeira, o expositor de
+  metal da locadora, um rack de som preto, o quarto anos 90 (Memphis) ou um
+  fliperama com neon. Configurações > estante > "Tema da estante" (clique ou
+  setas) e `shelf_theme` no `polystnx.cfg` (`ps1`, `wood`, `metal`, `hifi`,
+  `memphis`, `arcade`; valor desconhecido mantém o tema atual). O padrão
+  segue idêntico ao de antes.
+- **Botões "fósforo" em vermelho**: "histórico", "atualizar" e as setas das
+  faixas ficam sem caixa, só o rótulo com sublinhado, como no SixteeN (lá é
+  violeta; aqui, vermelho).
+  O mesmo vale para "voltar" e "página" do manual/conquistas, o zoom da capa
+  traseira e os botões da tela de primeiro uso.
+
 ## [1.4.1-beta] - 2026-11-11
 
 Retoques do console e do Cheater Fish, filtro AV e o ANALOG de verdade.

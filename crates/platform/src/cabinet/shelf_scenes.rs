@@ -466,28 +466,19 @@ impl Cabinet {
         let img_h = (sh as i32 - pad * 2 - btn_h - 14).max(60) as u32;
         self.paint_shelf((10, 10, 11), |d| {
             d.image_fit(id, pad, pad, img_w, img_h);
-            d.outline(
-                btn.x(),
-                btn.y(),
-                btn.width(),
-                btn.height(),
-                1,
-                (PANEL_TEXT.0, PANEL_TEXT.1, PANEL_TEXT.2, 255),
-            );
-            d.fill(
-                btn.x() + 1,
-                btn.y() + 1,
-                btn.width().saturating_sub(2),
-                btn.height().saturating_sub(2),
-                (PANEL_BTN_BG.0, PANEL_BTN_BG.1, PANEL_BTN_BG.2, 255),
-            );
+            // O "voltar" na linguagem fósforo (vermelho): sem caixa, rótulo
+            // com sublinhado.
             let text_w = GLYPH_W as i32 * label.chars().count() as i32;
-            d.text(
-                btn.x() + (btn.width() as i32 - text_w) / 2,
-                btn.y() + (btn.height() as i32 - GLYPH_H as i32) / 2,
-                1,
-                PANEL_TEXT,
-                label,
+            let tx = btn.x() + (btn.width() as i32 - text_w) / 2;
+            let ty = btn.y() + (btn.height() as i32 - GLYPH_H as i32) / 2;
+            const RED: (u8, u8, u8) = (240, 70, 64);
+            d.text(tx, ty, 1, RED, label);
+            d.fill(
+                tx,
+                ty + GLYPH_H as i32 + 1,
+                text_w.max(GLYPH_W as i32) as u32,
+                2,
+                (RED.0, RED.1, RED.2, 255),
             );
         });
         self.composite_shelf();

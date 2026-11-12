@@ -30,7 +30,7 @@ use crate::idle;
 const TILE_W: u32 = 236;
 const TILE_H: u32 = 236;
 const GAP: u32 = 18;
-const MARGIN: i32 = 28;
+pub(crate) const MARGIN: i32 = 28;
 /// Room reserved at the header row for the "N games" label and the filter
 /// box — both sit above the grid/recent row, inside the tube like the rest
 /// of the shelf's own content.
@@ -54,7 +54,6 @@ const RECENT_LABEL_H: i32 = 24;
 /// titulo (Todos os jogos)") — mirrors the "jogados recentemente" label
 /// above the recent strip, so both sections read the same way.
 const ALL_GAMES_LABEL_H: i32 = 24;
-const ALL_GAMES_TITLE: &str = "todos os jogos";
 
 /// A "favoritos" strip above the recent one (plan revision: "adicionar
 /// marcador de favorito nos jogos; mostrar em uma categoria acima dos
@@ -68,10 +67,6 @@ const FAV_TITLE: &str = "favoritos";
 /// Hard caps well past what fits on screen at once — the strips scroll, but
 /// a run of thousands of played games shouldn't grow them without bound.
 const STRIP_CAP: usize = 60;
-/// The recent strip shows at most this many games (plan revision: "jogados
-/// recentemente mostrar apenas no maximo 8 jogos") — favorites keep the
-/// wider `STRIP_CAP`.
-const RECENT_CAP: usize = 8;
 
 /// The title filter box (plan revision: "colocar filtro para facilitar o
 /// encontro dos games na lista") — the shelf's own one deliberate keyboard
@@ -97,6 +92,8 @@ const TEXT: (u8, u8, u8) = (232, 232, 232);
 const DIM: (u8, u8, u8) = (150, 150, 158);
 /// Text color on top of the `HILITE` selection bar (o histórico) — dark, for
 /// contrast against the bright fill.
+/// A cor dos botões "fósforo" da estante (o SixteeN usa violeta; aqui, vermelho).
+const FOSFORO: (u8, u8, u8) = (240, 70, 64);
 const HILITE_TEXT: (u8, u8, u8) = (24, 20, 12);
 /// How opaque the shelf sits over the resting TV static (plan §3.3) — era
 /// 0.92 (a neve sangrava de leve pelo fundo), mas com as capas 3D vazadas
@@ -159,6 +156,8 @@ pub struct ShelfOpts {
     /// that shows "conquistas: N" in the panel; `None` keeps the shelf
     /// entirely RA-free.
     pub ra: Option<(String, String, String)>,
+    /// O móvel da estante (`shelf_theme` no `polystnx.cfg`).
+    pub theme: crate::config::ShelfTheme,
 }
 
 impl Default for ShelfOpts {
@@ -170,6 +169,7 @@ impl Default for ShelfOpts {
             fade_in: None,
             preset_filter: None,
             ra: None,
+            theme: crate::config::ShelfTheme::Ps1,
         }
     }
 }
@@ -296,14 +296,7 @@ pub(crate) fn draw_manual_view(
     }
 
     let mut draw_nav = |r: &(i32, i32, u32, u32), label: &str| {
-        d.outline(r.0, r.1, r.2, r.3, 2, (TEXT.0, TEXT.1, TEXT.2, 255));
-        d.text(
-            r.0 + (r.2 as i32 - label.chars().count() as i32 * 9) / 2,
-            r.1 + 7,
-            1,
-            TEXT,
-            label,
-        );
+        draw_fosforo_btn(d, *r, label, true);
     };
     draw_nav(&prev, "< página");
     draw_nav(&next, "página >");
@@ -349,16 +342,7 @@ pub fn strip_arrow_rects(scr_w: u32, y0: i32) -> StripArrows {
 fn draw_strip_arrows(d: &mut Screen, scr_w: u32, y0: i32, scroll: usize, len: usize, vis: usize) {
     let (left, right) = strip_arrow_rects(scr_w, y0);
     for (rect, glyph, more) in [(left, "<", scroll > 0), (right, ">", scroll + vis < len)] {
-        let (bx, by, bw, bh) = rect;
-        d.outline(bx, by, bw, bh, 1, (150, 150, 158, 255));
-        d.fill(bx + 1, by + 1, bw - 2, bh - 2, (34, 34, 40, 255));
-        d.text(
-            bx + (bw as i32 - 9) / 2,
-            by + (bh as i32 - 20) / 2,
-            1,
-            if more { TEXT } else { DIM },
-            glyph,
-        );
+        draw_fosforo_btn(d, rect, glyph, more);
     }
 }
 
@@ -446,29 +430,8 @@ fn draw_achievements_view(
         }
     }
 
-    // "voltar" — same flat style the back-cover zoom uses.
-    d.outline(
-        voltar.0,
-        voltar.1,
-        voltar.2,
-        voltar.3,
-        1,
-        (150, 150, 158, 255),
-    );
-    d.fill(
-        voltar.0 + 1,
-        voltar.1 + 1,
-        voltar.2 - 2,
-        voltar.3 - 2,
-        (34, 34, 40, 255),
-    );
-    d.text(
-        voltar.0 + (voltar.2 as i32 - 9 * 6) / 2,
-        voltar.1 + (voltar.3 as i32 - 20) / 2,
-        1,
-        TEXT,
-        "voltar",
-    );
+    // "voltar" — a linguagem fósforo dos botões dentro da TV.
+    draw_fosforo_btn(d, voltar, "voltar", true);
     voltar
 }
 
@@ -942,6 +905,32 @@ fn draw_expositor(d: &mut Screen, x: i32, y: i32, w: u32, h: u32) {
     );
 }
 
+/// A cor do filete de seleção no tampo — a luz quente da vitrine (a mesma
+/// do SixteeN).
+const SELECT_GLOW: (u8, u8, u8) = (246, 236, 214);
+/// Quanto a capa selecionada sobe.
+const SELECT_LIFT: i32 = 6;
+
+/// O cursor de seleção, como no SixteeN: a capa selecionada SOBE
+/// `SELECT_LIFT` px (quem chama já passa o `y` erguido), ganha um contorno
+/// de luz quente colado nela com um brilho em volta, um fio de luz no topo
+/// e um filete aceso no tampo (`base`, a base do slot sem o ergue).
+fn draw_cursor(d: &mut Screen, x: i32, y: i32, w: u32, h: u32, base: i32) {
+    let g = SELECT_GLOW;
+    d.fill(x - 4, base + 1, w + 8, 2, (g.0, g.1, g.2, 255));
+    for (pad, a) in [(4, 40u8), (2, 90)] {
+        d.outline(
+            x - pad,
+            y - pad,
+            w + pad as u32 * 2,
+            h + pad as u32 * 2,
+            2,
+            (g.0, g.1, g.2, a),
+        );
+    }
+    d.fill(x, y, w, 2, (255, 250, 240, 150));
+}
+
 /// O botão de play sob o mouse: um CD (disco prateado, furo central) com
 /// a seta de play, no canto inferior direito da capa sob o cursor — o
 /// convite para o clique que lança o jogo.
@@ -1378,25 +1367,10 @@ pub fn run(
                 .cloned()
                 .collect();
             view.sort_by_key(|e| e.title().to_lowercase());
-            // The recent strip only makes sense browsing the unfiltered
-            // shelf — once a search narrows things, the whole point is
-            // finding a specific game, not re-surfacing what was just
-            // played.
-            // Most recently played first, descending (plan revision:
-            // "organizar jogados recentemente pelo ordem de ultimo jogado
-            // decrescente") — already was, kept explicit.
-            recent = if filter_query.is_empty() {
-                let mut r: Vec<CatalogEntry> = all
-                    .iter()
-                    .filter(|e| e.rom.last_played_at.is_some())
-                    .cloned()
-                    .collect();
-                r.sort_by_key(|e| std::cmp::Reverse(e.rom.last_played_at.unwrap_or(0)));
-                r.truncate(RECENT_CAP);
-                r
-            } else {
-                Vec::new()
-            };
+            // A faixa "jogados recentemente" saiu da estante (plan revision:
+            // "remover o campo ultimos jogados"): `recent` fica sempre vazio e
+            // todo o resto do código da faixa fica inerte.
+            recent = Vec::new();
             // Favorites sit above the recent strip (plan revision) — same
             // "only while browsing the unfiltered shelf" rule, alphabetical
             // (plan revision: "organizar favoritos em ordem alfabetica"),
@@ -1708,6 +1682,48 @@ pub fn run(
                             sel = view.len().saturating_sub(1);
                         }
                         MenuNav::Back => return Ok(Pick::Back),
+                        // Select/Back: histórico; Start: configurações — os
+                        // mesmos atalhos do SixteeN.
+                        MenuNav::Select => return Ok(Pick::History),
+                        MenuNav::Start => return Ok(Pick::Settings),
+                        // X/quadrado: favoritar o jogo sob o cursor.
+                        MenuNav::Alt => {
+                            let picked = if in_fav {
+                                favorites.get(fav_idx)
+                            } else if in_recent {
+                                recent.get(recent_idx)
+                            } else {
+                                view.get(sel)
+                            };
+                            if let Some(e) = picked {
+                                let sha1 = e.rom.sha1.clone();
+                                let fav = !e.rom.favorite;
+                                if catalog.set_favorite(&sha1, fav).is_ok() {
+                                    if let Some(row) = all.iter_mut().find(|e| e.rom.sha1 == sha1) {
+                                        row.rom.favorite = fav;
+                                    }
+                                    applied_filter = None;
+                                }
+                            }
+                        }
+                        // LT/RT: troca a aba do painel (informações, capa
+                        // traseira, manual, disco).
+                        MenuNav::TabPrev | MenuNav::TabNext => {
+                            const TABS: [PanelSection; 4] = [
+                                PanelSection::Informacoes,
+                                PanelSection::CapaTraseira,
+                                PanelSection::Manual,
+                                PanelSection::Cartucho,
+                            ];
+                            let cur = TABS.iter().position(|t| *t == panel_section).unwrap_or(0);
+                            let next = if matches!(nav, MenuNav::TabNext) {
+                                (cur + 1) % TABS.len()
+                            } else {
+                                (cur + TABS.len() - 1) % TABS.len()
+                            };
+                            panel_section = TABS[next];
+                            panel_scroll = 0;
+                        }
                         MenuNav::Confirm => {
                             let picked = if in_fav {
                                 favorites.get(fav_idx)
@@ -2643,6 +2659,9 @@ pub fn run(
                     // scrolls, not the absolute slot that would leave a
                     // blank gap at the start.
                     let (x, y) = fav_layout.item_pos(i - fav_scroll);
+                    let sel_here = in_fav && i == fav_idx;
+                    let base = y + RECENT_TILE_H as i32;
+                    let y = if sel_here { y - SELECT_LIFT } else { y };
                     let id = cover_id(&entry.rom.sha1);
                     // Faixa sem prateleira: tile plano — a capa vazada
                     // (render 3D) compõe direto no fundo, sem tile cinza;
@@ -2662,6 +2681,9 @@ pub fn run(
                             (id ^ (id >> 32)) as u32,
                             (x + 4, y + 4, RECENT_TILE_W - 8, RECENT_TILE_H - 8),
                         );
+                    }
+                    if sel_here {
+                        draw_cursor(d, x, y, RECENT_TILE_W, RECENT_TILE_H, base);
                     }
                     if hover_fav == Some(i) {
                         draw_play_icon(
@@ -2696,6 +2718,9 @@ pub fn run(
                     .take(strip_vis)
                 {
                     let (x, y) = recent_layout.item_pos(i - recent_scroll);
+                    let sel_here = in_recent && i == recent_idx;
+                    let base = y + RECENT_TILE_H as i32;
+                    let y = if sel_here { y - SELECT_LIFT } else { y };
                     let id = cover_id(&entry.rom.sha1);
                     // Faixa sem prateleira: tile plano — a capa vazada
                     // (render 3D) compõe direto no fundo, sem tile cinza;
@@ -2716,6 +2741,9 @@ pub fn run(
                             &entry.title().to_uppercase(),
                         );
                     }
+                    if sel_here {
+                        draw_cursor(d, x, y, RECENT_TILE_W, RECENT_TILE_H, base);
+                    }
                     if hover_recent == Some(i) {
                         draw_play_icon(
                             d,
@@ -2734,19 +2762,39 @@ pub fn run(
                 );
             }
 
-            d.text(MARGIN, all_games_label_y, 1, DIM, ALL_GAMES_TITLE);
-
             // A madeira sob cada fileira visível — as caixas pousam
             // nela (a prateleira mora no vão de GAP, sem mexer nos
             // rects de clique).
-            for row in 0..grid.vis_rows {
-                let y = grid.y0 + row as i32 * grid.cell_h + grid.item_h;
-                draw_shelf_board(d, MARGIN, scr_w - MARGIN as u32 * 2, y, 14);
+            if opts.theme == crate::config::ShelfTheme::Ps1 {
+                for row in 0..grid.vis_rows {
+                    let y = grid.y0 + row as i32 * grid.cell_h + grid.item_h;
+                    draw_shelf_board(d, MARGIN, scr_w - MARGIN as u32 * 2, y, 14);
+                }
+            } else {
+                crate::furniture::draw_back(d, opts.theme, scr_w, scr_h, grid.y0 + 1);
+                let tags: Vec<i32> = (0..grid.cols)
+                    .map(|c| grid.x0 + c as i32 * grid.cell_w + grid.item_w / 2)
+                    .collect();
+                for row in 0..grid.vis_rows {
+                    let y = grid.y0 + row as i32 * grid.cell_h + grid.item_h;
+                    crate::furniture::draw_shelf(
+                        d,
+                        opts.theme,
+                        MARGIN,
+                        scr_w - MARGIN as u32 * 2,
+                        y,
+                        14,
+                        &tags,
+                    );
+                }
             }
             for (i, entry) in view.iter().enumerate() {
                 let Some((x, y)) = grid.cell_pos(i, top_row) else {
                     continue;
                 };
+                let sel_here = !in_fav && !in_recent && i == sel;
+                let base = y + grid.item_h;
+                let y = if sel_here { y - SELECT_LIFT } else { y };
                 let id = cover_id(&entry.rom.sha1);
                 // Capa vazada (render 3D em ângulo): sem tile cinza —
                 // a arte compõe na madeira, ancorada na base.
@@ -2780,6 +2828,9 @@ pub fn run(
                     draw_box_dressing(d, x, y, grid.item_w as u32, grid.item_h as u32);
                 } else {
                     draw_expositor(d, x, y, grid.item_w as u32, grid.item_h as u32);
+                }
+                if sel_here {
+                    draw_cursor(d, x, y, grid.item_w as u32, grid.item_h as u32, base);
                 }
                 if hover_grid == Some(i) {
                     draw_play_icon(d, x + grid.item_w - 26, y + grid.item_h - 26);
@@ -3055,18 +3106,39 @@ fn draw_filter_box(
     d.text(fx + 8, fy + (fh as i32 - 16) / 2, 1, color, &shown);
 }
 
-/// The "Histórico" button — same plain box look as the filter box, just a
-/// static label (plan revision: "colocar um botão para histórico").
-fn draw_history_button(d: &mut Screen, (bx, by, bw, bh): (i32, i32, u32, u32)) {
-    d.outline(bx, by, bw, bh, 1, (150, 150, 158, 255));
-    d.fill(bx + 1, by + 1, bw - 2, bh - 2, (34, 34, 40, 255));
-    d.text(bx + 8, by + (bh as i32 - 16) / 2, 1, TEXT, "histórico");
+/// O botão "histórico" — linguagem fósforo (sem caixa, rótulo vermelho com
+/// sublinhado), como os botões dentro da TV do SixteeN.
+fn draw_history_button(d: &mut Screen, r: (i32, i32, u32, u32)) {
+    draw_fosforo_btn(d, r, "histórico", true);
 }
 
-fn draw_refresh_button(d: &mut Screen, (bx, by, bw, bh): (i32, i32, u32, u32)) {
-    d.outline(bx, by, bw, bh, 1, (150, 150, 158, 255));
-    d.fill(bx + 1, by + 1, bw - 2, bh - 2, (34, 34, 40, 255));
-    d.text(bx + 8, by + (bh as i32 - 16) / 2, 1, TEXT, "atualizar");
+fn draw_refresh_button(d: &mut Screen, r: (i32, i32, u32, u32)) {
+    draw_fosforo_btn(d, r, "atualizar", true);
+}
+
+/// Um botão da linguagem fósforo: texto centrado no rect em `FOSFORO`
+/// (vermelho) com sublinhado quando ativo, `DIM` sem sublinhado quando
+/// inativo — sem caixa. O rect de clique é o do caller; só o desenho muda.
+fn draw_fosforo_btn(
+    d: &mut Screen,
+    (bx, by, bw, bh): (i32, i32, u32, u32),
+    label: &str,
+    ativo: bool,
+) {
+    let cor = if ativo { FOSFORO } else { DIM };
+    let tw = label.chars().count() as i32 * 9;
+    let tx = bx + (bw as i32 - tw).max(0) / 2;
+    let ty = by + (bh as i32 - 20) / 2;
+    d.text(tx, ty, 1, cor, label);
+    if ativo {
+        d.fill(
+            tx,
+            ty + 21,
+            tw.max(9) as u32,
+            2,
+            (FOSFORO.0, FOSFORO.1, FOSFORO.2, 255),
+        );
+    }
 }
 
 /// A thin vertical scroll indicator at the grid's right edge (plan revision:

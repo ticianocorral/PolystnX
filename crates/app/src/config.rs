@@ -16,6 +16,73 @@ use anyhow::{bail, Context, Result};
 use polystnx_platform::{KeyMap, PadButton, PadMap};
 use serde::Deserialize;
 
+/// O tema do móvel da estante — gravado como a palavra no `polystnx.cfg`
+/// (`shelf_theme = "ps1"` / `"wood"` / `"metal"` / `"hifi"` / `"memphis"` /
+/// `"arcade"`). `Ps1` é o visual original do PolystnX; os demais são
+/// estilos extras portados do SixteeN.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ShelfTheme {
+    /// O visual padrão do PolystnX (fundo liso e prateleira de madeira).
+    #[default]
+    Ps1,
+    /// Estante de madeira: fundo com veios, montantes e travessa.
+    Wood,
+    /// Expositor de metal da locadora: chapa perfurada e prateleiras de aço.
+    Metal,
+    /// Rack de som preto: laminado "black ash" e prateleiras de vidro fumê.
+    HiFi,
+    /// Quarto dos anos 90: papel de parede Memphis e móvel laqueado.
+    Memphis,
+    /// Fliperama: carpete fluorescente com neon nos montantes e prateleiras.
+    Arcade,
+}
+
+impl ShelfTheme {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            ShelfTheme::Ps1 => "ps1",
+            ShelfTheme::Wood => "wood",
+            ShelfTheme::Metal => "metal",
+            ShelfTheme::HiFi => "hifi",
+            ShelfTheme::Memphis => "memphis",
+            ShelfTheme::Arcade => "arcade",
+        }
+    }
+
+    /// Clique / setas na linha das configurações: o próximo móvel, em ciclo.
+    pub fn cycle(self) -> Self {
+        match self {
+            ShelfTheme::Ps1 => ShelfTheme::Wood,
+            ShelfTheme::Wood => ShelfTheme::Metal,
+            ShelfTheme::Metal => ShelfTheme::HiFi,
+            ShelfTheme::HiFi => ShelfTheme::Memphis,
+            ShelfTheme::Memphis => ShelfTheme::Arcade,
+            ShelfTheme::Arcade => ShelfTheme::Ps1,
+        }
+    }
+
+    /// O anterior, em ciclo (seta para a esquerda).
+    pub fn cycle_back(self) -> Self {
+        let mut t = self;
+        for _ in 0..5 {
+            t = t.cycle();
+        }
+        t
+    }
+
+    pub fn parse(s: &str) -> Option<Self> {
+        match s.trim().to_ascii_lowercase().as_str() {
+            "ps1" | "padrao" | "padrão" | "" => Some(ShelfTheme::Ps1),
+            "wood" | "madeira" => Some(ShelfTheme::Wood),
+            "metal" => Some(ShelfTheme::Metal),
+            "hifi" | "rack" => Some(ShelfTheme::HiFi),
+            "memphis" | "quarto" => Some(ShelfTheme::Memphis),
+            "arcade" | "fliperama" => Some(ShelfTheme::Arcade),
+            _ => None,
+        }
+    }
+}
+
 pub struct Config {
     pub fullscreen: bool,
     /// Check GitHub for a newer app release, and the buildbot for a fresher
@@ -26,6 +93,8 @@ pub struct Config {
     pub check_updates_on_start: bool,
     /// Silencia o áudio do jogo (só o som de ambiente do leitor toca).
     pub mute_game: bool,
+    /// O móvel da estante (`shelf_theme`).
+    pub shelf_theme: ShelfTheme,
     /// Cheater Fish: ao ligar o console com um disco que tem cheats, mostra
     /// primeiro a tela de cheats (estilo GameShark) antes do jogo.
     pub cheater_fish: bool,
@@ -83,6 +152,8 @@ struct Raw {
     check_updates_on_start: Option<bool>,
     mute_game: Option<bool>,
     #[serde(default)]
+    shelf_theme: Option<String>,
+    #[serde(default)]
     cheater_fish: Option<bool>,
     #[serde(default)]
     av_composto: Option<bool>,
@@ -133,6 +204,7 @@ impl Config {
             fullscreen: true,
             check_updates_on_start: true,
             mute_game: false,
+            shelf_theme: ShelfTheme::Ps1,
             cheater_fish: true,
             av_composto: true,
             tv_volume: 16,
@@ -225,6 +297,15 @@ impl Config {
         if let Some(m) = raw.mute_game {
             self.mute_game = m;
         }
+        if let Some(t) = raw.shelf_theme {
+            match ShelfTheme::parse(&t) {
+                Some(v) => self.shelf_theme = v,
+                None => log::warn!(
+                    "[config] shelf_theme = {t:?}: não é um tema (ps1|wood|metal|hifi|memphis|arcade), mantendo {}",
+                    self.shelf_theme.as_str()
+                ),
+            }
+        }
         if let Some(c) = raw.card_slot1 {
             self.card_slot1 = if c.is_empty() { None } else { Some(c) };
         }
@@ -314,6 +395,10 @@ impl Config {
         s.push_str(&format!(
             "# mute_game: silencia o áudio do jogo (fica só o som ambiente do leitor).\nmute_game = {}\n\n",
             self.mute_game
+        ));
+        s.push_str(&format!(
+            "# shelf_theme: o móvel da estante — ps1 (padrão), wood, metal, hifi, memphis ou arcade.\nshelf_theme = {:?}\n\n",
+            self.shelf_theme.as_str()
         ));
         s.push_str(&format!(
             "# cheater_fish: ao ligar o console, a tela de cheats (estilo GameShark) antes do jogo.\ncheater_fish = {}\n\n",
@@ -428,6 +513,7 @@ mod tests {
             fullscreen: false,
             check_updates_on_start: true,
             mute_game: false,
+            shelf_theme: ShelfTheme::Ps1,
             cheater_fish: true,
             av_composto: true,
             tv_volume: 16,
@@ -532,6 +618,32 @@ mod tests {
         assert_eq!(round.ra_user, "player1");
         assert_eq!(round.ra_token, "abc123");
         assert!(!round.ra_hardcore);
+    }
+
+    #[test]
+    fn shelf_theme_round_trips_and_rejects_junk() {
+        let mut cfg = defaults();
+        assert_eq!(cfg.shelf_theme, ShelfTheme::Ps1);
+        cfg.apply(toml::from_str("shelf_theme = \"metal\"").unwrap())
+            .unwrap();
+        assert_eq!(cfg.shelf_theme, ShelfTheme::Metal);
+        // Lixo não derruba o cfg nem troca o tema.
+        cfg.apply(toml::from_str("shelf_theme = \"vidro\"").unwrap())
+            .unwrap();
+        assert_eq!(cfg.shelf_theme, ShelfTheme::Metal);
+        let raw: Raw = toml::from_str(&cfg.to_toml()).unwrap();
+        let mut round = defaults();
+        round.apply(raw).unwrap();
+        assert_eq!(round.shelf_theme, ShelfTheme::Metal);
+        // Todo tema sobrevive ao as_str/parse, o ciclo fecha e volta.
+        let mut t = ShelfTheme::Ps1;
+        for _ in 0..6 {
+            assert_eq!(ShelfTheme::parse(t.as_str()), Some(t));
+            assert_eq!(t.cycle().cycle_back(), t);
+            t = t.cycle();
+        }
+        assert_eq!(t, ShelfTheme::Ps1);
+        assert_eq!(ShelfTheme::parse("fliperama"), Some(ShelfTheme::Arcade));
     }
 
     #[test]

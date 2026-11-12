@@ -44,6 +44,7 @@ fn main() -> anyhow::Result<()> {
         fade_in: None,
         preset_filter: None,
         ra: None,
+        theme: polystnx_app::config::ShelfTheme::Ps1,
     };
     let _pick = shelf::run(&mut plat, &mut cab, &catalog, &opts)?;
     println!("first run pick ok (quit by frame cap)");

@@ -64,6 +64,7 @@ fn main() -> anyhow::Result<()> {
         fade_in: None,
         preset_filter: None,
         ra: None,
+        theme: polystnx_app::config::ShelfTheme::Ps1,
     };
     let _ = shelf::run(&mut plat, &mut cab, &catalog, &opts)?;
     println!("wrote estante.bmp");

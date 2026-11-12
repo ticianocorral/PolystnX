@@ -4,6 +4,7 @@
 mod audio;
 mod cabinet;
 mod input;
+pub mod padnav;
 pub mod sysinfo;
 
 pub use audio::AudioOut;
@@ -174,6 +175,15 @@ pub enum MenuNav {
     PageDown,
     Home,
     End,
+    /// X/quadrado (West) — a ação secundária: favoritar na estante.
+    Alt,
+    /// Select/Back/View — Histórico na estante.
+    Select,
+    /// Start/Menu — "Configurações" na estante e na tela inicial.
+    Start,
+    /// Gatilhos LT/RT como botões de borda — troca de seção/aba.
+    TabPrev,
+    TabNext,
 }
 
 /// One step of the Konami code, input-agnostic — arrows on the keyboard,
@@ -398,6 +408,8 @@ pub struct Platform {
     devices_pending: bool,
     /// Rising-edge tracking for `poll_menu`'s gamepad buttons.
     menu_prev: [bool; MENU_PAD_MAP.len()],
+    /// Rising-edge dos gatilhos LT/RT (TabPrev/TabNext).
+    trig_prev: [bool; 2],
     /// A última posição conhecida do cursor (janela), para o hover da
     /// estante — estado contínuo, atualizado a cada `poll_menu`.
     menu_pointer: Option<(i32, i32)>,
@@ -419,7 +431,7 @@ pub struct Platform {
     scheduled_clicks: Vec<(Instant, i32, i32)>,
 }
 
-const MENU_PAD_MAP: [(PadBtn, MenuNav); 8] = [
+const MENU_PAD_MAP: [(PadBtn, MenuNav); 11] = [
     (PadBtn::DPadUp, MenuNav::Up),
     (PadBtn::DPadDown, MenuNav::Down),
     (PadBtn::DPadLeft, MenuNav::Left),
@@ -428,7 +440,35 @@ const MENU_PAD_MAP: [(PadBtn, MenuNav); 8] = [
     (PadBtn::East, MenuNav::Back),
     (PadBtn::LeftShoulder, MenuNav::PageUp),
     (PadBtn::RightShoulder, MenuNav::PageDown),
+    (PadBtn::West, MenuNav::Alt),
+    (PadBtn::Back, MenuNav::Select),
+    (PadBtn::Start, MenuNav::Start),
 ];
+
+/// Gatilho analógico apertado além daqui (de 0..32767) conta como botão.
+const TRIGGER_PRESS: i16 = 16_000;
+
+/// Analógico esquerdo inclinado além daqui (de 0..32767, por eixo) conta
+/// como a seta do D-pad naquela direção — ~40%, folga para a zona morta de
+/// controles gastos; as diagonais saem de graça.
+const STICK_PRESS: i32 = 13_000;
+
+/// `btn` apertado em `pad` — as setas do D-pad também acendem com o
+/// analógico esquerdo, então quem joga no analógico anda nos menus sem
+/// remapear nada.
+fn pad_held(pad: &Gamepad, btn: PadBtn) -> bool {
+    if pad.button(btn) {
+        return true;
+    }
+    let (axis, sign) = match btn {
+        PadBtn::DPadLeft => (Axis::LeftX, -1),
+        PadBtn::DPadRight => (Axis::LeftX, 1),
+        PadBtn::DPadUp => (Axis::LeftY, -1),
+        PadBtn::DPadDown => (Axis::LeftY, 1),
+        _ => return false,
+    };
+    i32::from(pad.axis(axis)) * sign > STICK_PRESS
+}
 
 /// A keydown's Konami step, when it has one — arrow keys for the directions,
 /// the letters B and A for the finish (the classic keyboard form of the
@@ -456,7 +496,15 @@ fn konami_nav_step(nav: MenuNav) -> Option<KonamiStep> {
         MenuNav::Right => Some(KonamiStep::Right),
         MenuNav::Back => Some(KonamiStep::B),
         MenuNav::Confirm => Some(KonamiStep::A),
-        MenuNav::PageUp | MenuNav::PageDown | MenuNav::Home | MenuNav::End => None,
+        MenuNav::PageUp
+        | MenuNav::PageDown
+        | MenuNav::Home
+        | MenuNav::End
+        | MenuNav::Alt
+        | MenuNav::Select
+        | MenuNav::Start
+        | MenuNav::TabPrev
+        | MenuNav::TabNext => None,
     }
 }
 
@@ -554,6 +602,7 @@ impl Platform {
             seen_ids: Vec::new(),
             devices_pending: false,
             menu_prev: [false; MENU_PAD_MAP.len()],
+            trig_prev: [false; 2],
             menu_pointer: None,
             debug_pointer: None,
             pad_map: PadMap::defaults(),
@@ -736,7 +785,7 @@ impl Platform {
     pub fn prime_menu_edges(&mut self) {
         let pad = self.gamepads.first().map(|(_, p)| p);
         for (i, (btn, _)) in MENU_PAD_MAP.iter().enumerate() {
-            self.menu_prev[i] = pad.is_some_and(|p| p.button(*btn));
+            self.menu_prev[i] = pad.is_some_and(|p| pad_held(p, *btn));
         }
     }
 
@@ -858,7 +907,7 @@ impl Platform {
         // Gamepad: rising edges only.
         let pad = self.gamepads.first().map(|(_, pad)| pad);
         for (i, (btn, nav)) in MENU_PAD_MAP.iter().enumerate() {
-            let down = pad.map(|p| p.button(*btn)).unwrap_or(false);
+            let down = pad.map(|p| pad_held(p, *btn)).unwrap_or(false);
             if down && !self.menu_prev[i] {
                 // The pad's Konami steps ride the same buttons the menus use:
                 // the d-pad is inert on the idle screen, but the closing B/A
@@ -890,6 +939,20 @@ impl Platform {
             self.menu_prev[i] = down;
             if down {
                 self.last_activity = Instant::now();
+            }
+        }
+        // LT/RT: troca de aba/seção, uma vez por aperto.
+        {
+            let vals = match self.gamepads.first() {
+                Some((_, p)) => [p.axis(Axis::TriggerLeft), p.axis(Axis::TriggerRight)],
+                None => [0, 0],
+            };
+            for (i, nav) in [MenuNav::TabPrev, MenuNav::TabNext].into_iter().enumerate() {
+                let down = vals[i] > TRIGGER_PRESS;
+                if down && !self.trig_prev[i] {
+                    out.nav.push(nav);
+                }
+                self.trig_prev[i] = down;
             }
         }
         // A posição do cursor é estado contínuo (o hover da estante lê a
@@ -1003,6 +1066,41 @@ impl Platform {
         }
         self.refresh_gamepads_if_changed();
         out
+    }
+
+    /// Estado físico dos botões (máscara `padnav::bit`) de todos os pads
+    /// ligados, OU entre eles — a navegação dentro do jogo (acorde
+    /// Select+Start e menus) usa os botões SDL de verdade.
+    pub fn pad_bits(&self) -> u16 {
+        use padnav::bit;
+        const MAP: [(PadBtn, u16); 12] = [
+            (PadBtn::DPadUp, bit::UP),
+            (PadBtn::DPadDown, bit::DOWN),
+            (PadBtn::DPadLeft, bit::LEFT),
+            (PadBtn::DPadRight, bit::RIGHT),
+            (PadBtn::South, bit::A),
+            (PadBtn::East, bit::B),
+            (PadBtn::West, bit::X),
+            (PadBtn::North, bit::Y),
+            (PadBtn::LeftShoulder, bit::LB),
+            (PadBtn::RightShoulder, bit::RB),
+            (PadBtn::Start, bit::START),
+            (PadBtn::Back, bit::SELECT),
+        ];
+        let mut bits = 0;
+        for (_, pad) in &self.gamepads {
+            for (btn, b) in MAP {
+                if pad_held(pad, btn) {
+                    bits |= b;
+                }
+            }
+        }
+        bits
+    }
+
+    /// Há algum gamepad conectado?
+    pub fn has_gamepad(&self) -> bool {
+        !self.gamepads.is_empty()
     }
 
     /// Copy `text` to the OS clipboard — the text fields' Cmd/Ctrl+C. The

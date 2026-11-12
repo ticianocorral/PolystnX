@@ -600,6 +600,9 @@ impl Cabinet {
     /// should be.
     pub fn set_modal(&mut self, title: &str, rows: &[(String, bool)]) {
         let scroll = self.modal.as_ref().map_or(0, |m| m.scroll);
+        let (cursor, cursor_on) = self.modal.as_ref().map_or((0, false), |m| {
+            (m.cursor.min(rows.len().saturating_sub(1)), m.cursor_on)
+        });
         self.modal = Some(ModalInfo {
             title: title.to_string(),
             rows: rows
@@ -611,6 +614,8 @@ impl Cabinet {
                 })
                 .collect(),
             scroll,
+            cursor,
+            cursor_on,
             draft: None,
             draft_limit: 0,
             draft_heading: String::new(),
@@ -648,10 +653,41 @@ impl Cabinet {
             title: title.to_string(),
             rows: built,
             scroll,
+            cursor: 0,
+            cursor_on: false,
             draft: None,
             draft_limit: 0,
             draft_heading: String::new(),
         });
+    }
+
+    /// Liga o destaque do gamepad no modal aberto (sem mexer na linha).
+    pub fn show_modal_cursor(&mut self) {
+        if let Some(m) = &mut self.modal {
+            m.cursor_on = true;
+        }
+    }
+
+    /// Move o destaque: `dy` passos na lista (dá a volta), `dx` entre as
+    /// colunas, `page` salta linhas sem dar a volta (LB/RB). Liga o destaque.
+    pub fn move_modal_cursor(&mut self, dx: i32, dy: i32, page: i32) {
+        if let Some(m) = &mut self.modal {
+            let n = m.rows.len();
+            let cols = if n > 8 { 2 } else { 1 };
+            m.cursor_on = true;
+            m.cursor = crate::padnav::move_cursor(m.cursor, n, cols, dx, dy);
+            if page != 0 {
+                m.cursor = crate::padnav::page_cursor(m.cursor, n, page);
+            }
+        }
+    }
+
+    /// A linha destacada, se o gamepad a está usando (`None` com o mouse).
+    pub fn modal_cursor(&self) -> Option<usize> {
+        self.modal
+            .as_ref()
+            .filter(|m| m.cursor_on && !m.rows.is_empty())
+            .map(|m| m.cursor)
     }
 
     /// Scroll the modal's row grid by `delta` visual rows (negative = up) —
@@ -661,6 +697,7 @@ impl Cabinet {
     /// here too.
     pub fn scroll_modal(&mut self, delta: i32) {
         if let Some(m) = &mut self.modal {
+            m.cursor_on = false; // rolou com o mouse: o destaque do pad sai
             m.scroll = (m.scroll as i32 + delta).max(0) as usize;
         }
     }

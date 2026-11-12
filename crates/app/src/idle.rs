@@ -890,6 +890,8 @@ pub fn run(
                     _ => {}
                 },
                 MenuNav::Back => return Ok(IdleExit::Quit),
+                // Start: Configurações direto, como no SixteeN.
+                MenuNav::Start if !core_missing => return Ok(IdleExit::OpenSettings),
                 _ => {}
             }
         }
@@ -989,48 +991,36 @@ fn draw_update_view(
     } else {
         "atualizado"
     };
-    if can_update {
-        d.outline(
-            btn.0,
-            btn.1,
-            btn.2,
-            btn.3,
-            2,
-            (SETUP_GREEN.0, SETUP_GREEN.1, SETUP_GREEN.2, 255),
-        );
-        d.text(
-            btn.0 + (btn.2 as i32 - label.chars().count() as i32 * 18) / 2,
-            btn.1 + 12,
-            2,
-            SETUP_GREEN,
-            label,
-        );
-    } else {
-        d.outline(btn.0, btn.1, btn.2, btn.3, 2, (90, 90, 96, 255));
-        d.text(
-            btn.0 + (btn.2 as i32 - label.chars().count() as i32 * 18) / 2,
-            btn.1 + 12,
-            2,
-            SETUP_DIM,
-            label,
+    fosforo_btn2(
+        d,
+        &btn,
+        label,
+        if can_update { SETUP_TEXT } else { SETUP_DIM },
+    );
+    fosforo_btn2(d, &voltar, "voltar", SETUP_TEXT);
+    (btn, voltar)
+}
+
+/// Cor dos botões "fósforo" (vermelho), como no SixteeN.
+const FOSFORO: (u8, u8, u8) = (240, 70, 64);
+
+/// Botão fósforo em escala 2: sem caixa, rótulo centrado com sublinhado,
+/// na cor dada (`SETUP_TEXT` vira o vermelho fósforo; verde e cinza mantêm).
+fn fosforo_btn2(d: &mut Screen, r: &RectT, label: &str, color: (u8, u8, u8)) {
+    let cor = if color == SETUP_TEXT { FOSFORO } else { color };
+    let tw = label.chars().count() as i32 * 18;
+    let tx = r.0 + (r.2 as i32 - tw).max(0) / 2;
+    let ty = r.1 + (r.3 as i32 - 40) / 2;
+    d.text(tx, ty, 2, cor, label);
+    if color != SETUP_DIM {
+        d.fill(
+            tx,
+            ty + 42,
+            tw.max(18) as u32,
+            3,
+            (cor.0, cor.1, cor.2, 255),
         );
     }
-    d.outline(
-        voltar.0,
-        voltar.1,
-        voltar.2,
-        voltar.3,
-        2,
-        (SETUP_TEXT.0, SETUP_TEXT.1, SETUP_TEXT.2, 255),
-    );
-    d.text(
-        voltar.0 + (voltar.2 as i32 - "voltar".chars().count() as i32 * 18) / 2,
-        voltar.1 + 12,
-        2,
-        SETUP_TEXT,
-        "voltar",
-    );
-    (btn, voltar)
 }
 
 /// Whether the setup screen should come up — any of the three (plan
@@ -1079,16 +1069,7 @@ fn draw_setup(
     );
 
     fn draw_button(d: &mut Screen, r: &RectT, label: &str, color: (u8, u8, u8)) {
-        const CELL2: i32 = 18; // CELL * scale 2, for centering the label
-        let (cr, cg, cb) = color;
-        d.outline(r.0, r.1, r.2, r.3, 2, (cr, cg, cb, 255));
-        d.text(
-            r.0 + (r.2 as i32 - label.chars().count() as i32 * CELL2) / 2,
-            r.1 + (r.3 as i32 - 40) / 2,
-            2,
-            color,
-            label,
-        );
+        fosforo_btn2(d, r, label, color);
     }
     let (mut core_color, mut dat_color, mut bios_color) = (SETUP_TEXT, SETUP_TEXT, SETUP_TEXT);
     if core_busy {

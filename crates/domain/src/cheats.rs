@@ -150,12 +150,30 @@ pub fn for_title(title: &str) -> Vec<CheatDef> {
     if query_base.is_empty() {
         return Vec::new();
     }
-    index()
-        .iter()
-        .filter(|(name, _)| base_name(name) == query_base)
-        .max_by_key(|(_, block)| block.bytes().filter(|&b| b == b'\n').count())
-        .map(|&(_, block)| parse_block(block))
-        .unwrap_or_default()
+    let best = |key: &dyn Fn(&str) -> String, want: &str| {
+        index()
+            .iter()
+            .filter(|(name, _)| key(name) == want)
+            .max_by_key(|(_, block)| block.bytes().filter(|&b| b == b'\n').count())
+            .map(|&(_, block)| parse_block(block))
+    };
+    if let Some(found) = best(&base_name, &query_base) {
+        return found;
+    }
+    // Último recurso: ignora os números do título — o banco chama o jogo de
+    // "Crash Bandicoot 3 - Warped" e o disco (No-Intro) de "Crash Bandicoot -
+    // Warped". Só entra quando nada casou por nome inteiro.
+    let no_digits = |s: &str| -> String {
+        base_name(s)
+            .chars()
+            .filter(|c| !c.is_ascii_digit())
+            .collect()
+    };
+    let want = no_digits(query);
+    if want.is_empty() {
+        return Vec::new();
+    }
+    best(&no_digits, &want).unwrap_or_default()
 }
 
 #[cfg(test)]
@@ -168,6 +186,13 @@ mod tests {
         // libretro-database) casa de primeira.
         let cheats = for_title("Crash Bandicoot (World) (GameShark)");
         assert!(!cheats.is_empty());
+    }
+
+    #[test]
+    fn matches_title_missing_the_sequel_number() {
+        // O No-Intro do disco é "Crash Bandicoot - Warped (USA)"; o banco
+        // só tem "Crash Bandicoot 3 - Warped".
+        assert!(!for_title("Crash Bandicoot - Warped (USA)").is_empty());
     }
 
     #[test]

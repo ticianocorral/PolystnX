@@ -53,6 +53,9 @@ fn main() -> Result<()> {
         fade_in: None,
         preset_filter,
         ra: None,
+        theme: arg(&args, "--theme")
+            .and_then(polystnx_app::config::ShelfTheme::parse)
+            .unwrap_or_default(),
     };
     match shelf::run(&mut plat, &mut cab, &catalog, &opts)? {
         Pick::Play { rom, .. } => {

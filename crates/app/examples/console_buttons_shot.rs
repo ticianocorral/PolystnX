@@ -11,8 +11,13 @@ fn main() -> anyhow::Result<()> {
         .create_cabinet("PolystnX", 1280, 800, false)
         .map_err(|e| anyhow::anyhow!(e.to_string()))?;
     polystnx_app::console_art::load_mc_logo(&mut cab);
+    let logo = std::env::var("LOGO")
+        .ok()
+        .and_then(|p| image::open(p).ok())
+        .map(|i| i.thumbnail(512, 512).to_rgba8());
     cab.set_panel(
-        None,
+        logo.as_ref()
+            .map(|i| (i.width(), i.height(), i.as_raw().as_slice())),
         None,
         "Tekken 3 (USA)",
         &[
