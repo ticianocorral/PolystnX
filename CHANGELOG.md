@@ -7,6 +7,12 @@ inteiro compartilha uma versão (`[workspace.package]` em `Cargo.toml`).
 ## [Não lançado]
 
 ### Controle
+- **Menu do jogo no controle**: segurar Select+Start (~0,8 s) dentro do jogo abre
+  o Menu do jogo — continuar, salvar/carregar estado, print, anotações,
+  conquistas, reset, ligar/desligar, abrir a tampa, ejetar e sair — com
+  destaque no controle (D-pad/analógico, A confirma, B volta, LB/RB pulam). Os
+  slots, cards e conquistas também navegam pelo controle. Antes só o mouse
+  ligava o console. Uma dica no OSD avisa do atalho.
 - **Cursor de seleção na estante**: a capa selecionada (grade, favoritos e
   recentes) ganha contorno vermelho com halo; antes o controle navegava sem
   mostrar onde estava.

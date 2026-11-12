@@ -4,6 +4,7 @@
 mod audio;
 mod cabinet;
 mod input;
+pub mod padnav;
 pub mod sysinfo;
 
 pub use audio::AudioOut;
@@ -1065,6 +1066,41 @@ impl Platform {
         }
         self.refresh_gamepads_if_changed();
         out
+    }
+
+    /// Estado físico dos botões (máscara `padnav::bit`) de todos os pads
+    /// ligados, OU entre eles — a navegação dentro do jogo (acorde
+    /// Select+Start e menus) usa os botões SDL de verdade.
+    pub fn pad_bits(&self) -> u16 {
+        use padnav::bit;
+        const MAP: [(PadBtn, u16); 12] = [
+            (PadBtn::DPadUp, bit::UP),
+            (PadBtn::DPadDown, bit::DOWN),
+            (PadBtn::DPadLeft, bit::LEFT),
+            (PadBtn::DPadRight, bit::RIGHT),
+            (PadBtn::South, bit::A),
+            (PadBtn::East, bit::B),
+            (PadBtn::West, bit::X),
+            (PadBtn::North, bit::Y),
+            (PadBtn::LeftShoulder, bit::LB),
+            (PadBtn::RightShoulder, bit::RB),
+            (PadBtn::Start, bit::START),
+            (PadBtn::Back, bit::SELECT),
+        ];
+        let mut bits = 0;
+        for (_, pad) in &self.gamepads {
+            for (btn, b) in MAP {
+                if pad_held(pad, btn) {
+                    bits |= b;
+                }
+            }
+        }
+        bits
+    }
+
+    /// Há algum gamepad conectado?
+    pub fn has_gamepad(&self) -> bool {
+        !self.gamepads.is_empty()
     }
 
     /// Copy `text` to the OS clipboard — the text fields' Cmd/Ctrl+C. The

@@ -140,6 +140,69 @@ const PAD: [(Button, polystnx_platform::PadButton); 14] = {
     ]
 };
 
+/// As ações do Menu do jogo (acorde Select+Start do gamepad): tudo o que o
+/// mouse faz no painel e nos botões do console, ao alcance do controle.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum MenuAct {
+    Continue,
+    Save,
+    Load,
+    Print,
+    Notes,
+    Achievements,
+    Reset,
+    Power,
+    Eject,
+    QuitApp,
+}
+
+/// As linhas do Menu do jogo para o estado atual: ligado, desligado (Ligar
+/// no lugar de Desligar) e com a tampa aberta.
+fn game_menu_rows(powered: bool, lid_open: bool, has_ra: bool) -> Vec<(MenuAct, String)> {
+    let mut v = vec![(MenuAct::Continue, "Continuar".to_string())];
+    if powered {
+        v.push((MenuAct::Save, "Salvar estado".to_string()));
+        v.push((MenuAct::Load, "Carregar estado".to_string()));
+        v.push((MenuAct::Print, "Print".to_string()));
+        v.push((MenuAct::Notes, "Anotações".to_string()));
+        if has_ra {
+            v.push((MenuAct::Achievements, "Conquistas".to_string()));
+        }
+        v.push((MenuAct::Reset, "Reset".to_string()));
+    }
+    v.push((
+        MenuAct::Power,
+        if powered { "Desligar" } else { "Ligar" }.to_string(),
+    ));
+    v.push((
+        MenuAct::Eject,
+        match (powered, lid_open) {
+            (true, false) => "Abrir a tampa (OPEN)",
+            (true, true) => "Fechar a tampa (CLOSE)",
+            (false, _) => "Ejetar (voltar à estante)",
+        }
+        .to_string(),
+    ));
+    v.push((MenuAct::QuitApp, "Sair do app".to_string()));
+    v
+}
+
+/// Os `UiEvent`s que uma linha do Menu do jogo dispara.
+fn menu_act_events(act: MenuAct) -> Vec<UiEvent> {
+    match act {
+        MenuAct::Continue => vec![],
+        MenuAct::Save => vec![UiEvent::OpenSaveModal],
+        MenuAct::Load => vec![UiEvent::OpenLoadModal],
+        MenuAct::Print => vec![UiEvent::OpenPrintModal],
+        MenuAct::Notes => vec![UiEvent::TogglePause],
+        MenuAct::Achievements => vec![UiEvent::OpenAchievementsModal],
+        MenuAct::Reset => vec![UiEvent::Reset],
+        MenuAct::Power => vec![UiEvent::Quit],
+        MenuAct::Eject => vec![UiEvent::Eject],
+        MenuAct::QuitApp => vec![UiEvent::CloseRequested],
+    }
+}
+
 /// Snapshot de entrada de um tick — o `Input` da plataforma não é Send.
 #[derive(Default)]
 struct PadSnapshot {
@@ -1115,6 +1178,14 @@ pub fn run_game(
             match kind.as_str() {
                 "save" => cab.set_modal("Salvar estado", &save_slot_rows(&spec.save_dir, &title)),
                 "load" => cab.set_modal("Carregar estado", &load_slot_rows(&spec.save_dir, &title)),
+                "menu" => {
+                    let labels: Vec<(String, bool)> = game_menu_rows(true, false, false)
+                        .into_iter()
+                        .map(|(_, l)| (l, true))
+                        .collect();
+                    cab.set_modal("Menu do jogo", &labels);
+                    cab.move_modal_cursor(0, 2, 0);
+                }
                 "print" => cab.set_modal(
                     "Onde salvar o print?",
                     &print_slot_rows(&spec.notes_dir, &title, &notes_meta),
@@ -1256,6 +1327,17 @@ pub fn run_game(
     let mut card_rename: Option<PathBuf> = None;
     // A save/load-state or print slot picker (plan revision) — see `Modal`.
     let mut modal = Modal::None;
+    // Gamepad dentro do jogo: o acorde Select+Start (segurado) abre o Menu do
+    // jogo (`Modal::GameMenu`); com um overlay aberto os botões físicos viram
+    // navegação (`padnav`).
+    let mut chord = polystnx_platform::padnav::Chord::default();
+    let mut edges = polystnx_platform::padnav::EdgeTracker::default();
+    let mut menu_acts: Vec<MenuAct> = Vec::new();
+    // Overlay recém-fechado com botão ainda apertado: o jogo só volta a ver
+    // o pad depois de soltar tudo (o B que fechou não vaza).
+    let mut input_gate = false;
+    let mut was_overlay = false;
+    let mut hint_shown = false;
     // Set the instant "Printscreen" is clicked; the frame that's live once
     // `core.run()` next produces one gets cloned into `print_capture` below
     // and held there until the player finishes naming it (or cancels).
@@ -1689,7 +1771,74 @@ pub fn run_game(
             log::info!("janela escondida: pausando o jogo");
             events.push(UiEvent::TogglePause);
         }
-        for ev in events {
+        // --- Gamepad dentro do jogo ---
+        // O acorde Select+Start (segurado) abre o Menu do jogo; com um overlay
+        // aberto (menu, slots, cards...) os botões físicos navegam.
+        let mut events: std::collections::VecDeque<UiEvent> = events.into();
+        let pad_bits = plat.pad_bits();
+        let overlay_open = paused || modal != Modal::None;
+        if was_overlay && !overlay_open && pad_bits != 0 {
+            input_gate = true;
+        }
+        was_overlay = overlay_open;
+        let nav_edges = edges.update(pad_bits, frame_time);
+        let mut hide_pad = false;
+        if overlay_open {
+            chord.reset_latched();
+            if modal != Modal::None {
+                use polystnx_platform::padnav::bit;
+                let d = |neg: u16, pos: u16| {
+                    (nav_edges & pos != 0) as i32 - (nav_edges & neg != 0) as i32
+                };
+                let (dx, dy) = (d(bit::LEFT, bit::RIGHT), d(bit::UP, bit::DOWN));
+                let page = d(bit::LB, bit::RB) * 5;
+                if dx != 0 || dy != 0 || page != 0 {
+                    cab.move_modal_cursor(dx, dy, page);
+                }
+                if nav_edges & bit::A != 0 {
+                    match cab.modal_cursor() {
+                        Some(i) => events.push_back(UiEvent::ModalPick(i as u16)),
+                        // Primeiro toque só mostra o destaque.
+                        None => cab.show_modal_cursor(),
+                    }
+                }
+                if nav_edges & bit::B != 0 {
+                    events.push_back(UiEvent::ModalCancel);
+                }
+            }
+        } else {
+            let out = chord.update(pad_bits, frame_time);
+            hide_pad = out.swallow;
+            if out.fire {
+                // Abre o Menu do jogo (acorde Select+Start segurado).
+                let rows = game_menu_rows(powered, lid_open, ra_session.is_some());
+                menu_acts = rows.iter().map(|(a, _)| *a).collect();
+                let labels: Vec<(String, bool)> =
+                    rows.into_iter().map(|(_, l)| (l, true)).collect();
+                cab.clear_modal();
+                modal = Modal::GameMenu;
+                cab.set_modal("Menu do jogo", &labels);
+                cab.show_modal_cursor();
+                edges.swallow_held(pad_bits);
+                hide_pad = true;
+            }
+        }
+        // Dica única ~2 s depois do jogo ligar: o acorde não tem outra pista.
+        if !hint_shown && powered && frames >= 120 {
+            hint_shown = true;
+            if plat.has_gamepad() {
+                cab.push_osd(
+                    &["segure Select+Start = menu do jogo"],
+                    None,
+                    Duration::from_secs(4),
+                );
+            }
+        }
+        if input_gate && pad_bits == 0 {
+            input_gate = false;
+        }
+        let hide_menu_btns = hide_pad || input_gate;
+        while let Some(ev) = events.pop_front() {
             match ev {
                 UiEvent::ToggleLid => {
                     lid_open = !lid_open;
@@ -1809,7 +1958,17 @@ pub fn run_game(
                             // UMA entrada (plan revision: o suporte ao
                             // controle 2 saiu "no momento").
                             for (rb, pb) in PAD {
-                                snap.buttons.push((0, rb, input.held(0, pb)));
+                                snap.buttons.push((
+                                    0,
+                                    rb,
+                                    input.held(0, pb)
+                                        && !(hide_menu_btns
+                                            && matches!(
+                                                pb,
+                                                polystnx_platform::PadButton::Select
+                                                    | polystnx_platform::PadButton::Start
+                                            )),
+                                ));
                             }
                             if analog_on[0] {
                                 snap.analog.push((
@@ -2462,6 +2621,15 @@ pub fn run_game(
                             }
                         }
                     }
+                    Modal::GameMenu => {
+                        modal = Modal::None;
+                        cab.clear_modal();
+                        if let Some(act) = menu_acts.get(i as usize) {
+                            for e in menu_act_events(*act).into_iter().rev() {
+                                events.push_front(e);
+                            }
+                        }
+                    }
                     Modal::None => {}
                 },
                 UiEvent::ModalCancel => {
@@ -2826,7 +2994,17 @@ pub fn run_game(
                 // UMA entrada (plan revision: o suporte ao controle 2 saiu
                 // "no momento") — o pad 1 é o teclado/gamepad 1.
                 for (rb, pb) in PAD {
-                    snap.buttons.push((0, rb, input.held(0, pb)));
+                    snap.buttons.push((
+                        0,
+                        rb,
+                        input.held(0, pb)
+                            && !(hide_menu_btns
+                                && matches!(
+                                    pb,
+                                    polystnx_platform::PadButton::Select
+                                        | polystnx_platform::PadButton::Start
+                                )),
+                    ));
                 }
                 // O botão ANALOG da entrada: desligado, os sticks ficam
                 // mudos (o controle vira digital, igual ao original).

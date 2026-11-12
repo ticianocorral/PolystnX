@@ -733,6 +733,9 @@ struct ModalInfo {
     /// a fresh open (see `Cabinet::set_modal`) or a new search filter (see
     /// `Cabinet::set_modal_search`).
     scroll: usize,
+    /// O destaque do gamepad: linha atual e se está à mostra.
+    cursor: usize,
+    cursor_on: bool,
     draft: Option<String>,
     draft_limit: usize,
     draft_heading: String,

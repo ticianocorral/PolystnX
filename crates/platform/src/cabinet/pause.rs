@@ -356,6 +356,24 @@ pub(super) fn draw_pause_book(
     buttons
 }
 
+/// O destaque do gamepad numa linha do modal: moldura dupla e tinta.
+fn draw_cursor_frame(canvas: &mut WindowCanvas, rect: Rect) {
+    canvas.set_draw_color(Color::RGB(PANEL_WARN.0, PANEL_WARN.1, PANEL_WARN.2));
+    for k in 0..2i32 {
+        let r = Rect::new(
+            rect.x() - k - 1,
+            rect.y() - k - 1,
+            rect.width() + 2 * (k as u32 + 1),
+            rect.height() + 2 * (k as u32 + 1),
+        );
+        let _ = canvas.draw_rect(r);
+    }
+    canvas.set_blend_mode(sdl3::render::BlendMode::Blend);
+    canvas.set_draw_color(Color::RGBA(PANEL_WARN.0, PANEL_WARN.1, PANEL_WARN.2, 46));
+    let _ = canvas.fill_rect(rect);
+    canvas.set_blend_mode(sdl3::render::BlendMode::None);
+}
+
 /// Draw the modal dialog: a single centered card on a plain background,
 /// replacing the whole window like the pause book does (plan revision) but
 /// much lighter — a title, then either a grid of clickable slot rows (two
@@ -497,7 +515,17 @@ pub(super) fn draw_modal(
         rows_per_col
     };
     let scroll = if scrollable {
-        modal.scroll.min(rows_per_col - visible_rows)
+        let mut sc = modal.scroll.min(rows_per_col - visible_rows);
+        if modal.cursor_on && !modal.rows.is_empty() {
+            // O destaque do pad manda: rola a grade até ele aparecer.
+            let line = modal.cursor % rows_per_col;
+            if line < sc {
+                sc = line;
+            } else if line >= sc + visible_rows {
+                sc = line + 1 - visible_rows;
+            }
+        }
+        sc
     } else {
         0
     };
@@ -599,6 +627,9 @@ pub(super) fn draw_modal(
                     PanelButton::ModalSlot(i as u16),
                     draw_button(canvas, font, rect, &row.label, row.enabled),
                 ));
+            }
+            if modal.cursor_on && i == modal.cursor {
+                draw_cursor_frame(canvas, rect);
             }
         }
         cy = rows_top + visible_rows as i32 * row_h;

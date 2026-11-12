@@ -80,6 +80,9 @@ pub(super) enum Modal {
     CardsAction,
     /// A confirmação do apagar (destrutivo — nunca apaga direto).
     CardsConfirm,
+    /// O Menu do jogo aberto pelo acorde Select+Start do gamepad — as ações
+    /// do console ao alcance do controle (`menu_acts` guarda as linhas).
+    GameMenu,
 }
 
 /// One note slot's protection/caption (plan revision) — everything defaults
