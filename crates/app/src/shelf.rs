@@ -905,21 +905,30 @@ fn draw_expositor(d: &mut Screen, x: i32, y: i32, w: u32, h: u32) {
     );
 }
 
-/// O cursor de seleção (controle e mouse): contorno vermelho "fósforo" com um
-/// halo suave por fora — a capa selecionada fica inconfundível mesmo nas
-/// capas vazadas, sem mexer na geometria de clique.
-fn draw_cursor(d: &mut Screen, x: i32, y: i32, w: u32, h: u32) {
-    for (g, a) in [(6, 28u8), (4, 56), (2, 96)] {
+/// A cor do filete de seleção no tampo — a luz quente da vitrine (a mesma
+/// do SixteeN).
+const SELECT_GLOW: (u8, u8, u8) = (246, 236, 214);
+/// Quanto a capa selecionada sobe.
+const SELECT_LIFT: i32 = 6;
+
+/// O cursor de seleção, como no SixteeN: a capa selecionada SOBE
+/// `SELECT_LIFT` px (quem chama já passa o `y` erguido), ganha um contorno
+/// de luz quente colado nela com um brilho em volta, um fio de luz no topo
+/// e um filete aceso no tampo (`base`, a base do slot sem o ergue).
+fn draw_cursor(d: &mut Screen, x: i32, y: i32, w: u32, h: u32, base: i32) {
+    let g = SELECT_GLOW;
+    d.fill(x - 4, base + 1, w + 8, 2, (g.0, g.1, g.2, 255));
+    for (pad, a) in [(4, 40u8), (2, 90)] {
         d.outline(
-            x - g,
-            y - g,
-            w + 2 * g as u32,
-            h + 2 * g as u32,
+            x - pad,
+            y - pad,
+            w + pad as u32 * 2,
+            h + pad as u32 * 2,
             2,
-            (FOSFORO.0, FOSFORO.1, FOSFORO.2, a),
+            (g.0, g.1, g.2, a),
         );
     }
-    d.outline(x, y, w, h, 2, (FOSFORO.0, FOSFORO.1, FOSFORO.2, 255));
+    d.fill(x, y, w, 2, (255, 250, 240, 150));
 }
 
 /// O botão de play sob o mouse: um CD (disco prateado, furo central) com
@@ -2650,6 +2659,9 @@ pub fn run(
                     // scrolls, not the absolute slot that would leave a
                     // blank gap at the start.
                     let (x, y) = fav_layout.item_pos(i - fav_scroll);
+                    let sel_here = in_fav && i == fav_idx;
+                    let base = y + RECENT_TILE_H as i32;
+                    let y = if sel_here { y - SELECT_LIFT } else { y };
                     let id = cover_id(&entry.rom.sha1);
                     // Faixa sem prateleira: tile plano — a capa vazada
                     // (render 3D) compõe direto no fundo, sem tile cinza;
@@ -2670,8 +2682,8 @@ pub fn run(
                             (x + 4, y + 4, RECENT_TILE_W - 8, RECENT_TILE_H - 8),
                         );
                     }
-                    if in_fav && i == fav_idx {
-                        draw_cursor(d, x, y, RECENT_TILE_W, RECENT_TILE_H);
+                    if sel_here {
+                        draw_cursor(d, x, y, RECENT_TILE_W, RECENT_TILE_H, base);
                     }
                     if hover_fav == Some(i) {
                         draw_play_icon(
@@ -2706,6 +2718,9 @@ pub fn run(
                     .take(strip_vis)
                 {
                     let (x, y) = recent_layout.item_pos(i - recent_scroll);
+                    let sel_here = in_recent && i == recent_idx;
+                    let base = y + RECENT_TILE_H as i32;
+                    let y = if sel_here { y - SELECT_LIFT } else { y };
                     let id = cover_id(&entry.rom.sha1);
                     // Faixa sem prateleira: tile plano — a capa vazada
                     // (render 3D) compõe direto no fundo, sem tile cinza;
@@ -2726,8 +2741,8 @@ pub fn run(
                             &entry.title().to_uppercase(),
                         );
                     }
-                    if in_recent && i == recent_idx {
-                        draw_cursor(d, x, y, RECENT_TILE_W, RECENT_TILE_H);
+                    if sel_here {
+                        draw_cursor(d, x, y, RECENT_TILE_W, RECENT_TILE_H, base);
                     }
                     if hover_recent == Some(i) {
                         draw_play_icon(
@@ -2777,6 +2792,9 @@ pub fn run(
                 let Some((x, y)) = grid.cell_pos(i, top_row) else {
                     continue;
                 };
+                let sel_here = !in_fav && !in_recent && i == sel;
+                let base = y + grid.item_h;
+                let y = if sel_here { y - SELECT_LIFT } else { y };
                 let id = cover_id(&entry.rom.sha1);
                 // Capa vazada (render 3D em ângulo): sem tile cinza —
                 // a arte compõe na madeira, ancorada na base.
@@ -2811,8 +2829,8 @@ pub fn run(
                 } else {
                     draw_expositor(d, x, y, grid.item_w as u32, grid.item_h as u32);
                 }
-                if !in_fav && !in_recent && i == sel {
-                    draw_cursor(d, x, y, grid.item_w as u32, grid.item_h as u32);
+                if sel_here {
+                    draw_cursor(d, x, y, grid.item_w as u32, grid.item_h as u32, base);
                 }
                 if hover_grid == Some(i) {
                     draw_play_icon(d, x + grid.item_w - 26, y + grid.item_h - 26);

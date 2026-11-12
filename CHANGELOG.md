@@ -13,8 +13,9 @@ inteiro compartilha uma versão (`[workspace.package]` em `Cargo.toml`).
   destaque no controle (D-pad/analógico, A confirma, B volta, LB/RB pulam). Os
   slots, cards e conquistas também navegam pelo controle. Antes só o mouse
   ligava o console. Uma dica no OSD avisa do atalho.
-- **Cursor de seleção na estante**: a capa selecionada (grade, favoritos e
-  recentes) ganha contorno vermelho com halo; antes o controle navegava sem
+- **Cursor de seleção na estante, como no SixteeN**: a capa selecionada (grade,
+  favoritos e recentes) sobe 6 px, com contorno de luz quente, fio de luz no
+  topo e um filete aceso no tampo; antes o controle navegava sem
   mostrar onde estava.
 - **Navegação com controle como no SixteeN**: o analógico esquerdo anda como o
   D-pad nos menus; na estante, X/quadrado favorita o jogo sob o cursor,
