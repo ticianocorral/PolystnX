@@ -4,7 +4,11 @@ Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/);
 versionamento por [SemVer 2.0.0](https://semver.org/lang/pt-BR/). O workspace
 inteiro compartilha uma versão (`[workspace.package]` em `Cargo.toml`).
 
-## [Não lançado]
+## [1.5.0-beta] - 2026-11-12
+
+PolystnX alinhado ao SixteeN: temas de móvel da estante, navegação completa
+pelo controle (inclusive o Menu do jogo), tampa de acrílico de verdade e
+cheats completos.
 
 ### Controle
 - **Menu do jogo no controle**: segurar Select+Start (~0,8 s) dentro do jogo abre
@@ -25,7 +29,8 @@ inteiro compartilha uma versão (`[workspace.package]` em `Cargo.toml`).
 - Removido o aviso verde "ANALOG LIGADO/DESLIGADO" ao apertar o botão ANALOG.
 
 ### Cheats
-- Jogo sem cheats no banco: o Cheater Fish abre mesmo assim,   "No Cheat Codes Available" (antes pulava direto para o jogo).
+- Jogo sem cheats no banco: o Cheater Fish abre mesmo assim, com o aviso
+  "No Cheat Codes Available" (antes pulava direto para o jogo).
 - O Cheater Fish agora acha os cheats de jogos cujo nome no disco não tem o
   número da sequência que o banco usa (ex.: "Crash Bandicoot - Warped" no
   banco é "Crash Bandicoot 3 - Warped").

@@ -1080,7 +1080,7 @@ dependencies = [
 
 [[package]]
 name = "polystnx-app"
-version = "1.4.1-beta"
+version = "1.5.0-beta"
 dependencies = [
  "anyhow",
  "encoding_rs",
@@ -1109,7 +1109,7 @@ dependencies = [
 
 [[package]]
 name = "polystnx-domain"
-version = "1.4.1-beta"
+version = "1.5.0-beta"
 dependencies = [
  "crc32fast",
  "log",
@@ -1124,7 +1124,7 @@ dependencies = [
 
 [[package]]
 name = "polystnx-emulation"
-version = "1.4.1-beta"
+version = "1.5.0-beta"
 dependencies = [
  "anyhow",
  "libloading",
@@ -1134,14 +1134,14 @@ dependencies = [
 
 [[package]]
 name = "polystnx-ntsc"
-version = "1.4.1-beta"
+version = "1.5.0-beta"
 dependencies = [
  "cc",
 ]
 
 [[package]]
 name = "polystnx-platform"
-version = "1.4.1-beta"
+version = "1.5.0-beta"
 dependencies = [
  "ab_glyph",
  "log",
@@ -1152,7 +1152,7 @@ dependencies = [
 
 [[package]]
 name = "polystnx-ra"
-version = "1.4.1-beta"
+version = "1.5.0-beta"
 dependencies = [
  "cc",
  "chd",
